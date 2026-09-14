@@ -165,8 +165,8 @@ DEPS_CHECK_PASSED=true
 
 # 3. Project Structure Validation
 print_status "Validating project structure..."
-REQUIRED_DIRS=("src" "include" "package")
-REQUIRED_FILES=("CMakeLists.txt" "Makefile" "README.md" "LICENSE" ".env.example")
+REQUIRED_DIRS=("src" "src/include" "src/scripts" "docs")
+REQUIRED_FILES=("CMakeLists.txt" "Makefile" "README.md" "LICENSE" ".env.example" "Dockerfile")
 
 for dir in "${REQUIRED_DIRS[@]}"; do
     if [ ! -d "$dir" ]; then
@@ -294,7 +294,7 @@ print_success "Documentation check completed"
 
 # 11. Package Structure Validation
 print_status "Validating package structure..."
-REQUIRED_DIRS=("src" "include" "package" "build/bin")
+REQUIRED_DIRS=("src" "src/include" "docs" "build/bin")
 for dir in "${REQUIRED_DIRS[@]}"; do
     if [ ! -d "$dir" ]; then
         print_error "Required directory missing: $dir"
