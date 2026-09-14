@@ -485,6 +485,7 @@ target_include_directories(agentware-agent PRIVATE
 )
 target_link_libraries(agentware-agent PRIVATE
     agentware_lib
+    nlohmann_json::nlohmann_json
 )
 
 # Test executable
