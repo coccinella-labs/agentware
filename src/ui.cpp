@@ -46,8 +46,7 @@ void UI::print_logo() {
 
   std::cout << Color::DIM << "Agentware\n" << Color::RESET;
 
-  std::cout << Color::DIM << "Welcome to Agentware — Choose your mode below.\n"
-            << Color::RESET;
+  std::cout << Color::DIM << "Welcome to Coccinella Labs\n" << Color::RESET;
 
   print_divider();
 }
