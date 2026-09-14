@@ -1,28 +1,165 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>agentware - coccinella-labs</title>
-<meta name="description" content="Code with AI help in C++. Small dev tools.">
-<style>
-body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.6;color:#222}
-img{max-width:100%}
-code{background:#f2f2f2;padding:2px 6px;border-radius:4px}
-pre{background:#f2f2f2;padding:12px;border-radius:8px;overflow:auto}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Operational brief for agentware, an interactive C++ agent for deliberate development work.">
+  <title>agentware | operational brief</title>
+  <style>
+    :root {
+      --paper: #f4f1e9;
+      --ink: #172018;
+      --muted: #607064;
+      --line: #c9cec2;
+      --signal: #1d5b45;
+      --panel: #e8eee6;
+      --code: #14261d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: Georgia, "Times New Roman", serif;
+      line-height: 1.55;
+    }
+    main { max-width: 1060px; margin: 0 auto; padding: 32px 24px 72px; }
+    .stamp {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      border-top: 3px solid var(--ink);
+      border-bottom: 1px solid var(--ink);
+      padding: 9px 0;
+      color: var(--muted);
+      font: 700 .72rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .hero { padding: 72px 0 54px; max-width: 840px; }
+    .eyebrow, .section-label {
+      color: var(--signal);
+      font: 700 .76rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { font-size: clamp(3.4rem, 9vw, 7.8rem); line-height: .86; letter-spacing: -.075em; margin: 18px 0 25px; }
+    h2 { font-size: clamp(1.75rem, 4vw, 2.6rem); line-height: 1; letter-spacing: -.04em; margin-bottom: 18px; }
+    h3 { font-size: 1rem; margin-bottom: 6px; }
+    .lead { max-width: 700px; font-size: clamp(1.15rem, 2vw, 1.42rem); }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+    a.button {
+      border: 1px solid var(--ink);
+      color: var(--ink);
+      padding: 9px 13px;
+      font: 700 .8rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      text-decoration: none;
+    }
+    a.button:first-child { background: var(--ink); color: var(--paper); }
+    .report-grid { display: grid; grid-template-columns: 1fr 2fr; border-top: 1px solid var(--line); }
+    .report-grid > * { padding: 28px 0; border-bottom: 1px solid var(--line); }
+    .report-grid > .section-label { padding-right: 24px; }
+    .summary { font-size: 1.18rem; max-width: 720px; }
+    .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 36px 0; }
+    .fact { background: var(--panel); padding: 17px; min-height: 126px; }
+    .fact strong { display: block; font: 700 .78rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; text-transform: uppercase; color: var(--signal); margin-bottom: 14px; }
+    .fact span { display: block; font-size: 1.02rem; }
+    ul { padding-left: 1.1rem; margin-bottom: 0; }
+    li { margin: .35rem 0; }
+    .workflow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; counter-reset: step; }
+    .step { border-left: 1px solid var(--line); padding: 0 18px 12px; min-height: 150px; }
+    .step:first-child { border-left: 0; padding-left: 0; }
+    .step::before { counter-increment: step; content: "0" counter(step); color: var(--signal); font: 700 .8rem ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .step h3 { margin-top: 20px; }
+    pre { margin: 0; padding: 18px; background: var(--code); color: #e7efe2; overflow: auto; font: .82rem/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .notice { border-left: 4px solid var(--signal); padding: 4px 0 4px 18px; max-width: 700px; }
+    footer { color: var(--muted); font: .75rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; padding-top: 30px; }
+    @media (max-width: 700px) {
+      main { padding: 20px 18px 48px; }
+      .hero { padding: 48px 0 40px; }
+      .report-grid { display: block; }
+      .report-grid > .section-label { padding-bottom: 0; }
+      .facts, .workflow { grid-template-columns: 1fr; }
+      .step, .step:first-child { border-left: 0; border-top: 1px solid var(--line); padding: 18px 0; min-height: 0; }
+      .step:first-child { border-top: 0; padding-top: 0; }
+    }
+  </style>
 </head>
 <body>
-<img src="https://raw.githubusercontent.com/coccinella-labs/agentware/main/.github/assets/thumbnail.png" alt="agentware" width="100%">
-<h1>agentware</h1>
-<p>Code with AI help in C++. Small dev tools.</p>
-<h2>Start</h2>
-<pre><code>cmake -S . -B build
-cmake --build build</code></pre>
-<h2>Links</h2>
-<ul>
-<li><a href="https://github.com/coccinella-labs/agentware">GitHub</a></li>
-<li><a href="https://github.com/coccinella-labs/agentware/issues">Issues</a></li>
-</ul>
+  <main>
+    <div class="stamp"><span>Agentware / system brief</span><span>Revision 01</span><span>C++ interactive tool</span></div>
+
+    <header class="hero">
+      <p class="eyebrow">A deliberate tool for everyday technical work</p>
+      <h1>agentware</h1>
+      <p class="lead">An interactive C++ agent for turning a request into inspected files, bounded commands, working notes, and a clear next action. It is built for the work that sits between an office request and a code change.</p>
+      <div class="actions">
+        <a class="button" href="https://github.com/coccinella-labs/agentware">View source</a>
+        <a class="button" href="https://github.com/coccinella-labs/agentware/issues">Report an issue</a>
+      </div>
+    </header>
+
+    <section class="report-grid" aria-labelledby="finding">
+      <p class="section-label">Finding 01</p>
+      <div>
+        <h2 id="finding">One interactive session, with the work visible.</h2>
+        <p class="summary">agentware runs as a single command-line session. It keeps the operator in the loop while it helps examine code, read and write files, run commands, use Git and GitHub helpers, retrieve web content, and talk to a configured model provider.</p>
+      </div>
+    </section>
+
+    <div class="facts" aria-label="System facts">
+      <div class="fact"><strong>Runtime</strong><span>Native C++20 command-line application built with CMake.</span></div>
+      <div class="fact"><strong>Work surface</strong><span>Files, directories, shell commands, repositories, context, and checkpoints.</span></div>
+      <div class="fact"><strong>Model access</strong><span>Provider credentials are supplied through environment configuration.</span></div>
+    </div>
+
+    <section class="report-grid" aria-labelledby="use-cases">
+      <p class="section-label">Finding 02</p>
+      <div>
+        <h2 id="use-cases">Designed for practical requests.</h2>
+        <p>Use it when a request needs more than a chat response but less than an unattended automation system.</p>
+        <ul>
+          <li>Trace how a feature, configuration, or incident note maps onto an existing repository.</li>
+          <li>Prepare small code or documentation changes with file context available in the session.</li>
+          <li>Inspect a set of files, preserve useful notes in memory, and return to the work through checkpoints.</li>
+          <li>Work through Git, GitHub, web retrieval, or MCP-connected tooling from one interactive surface.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="report-grid" aria-labelledby="method">
+      <p class="section-label">Method</p>
+      <div>
+        <h2 id="method">A reviewable operating sequence.</h2>
+        <div class="workflow">
+          <div class="step"><h3>Receive</h3><p>Start with a concrete request and select an operating mode or provider.</p></div>
+          <div class="step"><h3>Inspect</h3><p>Read the relevant files, repository state, and available context before changing anything.</p></div>
+          <div class="step"><h3>Act</h3><p>Use direct commands, file operations, or model-assisted work in the active session.</p></div>
+          <div class="step"><h3>Record</h3><p>Keep context, checkpoints, session statistics, and errors available for follow-up.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="report-grid" aria-labelledby="start">
+      <p class="section-label">Start</p>
+      <div>
+        <h2 id="start">Build locally.</h2>
+        <pre><code>cmake -S . -B build
+cmake --build build
+./build/bin/agentware-agent</code></pre>
+      </div>
+    </section>
+
+    <section class="report-grid" aria-labelledby="boundaries">
+      <p class="section-label">Boundary</p>
+      <div>
+        <h2 id="boundaries">Human judgment remains part of the system.</h2>
+        <p class="notice">agentware can access powerful capabilities when configured, including local commands and external providers. Review configuration, credentials, commands, and proposed changes before using them in an important environment. This site describes the repository, not a compliance or security certification.</p>
+      </div>
+    </section>
+
+    <footer>agentware · operational brief · <a href="https://github.com/coccinella-labs/agentware">coccinella-labs/agentware</a></footer>
+  </main>
 </body>
 </html>
