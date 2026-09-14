@@ -1,9 +1,17 @@
+#include "logo_png.h"
 #include "ui.h"
 #include <array>
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <thread>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace Utils {
 
@@ -22,6 +30,61 @@ AGENTWARE_API const std::string PINK = "\033[38;2;243;75;125m";
 } // namespace Color
 
 // ===== Logo =====
+namespace {
+
+bool stdout_is_tty() {
+#ifdef _WIN32
+  return _isatty(_fileno(stdout)) != 0;
+#else
+  return isatty(STDOUT_FILENO) != 0;
+#endif
+}
+
+// Returns the terminal image protocol to use, or "" if unsupported.
+std::string image_protocol() {
+  if (const char *tp = std::getenv("TERM_PROGRAM")) {
+    std::string_view t(tp);
+    if (t == "iTerm.app" || t == "WezTerm" || t == "Hyper" ||
+        t == "mintty" || t == "rio") {
+      return "iterm";
+    }
+    if (t == "kitty") {
+      return "kitty";
+    }
+  }
+  if (std::getenv("KITTY_WINDOW_ID") != nullptr) {
+    return "kitty";
+  }
+  if (const char *term = std::getenv("TERM")) {
+    if (std::string_view(term).find("kitty") != std::string_view::npos) {
+      return "kitty";
+    }
+  }
+  return "";
+}
+
+void print_image_iterm() {
+  std::cout << "\033]1337;File=inline=1;preserveAspectRatio=1;width=22c;"
+               "height=12c;size="
+            << kLogoPngBase64.size() << ":" << kLogoPngBase64 << "\007";
+}
+
+void print_image_kitty() {
+  const std::size_t chunk_size = 1024;
+  std::size_t pos = 0;
+  for (;;) {
+    std::size_t n = std::min(chunk_size, kLogoPngBase64.size() - pos);
+    bool more = pos + n < kLogoPngBase64.size();
+    std::cout << "\033_Ga=T,t=f,f=100,i=1,s=176,v=96"
+              << (more ? ",m=1" : "") << ";" << kLogoPngBase64.substr(pos, n)
+              << "\033\\";
+    if (!more) break;
+    pos += n;
+  }
+}
+
+} // namespace
+
 void UI::print_logo() {
   static const std::array<std::string_view, 16> kLogo = {
       "██▓",
@@ -42,11 +105,25 @@ void UI::print_logo() {
       "██▓    ▓██    ▒██▒           ███",
   };
 
-  std::cout << Color::PINK;
-  for (const auto &line : kLogo) {
-    std::cout << line << "\n";
+  bool rendered = false;
+  if (stdout_is_tty()) {
+    const std::string protocol = image_protocol();
+    if (protocol == "iterm") {
+      print_image_iterm();
+      rendered = true;
+    } else if (protocol == "kitty") {
+      print_image_kitty();
+      rendered = true;
+    }
   }
-  std::cout << Color::RESET;
+
+  if (!rendered) {
+    std::cout << Color::PINK;
+    for (const auto &line : kLogo) {
+      std::cout << line << "\n";
+    }
+    std::cout << Color::RESET;
+  }
 
   std::cout << Color::DIM << "Agentware\n" << Color::RESET;
 
