@@ -158,3 +158,4 @@ vcpkg_installed/
 *.temp
 *.bak # Ignore temporary test input files
 src/tests/input_*.txt
+src/include/logo_png.h
