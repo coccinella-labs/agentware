@@ -13,6 +13,7 @@ extern AGENTWARE_API const std::string RED;
 extern AGENTWARE_API const std::string CYAN;
 extern AGENTWARE_API const std::string BOLD;
 extern AGENTWARE_API const std::string DIM;
+extern AGENTWARE_API const std::string PINK;
 } // namespace Color
 
 // UI namespace
