@@ -1,4 +1,4 @@
-name: cla
+name: CLA
 
 on:
   pull_request:

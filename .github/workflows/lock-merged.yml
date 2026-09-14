@@ -1,4 +1,4 @@
-name: lock-merged
+name: Lock Merged
 
 on:
   pull_request:
