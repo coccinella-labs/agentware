@@ -5,12 +5,26 @@
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
 #include <sstream>
+#include <stdexcept>
 
 // Use the HeaderMap from web_service.h
 
 // Reuse the CaseInsensitiveCompare and HeaderMap from web_service.h
 
 namespace Services {
+
+namespace {
+
+std::string test_endpoint(const char *variable, const char *path) {
+  const char *base_url = std::getenv(variable);
+  if (base_url == nullptr || *base_url == '\0') {
+    throw std::runtime_error("Missing test endpoint configuration: " +
+                             std::string(variable));
+  }
+  return std::string(base_url) + path;
+}
+
+} // namespace
 
 AIService::AIService(Core::AgentMode mode, const std::string &api_key)
     : mode_(mode), api_key_(api_key) {}
@@ -35,25 +49,26 @@ bool AIService::is_available() {
 
 std::string AIService::get_api_url() {
   if (std::getenv("TEST_MODE")) {
-    // Use mock URLs for testing
+    // Docker Compose supplies the isolated mock endpoints for E2E testing.
     switch (mode_) {
     case Core::AgentMode::MODE_TOGETHER:
-      return "http://mock-together/v1/chat/completions";
+      return test_endpoint("TEST_TOGETHER_URL", "/v1/chat/completions");
     case Core::AgentMode::MODE_CEREBRAS:
-      return "http://mock-cerebras/v1/chat/completions";
+      return test_endpoint("TEST_CEREBRAS_URL", "/v1/chat/completions");
     case Core::AgentMode::MODE_FIREWORKS:
-      return "http://mock-fireworks/inference/v1/chat/completions";
+      return test_endpoint("TEST_FIREWORKS_URL",
+                           "/inference/v1/chat/completions");
     case Core::AgentMode::MODE_GROQ:
-      return "http://mock-groq/openai/v1/chat/completions";
+      return test_endpoint("TEST_GROQ_URL", "/openai/v1/chat/completions");
     case Core::AgentMode::MODE_DEEPSEEK:
-      return "http://mock-deepseek/v1/chat/completions";
+      return test_endpoint("TEST_DEEPSEEK_URL", "/v1/chat/completions");
     case Core::AgentMode::MODE_OPENAI:
-      return "http://mock-openai/v1/chat/completions";
+      return test_endpoint("TEST_OPENAI_URL", "/v1/chat/completions");
     case Core::AgentMode::MODE_LLAMA_3B:
     case Core::AgentMode::MODE_LLAMA_LATEST:
     case Core::AgentMode::MODE_LLAMA_31:
     default:
-      return "http://mock-ollama:11434/api/chat";
+      return test_endpoint("TEST_OLLAMA_URL", "/api/chat");
     }
   } else {
     switch (mode_) {

@@ -160,6 +160,13 @@ services:
       - SERPAPI_KEY=test-key
       - OLLAMA_HOST=http://mock-ollama:11434
       - TEST_MODE=1
+      - TEST_TOGETHER_URL=http://mock-together
+      - TEST_CEREBRAS_URL=http://mock-cerebras
+      - TEST_FIREWORKS_URL=http://mock-fireworks
+      - TEST_GROQ_URL=http://mock-groq
+      - TEST_DEEPSEEK_URL=http://mock-deepseek
+      - TEST_OPENAI_URL=http://mock-openai
+      - TEST_OLLAMA_URL=http://mock-ollama:11434
       - BUILDKIT_INLINE_CACHE=1
     volumes:
       - .:/app
