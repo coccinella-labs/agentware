@@ -8,9 +8,7 @@ Code with AI help in C++. Small dev tools.
 
 ## Scope
 
-- `include/core` - agent and mode
-- `include/data` - memory
-- `include/services` - ai, auth, git, github, file, sandbox, context, database, and more
+- `src/` - implementation, public headers, tests, and automation
 - `CMakeLists.txt` and `Makefile` - build files
 
 ## Start

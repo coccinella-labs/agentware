@@ -34,7 +34,7 @@ endif()
 project(AgentwareAgent VERSION ${PROJECT_VERSION} LANGUAGES CXX)
 
 # Configure version header
-configure_file(include/utils/version.h.in include/version.h @ONLY)
+configure_file(src/include/version.h.in include/version.h @ONLY)
 
 # Include FetchContent for downloading dependencies
 include(FetchContent)
@@ -415,55 +415,16 @@ if(APPLE)
 endif()
 
 # Include directories
-include_directories(include)
+include_directories(src/include)
 
-# Source files organized by modules
-set(CORE_SOURCES
-    src/core/agent.cpp
-)
-
-set(SERVICE_SOURCES
-    src/services/command_service.cpp
-    src/services/file_service.cpp
-    src/services/web_service.cpp
-    src/services/ai_service.cpp
-    src/services/git_service.cpp
-    src/services/github_service.cpp
-    src/services/codebase_service.cpp
-    src/services/multi_file_service.cpp
-    src/services/context_service.cpp
-    src/services/checkpoint_service.cpp
-    src/services/mcp_service.cpp
-    src/services/theme_service.cpp
-    src/services/auth_service.cpp
-    src/services/error_service.cpp
-    src/services/sandbox_service.cpp
-    src/services/database_service.cpp
-)
-
-set(UTILS_SOURCES
-    src/utils/ui.cpp
-    src/utils/config.cpp
-    src/utils/memory_utils.cpp
-    src/utils/version.cpp
-    src/utils/validation.cpp
-)
-
-set(DATA_SOURCES
-    src/data/memory_manager.cpp
-)
-
-set(ALL_SOURCES
-    ${CORE_SOURCES}
-    ${SERVICE_SOURCES}
-    ${UTILS_SOURCES}
-    ${DATA_SOURCES}
-)
+# Implementation files live in one source directory.
+file(GLOB ALL_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+list(REMOVE_ITEM ALL_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp")
 
 # Create library with all sources
 add_library(agentware_lib ${ALL_SOURCES})
 target_include_directories(agentware_lib PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
     $<INSTALL_INTERFACE:include>
     ${CURL_INCLUDE_DIRS}
@@ -519,7 +480,7 @@ endif()
 # Main executable
 add_executable(agentware-agent src/main.cpp)
 target_include_directories(agentware-agent PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/include
     ${CMAKE_CURRENT_BINARY_DIR}/include
 )
 target_link_libraries(agentware-agent PRIVATE
@@ -527,9 +488,9 @@ target_link_libraries(agentware-agent PRIVATE
 )
 
 # Test executable
-add_executable(agentware-tests tests/main_test.cpp src/utils/version.cpp)
+add_executable(agentware-tests src/tests/main_test.cpp src/version.cpp)
 target_include_directories(agentware-tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/include
     ${CMAKE_CURRENT_BINARY_DIR}/include
 )
 target_link_libraries(agentware-tests PRIVATE
@@ -649,7 +610,7 @@ endif()
 
 # Add preflight target (comprehensive pre-deployment checks)
 add_custom_target(preflight
-    COMMAND ${CMAKE_SOURCE_DIR}/package/scripts/preflight.sh
+    COMMAND ${CMAKE_SOURCE_DIR}/src/scripts/preflight.sh
     DEPENDS agentware-agent
     COMMENT "Running comprehensive preflight checks"
 )

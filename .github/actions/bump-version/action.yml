@@ -56,8 +56,8 @@ runs:
       if: steps.bump-type.outputs.bump-type != 'skip'
       shell: bash
       run: |
-        chmod +x ./scripts/version.sh
-        ./scripts/version.sh ${{ steps.bump-type.outputs.bump-type }}
+        chmod +x ./src/scripts/version.sh
+        ./src/scripts/version.sh ${{ steps.bump-type.outputs.bump-type }}
 
     - name: Get version
       id: version

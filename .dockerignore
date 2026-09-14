@@ -35,10 +35,7 @@ temp/
 node_modules/
 
 # Package artifacts
-package/dist/
-package/binary/
-package/managers/
-package/docs/
+dist/
 
 # Test files (keep for E2E builds)
 # test/

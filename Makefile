@@ -16,7 +16,7 @@ build:
 clean:
 	@echo "Cleaning build artifacts..."
 	@rm -rf build
-	@rm -rf package/dist
+	@rm -rf dist
 	@echo "Clean complete."
 
 # Run basic tests
@@ -27,7 +27,7 @@ test: build
 # Run E2E tests locally
 test-e2e: build
 	@echo "Running E2E tests locally..."
-	@./tests/e2e/run_e2e_tests.sh
+	@./src/tests/run_e2e_tests.sh
 
 # Run E2E tests in Docker
 test-e2e-docker:
@@ -37,12 +37,12 @@ test-e2e-docker:
 # Create distribution package
 package: build
 	@echo "Creating distribution package..."
-	@mkdir -p package/dist
-	@cp build/bin/agentware-agent package/dist/
-	@cp README.md package/dist/
-	@cp LICENSE package/dist/
-	@cp .env.example package/dist/
-	@echo "Package created in package/dist/"
+	@mkdir -p dist
+	@cp build/bin/agentware-agent dist/
+	@cp README.md dist/
+	@cp LICENSE dist/
+	@cp .env.example dist/
+	@echo "Package created in dist/"
 
 # Install locally
 install: build
@@ -53,32 +53,32 @@ install: build
 # Build Docker image
 docker-build:
 	@echo "Building Docker image..."
-	@docker build -t agentware/agent -f package/docker/Dockerfile .
+	@docker build -t agentware/agent -f Dockerfile .
 
 # Run preflight checks (smart detection)
 preflight:
 	@echo "Running preflight checks..."
-	@./package/scripts/preflight.sh
+	@./src/scripts/preflight.sh
 
 # Run quick preflight checks
 preflight-quick:
 	@echo "Running quick preflight checks..."
-	@QUICK=true ./package/scripts/preflight.sh
+	@QUICK=true ./src/scripts/preflight.sh
 
 # Run full preflight checks
 preflight-full:
 	@echo "Running full preflight checks..."
-	@QUICK=false ./package/scripts/preflight.sh
+	@QUICK=false ./src/scripts/preflight.sh
 
 # Run CI-style preflight checks
 preflight-ci:
 	@echo "Running CI-style preflight checks..."
-	@CI=true ./package/scripts/preflight.sh
+	@CI=true ./src/scripts/preflight.sh
 
 # Run full check (clean, build, test, preflight-quick, preflight)
 full-check:
 	@echo "Running full check..."
-	@./scripts/full-check.sh
+	@./src/scripts/full-check.sh
 
 # Run CI locally (simulate GitHub Actions)
 ci:
@@ -88,7 +88,7 @@ ci:
 # Setup development environment
 setup:
 	@echo "Setting up development environment..."
-	@./package/scripts/setup-git-hooks.sh
+	@./src/scripts/setup-git-hooks.sh
 
 # Install dependencies on macOS
 install-deps-mac:

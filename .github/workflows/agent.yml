@@ -98,7 +98,7 @@ jobs:
             TEST_STATUS="No tests"; TEST_PERCENT=0
           fi
 
-          TODO_COUNT=$(grep -r "TODO\\|FIXME\\|HACK" src/ include/ 2>/dev/null | wc -l || echo "0")
+          TODO_COUNT=$(grep -r "TODO\\|FIXME\\|HACK" src/ 2>/dev/null | wc -l || echo "0")
           if [ "$TODO_COUNT" -gt 0 ]; then
             QUALITY_STATUS="$TODO_COUNT issue(s)"; QUALITY_PERCENT=70
           else

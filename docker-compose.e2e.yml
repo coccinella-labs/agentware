@@ -18,7 +18,7 @@ services:
     ports:
       - "8081:80"
     volumes:
-      - ./tests/mocks/start_nginx.sh:/start_nginx.sh:ro
+      - ./src/tests/start_nginx.sh:/start_nginx.sh:ro
     networks:
       - e2e-network
 
@@ -37,7 +37,7 @@ services:
     ports:
       - "8082:80"
     volumes:
-      - ./tests/mocks/start_nginx.sh:/start_nginx.sh:ro
+      - ./src/tests/start_nginx.sh:/start_nginx.sh:ro
     networks:
       - e2e-network
 
@@ -56,7 +56,7 @@ services:
     ports:
       - "8083:80"
     volumes:
-      - ./tests/mocks/start_nginx.sh:/start_nginx.sh:ro
+      - ./src/tests/start_nginx.sh:/start_nginx.sh:ro
     networks:
       - e2e-network
 
@@ -75,7 +75,7 @@ services:
     ports:
       - "8084:80"
     volumes:
-      - ./tests/mocks/start_nginx.sh:/start_nginx.sh:ro
+      - ./src/tests/start_nginx.sh:/start_nginx.sh:ro
     networks:
       - e2e-network
 
@@ -94,7 +94,7 @@ services:
     ports:
       - "8085:80"
     volumes:
-      - ./tests/mocks/start_nginx.sh:/start_nginx.sh:ro
+      - ./src/tests/start_nginx.sh:/start_nginx.sh:ro
     networks:
       - e2e-network
 
@@ -113,7 +113,7 @@ services:
     ports:
       - "8086:80"
     volumes:
-      - ./tests/mocks/start_nginx.sh:/start_nginx.sh:ro
+      - ./src/tests/start_nginx.sh:/start_nginx.sh:ro
     networks:
       - e2e-network
 
@@ -132,14 +132,14 @@ services:
     ports:
       - "11434:80"
     volumes:
-      - ./tests/mocks/start_nginx.sh:/start_nginx.sh:ro
+      - ./src/tests/start_nginx.sh:/start_nginx.sh:ro
     networks:
       - e2e-network
 
   e2e-tests:
     build:
       context: .
-      dockerfile: package/docker/Dockerfile
+      dockerfile: Dockerfile
       target: builder
     container_name: agentware-e2e-tests
     depends_on:
@@ -170,7 +170,7 @@ services:
     command:
       - "bash"
       - "-c"
-      - "ulimit -c unlimited && /app/tests/e2e/run_tests_in_docker.sh || touch /app/tests/e2e/.e2e_failed"
+      - "ulimit -c unlimited && /app/src/tests/run_tests_in_docker.sh || touch /app/src/tests/.e2e_failed"
     security_opt:
       - seccomp:unconfined
     cap_add:

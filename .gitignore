@@ -52,7 +52,7 @@ cmake-build-*/
 data/memory.txt
 data/*.log
 *.log
-tests/e2e/data/*.txt
+src/tests/data/*.txt
 
 # Cache directories
 .cache/
@@ -64,19 +64,18 @@ __pycache__/
 
 # Test artifacts
 test_data/
-tests/e2e/test_data/
-tests/e2e/*.log
-tests/e2e/.e2e_failed
-tests/e2e/test_*.txt
-tests/e2e/*.log
-tests/e2e/expect*.log
-tests/e2e/*.gcov
-tests/e2e/coverage/
+src/tests/test_data/
+src/tests/*.log
+src/tests/.e2e_failed
+src/tests/test_*.txt
+src/tests/expect*.log
+src/tests/*.gcov
+src/tests/coverage/
 e2e_test.log
 
 # Test mock data
-tests/mocks/*.conf
-tests/mocks/*_responses/
+src/tests/*.conf
+src/tests/*_responses/
 
 # Temporary files
 *.tmp
@@ -158,4 +157,4 @@ vcpkg_installed/
 *.tmp
 *.temp
 *.bak # Ignore temporary test input files
-tests/e2e/input_*.txt
+src/tests/input_*.txt

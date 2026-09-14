@@ -166,7 +166,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: e2e-logs
-          path: tests/e2e/e2e_test.log
+          path: src/tests/e2e_test.log
 
   docker:
     runs-on: ubuntu-latest
@@ -197,7 +197,7 @@ jobs:
       - uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./package/docker/Dockerfile
+          file: ./Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
