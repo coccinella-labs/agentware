@@ -25,6 +25,7 @@ RUN apt-get update && \
     libpqxx-dev \
     python3 \
     python3-pip \
+    python3-venv \
     expect && \
     python3 -m venv /opt/venv && \
     /opt/venv/bin/pip install pytest && \
@@ -84,7 +85,8 @@ RUN apt-get update && \
     zlib1g \
     libpqxx-7.10 \
     python3 \
-    python3-pip && \
+    python3-pip \
+    python3-venv && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python test dependencies (venv to avoid PEP 668 externally-managed error)
