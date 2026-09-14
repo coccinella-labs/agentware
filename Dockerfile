@@ -1,5 +1,5 @@
 # Build stage
-FROM ubuntu:22.04 as builder
+FROM ubuntu:26.04 as builder
 
 LABEL maintainer="bniladridas"
 LABEL description="Agentware Agent - Build Stage"
@@ -68,7 +68,7 @@ RUN mkdir -p build && cd build && \
     make install
 
 # Runtime stage
-FROM ubuntu:22.04
+FROM ubuntu:26.04
 
 LABEL maintainer="bniladridas"
 LABEL description="Agentware Agent - Runtime"
