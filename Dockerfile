@@ -85,8 +85,10 @@ RUN apt-get update && \
     python3-pip && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Python test dependencies
-RUN pip3 install --no-cache-dir pytest requests
+# Install Python test dependencies (venv to avoid PEP 668 externally-managed error)
+RUN python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir pytest requests && \
+    ln -s /opt/venv/bin/pytest /usr/local/bin/pytest
 
 # Copy built binary from builder
 COPY --from=builder /usr/local/bin/agentware-agent /usr/local/bin/
