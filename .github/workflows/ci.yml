@@ -48,9 +48,22 @@ jobs:
             build
             ~/.cache/vcpkg
             C:\vcpkg\installed
-          key: ${{ runner.os }}-${{ matrix.build_type }}-${{ hashFiles('CMakeLists.txt') }}
+          key: agentware-v2-${{ runner.os }}-${{ matrix.build_type }}-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.build_type }}-
+            agentware-v2-${{ runner.os }}-${{ matrix.build_type }}-
+
+      - name: clean stale cache
+        shell: bash
+        run: |
+          if [ -d build ]; then
+            if [ -f build/CMakeCache.txt ] && grep -qi "llamaware" build/CMakeCache.txt 2>/dev/null; then
+              echo "Detected stale llamaware cache - removing build directory"
+              rm -rf build
+            elif [ -f build/CMakeCache.txt ] && ! grep -q "$GITHUB_WORKSPACE" build/CMakeCache.txt 2>/dev/null; then
+              echo "Detected mismatched workspace path in CMakeCache - removing build directory"
+              rm -rf build
+            fi
+          fi
 
       - name: setup
         shell: bash
@@ -77,6 +90,13 @@ jobs:
       - name: build
         shell: bash
         run: |
+          # Guard against poisoned cache from pre-rename (llamaware) builds
+          if [ -d build ]; then
+            if [ -f build/CMakeCache.txt ] && grep -qi "llamaware" build/CMakeCache.txt 2>/dev/null; then
+              echo "Removing poisoned CMakeCache containing llamaware"
+              rm -rf build
+            fi
+          fi
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             cmake -S . -B build \
               -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake \
