@@ -26,7 +26,9 @@ RUN apt-get update && \
     python3 \
     python3-pip \
     expect && \
-    python3 -m pip install pytest && \
+    python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install pytest && \
+    ln -sf /opt/venv/bin/pytest /usr/local/bin/pytest && \
     dpkg-reconfigure --frontend noninteractive tzdata && \
     rm -rf /var/lib/apt/lists/*
 
