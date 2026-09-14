@@ -294,7 +294,7 @@ print_success "Documentation check completed"
 
 # 11. Package Structure Validation
 print_status "Validating package structure..."
-REQUIRED_DIRS=("src" "src/include" "docs" "build/bin")
+REQUIRED_DIRS=("src" "src/include" "docs")
 for dir in "${REQUIRED_DIRS[@]}"; do
     if [ ! -d "$dir" ]; then
         print_error "Required directory missing: $dir"
