@@ -1,7 +1,7 @@
 # Build stage
 FROM ubuntu:26.04 as builder
 
-LABEL maintainer="bniladridas"
+LABEL maintainer="Coccinella Labs"
 LABEL description="Agentware Agent - Build Stage"
 LABEL version="0.1"
 
@@ -73,7 +73,7 @@ RUN mkdir -p build && cd build && \
 # Runtime stage
 FROM ubuntu:26.04
 
-LABEL maintainer="bniladridas"
+LABEL maintainer="Coccinella Labs"
 LABEL description="Agentware Agent - Runtime"
 LABEL version="0.1"
 
