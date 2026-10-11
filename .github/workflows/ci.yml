@@ -21,6 +21,7 @@ jobs:
       ${{ matrix.build_type == 'Release' && 'release' || 'debug' }})
     runs-on: ${{ matrix.os }}
     if: github.repository_owner == 'coccinella-labs'
+    fail-fast: false
     strategy:
       matrix:
         include:

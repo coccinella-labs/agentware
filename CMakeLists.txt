@@ -87,9 +87,17 @@ if(APPLE)
     if(PkgConfig_FOUND)
         pkg_check_modules(ZLIB QUIET IMPORTED_TARGET zlib)
         if(ZLIB_FOUND)
-            message(STATUS "Found zlib using pkg-config: ${ZLIB_LINK_LIBRARIES}")
-            set(ZLIB_TARGET PkgConfig::ZLIB)
-            set(zlib_is_found TRUE)
+            # Newer Xcode SDKs no longer ship usr/include, so pkg-config can
+            # report an include directory that does not exist. Imported
+            # targets with a missing include directory fail the generate
+            # step, so fall back to a source build in that case.
+            if(EXISTS "${ZLIB_INCLUDE_DIRS}")
+                message(STATUS "Found zlib using pkg-config: ${ZLIB_LINK_LIBRARIES}")
+                set(ZLIB_TARGET PkgConfig::ZLIB)
+                set(zlib_is_found TRUE)
+            else()
+                message(STATUS "pkg-config zlib include dir missing, will build from source")
+            endif()
         endif()
     endif()
 elseif(WIN32)
@@ -136,6 +144,29 @@ if(NOT zlib_is_found)
     set(zlib_is_found TRUE)
 endif()
 
+# On macOS/arm64 prefer Homebrew's curl over the Xcode SDK stub. The SDK
+# libcurl.tbd exposes an INTERFACE_INCLUDE_DIRECTORIES entry pointing at a
+# directory that newer Xcode SDKs no longer ship, which fails the generate
+# step. Homebrew's curl is keg-only, so add its opt prefix explicitly.
+set(CURL_HOMEBREW_PREFIX "")
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+    find_program(HOMEBREW NAMES brew)
+    if(HOMEBREW)
+        execute_process(
+            COMMAND ${HOMEBREW} --prefix curl
+            OUTPUT_VARIABLE _curl_prefix
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _curl_prefix_result
+        )
+        if(_curl_prefix_result EQUAL 0 AND
+            EXISTS "${_curl_prefix}/include/curl/curl.h")
+            set(CURL_HOMEBREW_PREFIX ${_curl_prefix})
+            set(CURL_ROOT_DIR ${_curl_prefix} CACHE PATH "curl root directory" FORCE)
+            list(APPEND CMAKE_PREFIX_PATH ${_curl_prefix})
+        endif()
+    endif()
+endif()
+
 # Find libcurl
 find_package(CURL REQUIRED)
 
@@ -172,11 +203,15 @@ if(APPLE)
             endif()
 
             # Also find Homebrew's curl if available
-            execute_process(
-                COMMAND ${HOMEBREW} --prefix curl
-                OUTPUT_VARIABLE CURL_ROOT_DIR
-                OUTPUT_STRIP_TRAILING_WHITESPACE
-            )
+            if(NOT CURL_HOMEBREW_PREFIX STREQUAL "")
+                set(CURL_ROOT_DIR ${CURL_HOMEBREW_PREFIX})
+            else()
+                execute_process(
+                    COMMAND ${HOMEBREW} --prefix curl
+                    OUTPUT_VARIABLE CURL_ROOT_DIR
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                )
+            endif()
             if(EXISTS ${CURL_ROOT_DIR})
                 set(CURL_INCLUDE_DIRS ${CURL_ROOT_DIR}/include)
                 set(CURL_LIBRARIES ${CURL_ROOT_DIR}/lib/libcurl.dylib)
