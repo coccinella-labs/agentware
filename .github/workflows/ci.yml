@@ -30,10 +30,10 @@ jobs:
           - os: ubuntu-24.04
             os_short: ubuntu
             build_type: debug
-          - os: macos-latest
+          - os: macos-15
             os_short: macos
             build_type: release
-          - os: macos-latest
+          - os: macos-15
             os_short: macos
             build_type: debug
           - os: windows-latest
@@ -233,4 +233,6 @@ jobs:
           # Prefer RELEASE_TOKEN so the tag and release trigger the build
           # workflow. GITHUB_TOKEN cannot trigger new runs, which leaves the
           # release without binaries. Same fallback as version-bump.yml.
-          token: ${{ secrets.RELEASE_TOKEN != '' && secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${
+            { secrets.RELEASE_TOKEN != '' && secrets.RELEASE_TOKEN
+            || secrets.GITHUB_TOKEN }}
