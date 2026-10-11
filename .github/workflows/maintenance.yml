@@ -11,7 +11,9 @@ on:
 
 # A slow run is never killed by the next day's; it queues behind it.
 concurrency:
-  group: daily-maintenance
+  # Scoped by workflow so an unrelated workflow reusing this name cannot
+  # silently queue behind or delay this job.
+  group: ${{ github.workflow }}-daily
   cancel-in-progress: false
 
 permissions:
@@ -22,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Record checked commit
         run: echo "CHECKED_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
@@ -64,8 +66,14 @@ jobs:
         run: |
           STATUS="PASS"
           DETAIL=""
-          if ! ctest --test-dir build --output-on-failure > ctest.log 2>&1; then
-            STATUS="FAIL: ctest reported failures (see CI log)"
+          if [ ! -f build/CTestTestfile.cmake ]; then
+            # Build failed or produced no test tree. Blaming ctest here would
+            # misattribute a build failure to the test suite.
+            STATUS="SKIPPED: no tests registered (see Build)"
+            DETAIL="build/CTestTestfile.cmake absent"
+          elif ! ctest --test-dir build --output-on-failure > ctest.log 2>&1; then
+            STATUS="FAIL: ctest reported failures (see ctest.log)"
+            DETAIL=$(grep -iE "tests? failed|Failed  " ctest.log | head -5)
           else
             DETAIL=$(grep -E "tests passed" ctest.log | tail -1)
           fi
@@ -76,7 +84,7 @@ jobs:
               echo "- $DETAIL"
             fi
           } > report_tests.md
-          [ "$STATUS" = "PASS" ]
+          [ "$STATUS" = "PASS" ] || [ "$STATUS" = "SKIPPED: no tests registered (see Build)" ]
 
       - name: Check binary version
         # Honest version check: run the built binary through its documented
@@ -85,10 +93,18 @@ jobs:
         run: |
           STATUS="PASS"
           EXPECTED=$(tr -d '\n' < VERSION)
-          REPORTED=$(printf '\n\nversion\nexit\n' | \
-            ./build/bin/agentware-agent 2>/dev/null | \
-            grep -oE "Agentware v[0-9.]+" | head -1 || true)
-          if [ -z "$REPORTED" ]; then
+          if [ ! -x ./build/bin/agentware-agent ]; then
+            # Build did not produce a binary. Reporting "did not report a
+            # version" here would blame the wrong check for a build failure.
+            REPORTED="(no binary: build did not succeed)"
+          else
+            REPORTED=$(printf '\n\nversion\nexit\n' | \
+              ./build/bin/agentware-agent 2>/dev/null | \
+              grep -oE "Agentware v[0-9.]+" | head -1 || true)
+          fi
+          if [ ! -x ./build/bin/agentware-agent ]; then
+            STATUS="SKIPPED: no binary (see Build)"
+          elif [ -z "$REPORTED" ]; then
             STATUS="FAIL: binary did not report a version"
           elif [ "$REPORTED" != "Agentware v$EXPECTED" ]; then
             STATUS="FAIL: binary reports '$REPORTED' but VERSION file says '$EXPECTED'"
@@ -99,7 +115,9 @@ jobs:
             echo "- VERSION file: $EXPECTED"
             echo "- binary reports: ${REPORTED:-(nothing)}"
           } > report_version.md
-          [ "$STATUS" = "PASS" ]
+          # SKIPPED is not a failure; do not redden the run for a missing binary
+          # that the Build section already reports.
+          [ "$STATUS" = "PASS" ] || [ "$STATUS" = "SKIPPED: no binary (see Build)" ]
 
       - name: Check dependencies
         # Informational only: records what the build actually used. Never fails;
@@ -162,11 +180,12 @@ jobs:
         # failed, and nothing here exits 0 to cover that up.
         if: always()
         run: |
-          REPORT="docs/maintenance/$(date -u +%F).md"
+          REPORT="docs/maintenance/$(date -u +%F)-$(date -u +%H%M%S).md"
           mkdir -p docs/maintenance
           {
-            echo "# Maintenance $(date -u +%F)"
+            echo "# Maintenance $(date -u +%F) $(date -u +%H%M%S) UTC"
             echo ""
+            echo "- run triggered by: ${{ github.event_name }}"
             echo "- checked commit: $CHECKED_SHA"
             echo ""
           for section in report_build.md report_tests.md report_version.md report_deps.md report_links.md; do
@@ -202,7 +221,7 @@ jobs:
             echo "No report changes to commit."
             exit 0
           fi
-          git commit -m "Daily maintenance report $(date -u +%F)"
+          git commit -m "Daily maintenance report $(date -u +%F) $(date -u +%H%M%S) UTC"
           git fetch origin main
           git rebase origin/main || { echo "::error::rebase failed; human intervention needed"; exit 1; }
           # Fully qualified refspec. The repo carries a tag literally named
