@@ -35,4 +35,4 @@ cmake --build build --config Release
 Thanks to all contributors who made this release possible!
 
 ---
-**Full Changelog**: https://github.com/coccinella-labs/agentware/compare/v{previous_tag}...v{current_tag}
+**Full Changelog**: https://github.com/coccinella-labs/agentware/compare/{previous_tag}...{current_tag}
