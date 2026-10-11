@@ -34,6 +34,9 @@ AGENTWARE_API void print_info(const std::string &message);
 // Utility functions
 AGENTWARE_API void print_divider();
 AGENTWARE_API void print_quick_help();
+// True when stdout renders to an interactive terminal. Centralizes the
+// TTY check so output code can avoid control sequences in pipes.
+AGENTWARE_API bool interactive_output();
 AGENTWARE_API void print_system_info(const std::string &mode,
                                      const std::string &model);
 AGENTWARE_API void print_ready_interface(const std::string &mode,

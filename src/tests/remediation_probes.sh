@@ -445,6 +445,42 @@ probe "routing docker failure reported" 0 "Exit code: 1" \
   "2" "1" "!echo hi" "exit"
 export FAKE_DOCKER_MODE=ok
 
+# Pass A terminal capability: NO_COLOR disables escapes without removing
+# output; piped runs carry no spinner carriage returns; a pty keeps color.
+probe_raw_absent() {
+  local name="$1"
+  shift 1
+  local out exit_code
+  out=$(printf '%s\n' "$@" | env "PATH=$PROBE_PATH" "$BIN" 2>&1)
+  exit_code=$?
+  # Neither ESC (color) nor CR (spinner frames) may appear in piped output.
+  if [ "$exit_code" -eq 0 ] && ! printf '%s' "$out" | grep -qF "$(printf '\033')" \
+    && ! printf '%s' "$out" | grep -qF "$(printf '\r')"; then
+    PASS=$((PASS + 1))
+    echo "PASS: $name"
+  else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: $name (exit=$exit_code, want no ESC bytes)"
+    printf '%s\n' "$out" | tail -n 3
+  fi
+}
+export NO_COLOR=1
+probe_raw_absent "NO_COLOR disables escapes" \
+  "2" "1" "/stats" "exit"
+unset NO_COLOR
+probe_raw_absent "piped spinner emits no carriage returns" \
+  "2" "1" "@sample.txt hi" "exit"
+if command -v script >/dev/null 2>&1; then
+  pty_out=$(printf '%s\n' "2" "1" "/stats" "exit" | env "PATH=$PROBE_PATH" script -q /dev/null "$BIN" 2>&1)
+  if printf '%s' "$pty_out" | grep -qF "$(printf '\033')"; then
+    PASS=$((PASS + 1))
+    echo "PASS: interactive pty keeps color"
+  else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: interactive pty keeps color (no ESC bytes under pty)"
+  fi
+fi
+
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

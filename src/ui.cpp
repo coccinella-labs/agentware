@@ -1,6 +1,7 @@
 #include "ui.h"
 #include <array>
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -13,18 +14,40 @@
 
 namespace Utils {
 
+namespace {
+// Output capability, evaluated once per process at startup: environment
+// and descriptors are fixed before main runs.
+bool stdout_is_tty() {
+#ifdef _WIN32
+  return _isatty(_fileno(stdout)) != 0;
+#else
+  return isatty(STDOUT_FILENO) != 0;
+#endif
+}
+// NO_COLOR disables color without disabling any other output.
+bool colors_enabled() {
+  if (std::getenv("NO_COLOR") != nullptr) {
+    return false;
+  }
+  return stdout_is_tty();
+}
+std::string code(const char *seq) { return colors_enabled() ? seq : ""; }
+} // namespace
+
+bool UI::interactive_output() { return stdout_is_tty(); }
+
 // ===== Color Codes =====
 namespace Color {
 // Exported color constants
-AGENTWARE_API const std::string RESET = "\033[0m";
-AGENTWARE_API const std::string GREEN = "\033[32m";
-AGENTWARE_API const std::string YELLOW = "\033[33m";
-AGENTWARE_API const std::string RED = "\033[31m";
-AGENTWARE_API const std::string CYAN = "\033[36m";
-AGENTWARE_API const std::string BOLD = "\033[1m";
-AGENTWARE_API const std::string DIM = "\033[2m";
+AGENTWARE_API const std::string RESET = code("\033[0m");
+AGENTWARE_API const std::string GREEN = code("\033[32m");
+AGENTWARE_API const std::string YELLOW = code("\033[33m");
+AGENTWARE_API const std::string RED = code("\033[31m");
+AGENTWARE_API const std::string CYAN = code("\033[36m");
+AGENTWARE_API const std::string BOLD = code("\033[1m");
+AGENTWARE_API const std::string DIM = code("\033[2m");
 // Logo color (matches Coccinella Labs pink #F34B7D)
-AGENTWARE_API const std::string PINK = "\033[38;2;243;75;125m";
+AGENTWARE_API const std::string PINK = code("\033[38;2;243;75;125m");
 } // namespace Color
 
 // ===== Logo =====
@@ -197,6 +220,10 @@ void UI::spinner(const std::string &message, int duration_ms) {
 
 // ===== Threaded Spinner =====
 void UI::spinner(std::atomic<bool> &done) {
+  if (!stdout_is_tty()) {
+    // Carriage-return animation is garbage in logs and pipes.
+    return;
+  }
   const char frames[] = {'|', '/', '-', '\\'};
   int frame = 0;
 

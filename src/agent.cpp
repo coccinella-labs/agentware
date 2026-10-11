@@ -1104,6 +1104,10 @@ void Agent::show_meta_help() {
 }
 
 void Agent::clear_screen() {
+  // Clearing a pipe or log is meaningless; skip the escape codes there.
+  if (!Utils::UI::interactive_output()) {
+    return;
+  }
   // Clear screen using ANSI escape codes
   std::cout << "\033[2J\033[H" << std::flush;
 }
