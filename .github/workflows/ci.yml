@@ -1,6 +1,7 @@
+---
 name: CI
 
-on:
+"on":
   push:
     branches: [main, develop]
   pull_request:
@@ -16,16 +17,17 @@ permissions:
 
 jobs:
   build:
-    name: build (${{ matrix.os_short }}, ${{ matrix.build_type == 'Release' && 'release' || 'debug' }})
+    name: build (${{ matrix.os_short }},
+      ${{ matrix.build_type == 'Release' && 'release' || 'debug' }})
     runs-on: ${{ matrix.os }}
     if: github.repository_owner == 'coccinella-labs'
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             os_short: ubuntu
             build_type: release
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             os_short: ubuntu
             build_type: debug
           - os: macos-latest
@@ -48,7 +50,9 @@ jobs:
             build
             ~/.cache/vcpkg
             C:\vcpkg\installed
-          key: agentware-v2-${{ runner.os }}-${{ matrix.build_type }}-${{ hashFiles('CMakeLists.txt') }}
+          key: |
+            agentware-v2-${{ runner.os }}-${{ matrix.build_type }}
+            -${{ hashFiles('CMakeLists.txt') }}
           restore-keys: |
             agentware-v2-${{ runner.os }}-${{ matrix.build_type }}-
 
@@ -59,7 +63,8 @@ jobs:
           # and silently misconfigures the build. Detect and drop it.
           if [ -d build ] && [ -f build/CMakeCache.txt ] &&
             ! grep -q "$GITHUB_WORKSPACE" build/CMakeCache.txt 2>/dev/null; then
-            echo "Detected mismatched workspace path in CMakeCache - removing build directory"
+            echo "Detected mismatched workspace path in CMakeCache
+            - removing build directory"
             rm -rf build
           fi
 
@@ -76,12 +81,15 @@ jobs:
           else
             powershell -Command "
               Set-ExecutionPolicy Bypass -Scope Process -Force;
-              iwr https://chocolatey.org/install.ps1 -UseBasicParsing | iex;
+              iwr https://chocolatey.org/install.ps1
+              -UseBasicParsing | iex;
               choco install -y cmake --no-progress;
-              git clone https://github.com/microsoft/vcpkg.git C:\vcpkg;
+              git clone https://github.com/microsoft/vcpkg.git \
+                C:\vcpkg;
               C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics;
               C:\vcpkg\vcpkg.exe integrate install;
-              C:\vcpkg\vcpkg.exe install cpr nlohmann-json libpqxx --triplet x64-windows
+              C:\vcpkg\vcpkg.exe install cpr nlohmann-json libpqxx \
+                --triplet x64-windows
             "
           fi
 
@@ -94,8 +102,10 @@ jobs:
               -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           else
             FLAGS=""
-            [[ "$RUNNER_OS" == "macOS" ]] && FLAGS="-DCMAKE_PREFIX_PATH=/opt/homebrew"
-            cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} $FLAGS
+            [[ "$RUNNER_OS" == "macOS" ]] && \
+              FLAGS="-DCMAKE_PREFIX_PATH=/opt/homebrew"
+            cmake -S . -B build \
+              -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} $FLAGS
           fi
           cmake --build build --config ${{ matrix.build_type }}
 
@@ -103,7 +113,8 @@ jobs:
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cmake --build build --target preflight --config ${{ matrix.build_type }} || true
+            cmake --build build --target preflight \
+              --config ${{ matrix.build_type }} || true
           else
             make preflight
           fi
@@ -116,14 +127,15 @@ jobs:
             build/bin/Release/agentware-agent.exe
 
   coverage:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build
     if: github.event_name != 'release'
     steps:
       - uses: actions/checkout@v6
       - run: |
           sudo apt update
-          sudo apt install -y nlohmann-json3-dev cmake build-essential libcurl4-openssl-dev libpqxx-dev lcov
+          sudo apt install -y nlohmann-json3-dev cmake build-essential \
+            libcurl4-openssl-dev libpqxx-dev lcov
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
           cmake --build build --target coverage
       - uses: codecov/codecov-action@v5
@@ -134,7 +146,7 @@ jobs:
           fail_ci_if_error: false
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
       - run: |
@@ -144,15 +156,19 @@ jobs:
           cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           echo "Running basic syntax check..."
           clang-tidy --list-checks > /dev/null && echo "✅ Clang-tidy available"
-          echo "✅ Lint check completed (detailed linting handled by pre-commit hooks)"
+          echo "✅ Lint check completed (detailed linting
+          handled by pre-commit hooks)"
 
   e2e:
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    if: github.ref == 'refs/heads/main'
+      || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v6
       - uses: docker/setup-buildx-action@v3
-      - run: docker compose -f docker-compose.e2e.yml up --abort-on-container-exit --exit-code-from e2e-tests
+      - run: |
+          docker compose -f docker-compose.e2e.yml up \
+          --abort-on-container-exit --exit-code-from e2e-tests
       - if: failure()
         uses: actions/upload-artifact@v6
         with:
@@ -160,7 +176,7 @@ jobs:
           path: src/tests/e2e_test.log
 
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.ref == 'refs/heads/main' || github.event_name == 'release'
     permissions:
       contents: read
@@ -194,7 +210,7 @@ jobs:
   release:
     name: release
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
