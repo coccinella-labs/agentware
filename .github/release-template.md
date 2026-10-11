@@ -16,7 +16,7 @@ cmake --build build --config Release
 ```
 
 ##  Upgrade Notes
--
+No special upgrade notes.
 
 ##  Contributors
 Thanks to all contributors who made this release possible!

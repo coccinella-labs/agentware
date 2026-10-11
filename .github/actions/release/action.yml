@@ -42,27 +42,39 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.token }}
       run: |
+        TAG="v${{ steps.version.outputs.version }}"
+
         # get previous tag
         PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+        # Guard against retags and rewritten history: the previous tag must be
+        # a real ancestor and must not be the tag being released. Fall back to
+        # the nearest tag excluding the new one, then to the root commit.
+        if [ -n "$PREVIOUS_TAG" ] && { [ "$PREVIOUS_TAG" = "$TAG" ] || \
+          ! git merge-base --is-ancestor "$PREVIOUS_TAG" "$TAG" 2>/dev/null; }; then
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 --exclude="$TAG" HEAD 2>/dev/null || echo "")
+        fi
         if [ -z "$PREVIOUS_TAG" ]; then
           PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
         fi
-
-        TAG="v${{ steps.version.outputs.version }}"
 
         # read template
         RELEASE_NOTES=$(cat .github/release-template.md | \
           sed "s/{previous_tag}/$PREVIOUS_TAG/g" | \
           sed "s/{current_tag}/$TAG/g")
 
-        # Use the commit log between tags rather than GitHub's
-        # generate-notes API. That API only lists PRs merged between
-        # two tags, so commits pushed directly to main are invisible.
-        # The commit log captures both, and %s keeps the "(#123)" PR
-        # suffix when a commit did arrive through a pull request.
+        # Prefer the curated CHANGELOG entry for this version. The team pushes
+        # directly to main, so the changelog is the written record; the commit
+        # log below is only the fallback for versions without an entry.
         NOTES_FILE=$(mktemp)
-        if git rev-parse --verify "$PREV_TAG" >/dev/null 2>&1; then
-          git log --pretty=format:'* %s (%h)' "${PREV_TAG}..${TAG}" > "$NOTES_FILE"
+        CHANGELOG_NOTES=$(awk -v ver="${{ steps.version.outputs.version }}" '
+          $0 ~ "^## \\["ver"\\]" {insec=1; next}
+          insec && /^## \\[/ {insec=0}
+          insec {print}
+        ' CHANGELOG.md | sed '/^[[:space:]]*$/d')
+        if [ -n "$CHANGELOG_NOTES" ] && ! printf '%s\n' "$CHANGELOG_NOTES" | grep -qx '\*'; then
+          printf '%s\n' "$CHANGELOG_NOTES" > "$NOTES_FILE"
+        elif git rev-parse --verify "$PREVIOUS_TAG" >/dev/null 2>&1; then
+          git log --pretty=format:'* %s (%h)' "${PREVIOUS_TAG}..${TAG}" > "$NOTES_FILE"
         else
           git log --pretty=format:'* %s (%h)' "$TAG" > "$NOTES_FILE"
         fi
@@ -71,9 +83,9 @@ runs:
         fi
         RELEASE_NOTES=$(printf '%s\n' "$RELEASE_NOTES" | \
           sed -e "/{generated_notes}/ {" -e "r $NOTES_FILE" -e "d" -e "}")
-        echo "notes<<EOF" >> $GITHUB_OUTPUT
-        echo "$RELEASE_NOTES" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
+        echo "notes<<AGENTWARE_RELEASE_NOTES_EOF" >> $GITHUB_OUTPUT
+        printf '%s\n' "$RELEASE_NOTES" >> $GITHUB_OUTPUT
+        echo "AGENTWARE_RELEASE_NOTES_EOF" >> $GITHUB_OUTPUT
 
     - name: release
       uses: softprops/action-gh-release@v2

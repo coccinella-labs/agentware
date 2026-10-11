@@ -214,4 +214,7 @@ jobs:
         if: steps.version_check.outputs.changed == 'true'
         uses: ./.github/actions/release
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # Prefer RELEASE_TOKEN so the tag and release trigger the build
+          # workflow. GITHUB_TOKEN cannot trigger new runs, which leaves the
+          # release without binaries. Same fallback as version-bump.yml.
+          token: ${{ secrets.RELEASE_TOKEN != '' && secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
