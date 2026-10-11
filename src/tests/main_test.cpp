@@ -1,3 +1,4 @@
+#include "context_service.h"
 #include "validation.h"
 #include "version.h"
 #include "memory_manager.h"
@@ -160,6 +161,23 @@ TEST(FileAccessTest, NonexistentNestedInsideAllowed) {
   EXPECT_TRUE(Utils::Validator::validate_file_access("newdir/note.txt",
                                                      root.string())
                   .is_valid);
+}
+
+// find_project_root must terminate on marker-less directories (review
+// gate: the loop never ended at the filesystem root, hanging every chat
+// started outside a project).
+TEST(FindProjectRootTest, TerminatesWithoutMarkers) {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  auto dir = fs::temp_directory_path() / "agentware_noroot_test";
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir / "sub", ec);
+  // The parent chain is the shared temp area, so only assert termination
+  // and a sane result rather than a specific value.
+  std::string root =
+      Services::ContextService::find_project_root((dir / "sub").string());
+  EXPECT_TRUE(root.empty() || fs::exists(fs::path(root), ec));
+  fs::remove_all(dir, ec);
 }
 
 int main(int argc, char **argv) {

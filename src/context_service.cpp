@@ -211,7 +211,11 @@ ContextService::find_project_root(const std::string &starting_directory) {
     if (is_project_root(current_path.string())) {
       return current_path.string();
     }
-    current_path = current_path.parent_path();
+    std::filesystem::path parent = current_path.parent_path();
+    if (parent == current_path) {
+      break; // Filesystem root: parent_path() of root is root itself.
+    }
+    current_path = parent;
   }
 
   return ""; // No project root found

@@ -512,27 +512,43 @@ void Agent::handle_direct_command(const std::string &input) {
     if (path.empty()) {
       path = "."; // Current directory
     }
-    result = Services::CodebaseService::analyze_structure(path);
+    auto access = Utils::Validator::validate_file_access(path);
+    if (!access.is_valid) {
+      result = "Error: " + access.error_message;
+    } else {
+      result = Services::CodebaseService::analyze_structure(path);
+    }
     record_interaction(*memory_, "analyze:" + path, result);
   } else if (input.rfind("components:", 0) == 0) {
     std::string path = trim_copy(input.substr(11));
     if (path.empty()) {
       path = "."; // Current directory
     }
-    result = Services::CodebaseService::find_main_components(path);
+    auto access = Utils::Validator::validate_file_access(path);
+    if (!access.is_valid) {
+      result = "Error: " + access.error_message;
+    } else {
+      result = Services::CodebaseService::find_main_components(path);
+    }
     record_interaction(*memory_, "components:" + path, result);
   } else if (input.rfind("todos:", 0) == 0) {
     std::string path = trim_copy(input.substr(6));
     if (path.empty()) {
       path = "."; // Current directory
     }
-    auto todos = Services::CodebaseService::find_todos(path);
-    if (todos.empty()) {
-      result = "No task comments found";
+    auto access = Utils::Validator::validate_file_access(path);
+    if (!access.is_valid) {
+      result = "Error: " + access.error_message;
     } else {
-      result = "Found " + std::to_string(todos.size()) + " task comments:\n";
-      for (const auto &todo : todos) {
-        result += todo + "\n";
+      auto todos = Services::CodebaseService::find_todos(path);
+      if (todos.empty()) {
+        result = "No task comments found";
+      } else {
+        result =
+            "Found " + std::to_string(todos.size()) + " task comments:\n";
+        for (const auto &todo : todos) {
+          result += todo + "\n";
+        }
       }
     }
     record_interaction(*memory_, "todos:" + path, result);
@@ -555,7 +571,12 @@ void Agent::handle_direct_command(const std::string &input) {
     if (path.empty()) {
       path = "."; // Current directory
     }
-    result = Services::CodebaseService::get_directory_tree(path, 3);
+    auto access = Utils::Validator::validate_file_access(path);
+    if (!access.is_valid) {
+      result = "Error: " + access.error_message;
+    } else {
+      result = Services::CodebaseService::get_directory_tree(path, 3);
+    }
     record_interaction(*memory_, "tree:" + path, result);
   } else if (input.rfind("github:", 0) == 0) {
     std::string params = trim_copy(input.substr(7));
@@ -798,6 +819,13 @@ std::string Agent::process_file_injections(const std::string &input) {
 
 std::string Agent::read_file_or_directory(const std::string &path) {
   try {
+    // Enforce the same access policy as the file commands: @-injection
+    // must not read outside the permitted boundary.
+    auto access = Utils::Validator::validate_file_access(path);
+    if (!access.is_valid) {
+      return "[Access denied: " + access.error_message + "]";
+    }
+
     if (!std::filesystem::exists(path)) {
       return "[File not found: " + path + "]";
     }
@@ -1177,6 +1205,15 @@ void Agent::handle_multi_file_command(const std::string &command) {
 
   if (paths.empty()) {
     paths.push_back("."); // Default to current directory
+  }
+
+  // Enforce the access policy on every requested path before reading.
+  for (const auto &path : paths) {
+    auto access = Utils::Validator::validate_file_access(path);
+    if (!access.is_valid) {
+      std::cout << "Error: " + access.error_message << std::endl;
+      return;
+    }
   }
 
   // Read files
