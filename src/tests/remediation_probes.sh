@@ -72,7 +72,7 @@ probe() {
     echo "PASS: $name"
   else
     FAIL=$((FAIL + 1))
-    echo "FAIL: $name (exit=$exit_code, want exit=0, want '$expected_grep')"
+    echo "FAIL: $name (exit=$exit_code, want exit=$expected_exit, want '$expected_grep')"
     printf '%s\n' "$out" | tail -n 5
   fi
 }
@@ -119,7 +119,7 @@ provider_probe() {
     echo "PASS: $name"
   else
     FAIL=$((FAIL + 1))
-    echo "FAIL: $name (exit=$exit_code, want exit=$expected_exit, want '$expected_grep')"
+    echo "FAIL: $name (exit=$exit_code, want exit=0, want '$expected_grep')"
     printf '%s\n' "$out" | tail -n 5
   fi
 }
