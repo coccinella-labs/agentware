@@ -77,7 +77,7 @@ jobs:
               libcurl4-openssl-dev libpqxx-dev expect clang-tidy
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
             brew update
-            brew install cmake nlohmann-json cpr libpqxx expect llvm
+            brew install cmake nlohmann-json libpqxx expect llvm
           else
             powershell -Command "
               Set-ExecutionPolicy Bypass -Scope Process -Force;
