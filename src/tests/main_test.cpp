@@ -1,5 +1,6 @@
 #include "context_service.h"
 #include "file_service.h"
+#include "git_service.h"
 #include "github_service.h"
 #include "sandbox_service.h"
 #include "validation.h"
@@ -788,6 +789,46 @@ TEST(ParseIssuesTest, MalformedPayloadThrows) {
                std::runtime_error);
   EXPECT_THROW(Services::GitHubService::parse_issues("{\"a\":1}"),
                std::runtime_error);
+}
+
+// B1: internally constructed git commands must run; hostile paths must
+// be refused before any shell sees them. Needs a git binary; skip
+// without one rather than failing the suite.
+TEST(GitLogTest, WorksInRepoAndRefusesHostilePath) {
+  if (std::system("git --version > /dev/null 2>&1") != 0) {
+    GTEST_SKIP() << "git binary unavailable";
+  }
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  auto dir = fs::temp_directory_path() / "agentware_git_test";
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  auto run = [&](const std::string &cmd) {
+    return std::system(cmd.c_str());
+  };
+  std::string d = dir.string();
+  ASSERT_EQ(run("git -C \"" + d + "\" init -q"), 0);
+  ASSERT_EQ(run("git -C \"" + d + "\" config user.email t@t"), 0);
+  ASSERT_EQ(run("git -C \"" + d + "\" config user.name t"), 0);
+  {
+    std::ofstream f(d + "/note.txt");
+    f << "hi";
+  }
+  ASSERT_EQ(run("git -C \"" + d + "\" add -A"), 0);
+  ASSERT_EQ(run("git -C \"" + d + "\" commit -qm seed"), 0);
+
+  std::string log = Services::GitService::get_git_log(d, 30);
+  EXPECT_NE(log.find("seed"), std::string::npos);
+
+  // Hostile paths never reach a shell: nonexistent ones fail at the
+  // repository check, existing hostile-named ones at the path check.
+  EXPECT_NE(Services::GitService::get_git_log(d + "\"; touch /tmp/pwned", 30).find("Error:"), std::string::npos);
+  std::string hostile = d + "/a;b";
+  fs::create_directories(hostile, ec);
+  ASSERT_EQ(run("git -C \"" + hostile + "\" init -q"), 0);
+  EXPECT_NE(Services::GitService::get_git_log(hostile, 30).find("Unsafe"), std::string::npos);
+  EXPECT_FALSE(fs::exists("/tmp/pwned", ec));
+  fs::remove_all(dir, ec);
 }
 
 int main(int argc, char **argv) {

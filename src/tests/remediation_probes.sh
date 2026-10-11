@@ -129,6 +129,15 @@ probe "A3 issues API failure errors" 0 "Error:" \
 probe "A3 health API failure errors" 0 "Error:" \
   "2" "1" "github:health:no-such-owner-xyz/no-such-repo-xyz" "exit"
 
+# B1: git:log must show real log output, not trip on its own operators.
+# The handler inspects hardcoded "." (the probe CWD), so make it a repo.
+if command -v git >/dev/null 2>&1; then
+  git init -q . && git add -A 2>/dev/null
+  git -c user.email=t@t -c user.name=t commit -qm seed 2>/dev/null
+  probe "B1 git log shows commits" 0 "seed" \
+    "2" "1" "git:log" "exit"
+fi
+
 # R-02: malformed replace: count must error, not crash.
 probe "R-02 replace non-numeric count errors" 0 "Error: invalid expected count" \
   "2" "1" "replace:sample.txt:old:new:abc" "exit"
