@@ -4,6 +4,14 @@ on:
   push:
     tags:
       - 'v*'
+  # Manual escape hatch. Automated tag pushes made with GITHUB_TOKEN cannot
+  # trigger this workflow, so a release created that way stays empty until
+  # someone runs this by hand against its tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build and attach binaries to (e.g. v0.1.6)'
+        required: true
 
 permissions:
   contents: write
@@ -66,10 +74,14 @@ jobs:
             tar -czvf release-${{ matrix.artifact_name }}.tar.gz release/*
           fi
 
+      - name: Resolve tag
+        # Manual runs carry the tag as an input; tag pushes carry it as the ref.
+        run: echo "TAG_NAME=${{ inputs.tag != '' && inputs.tag || github.ref_name }}" >> "$GITHUB_ENV"
+
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ env.TAG_NAME }}
           file: release-${{ matrix.artifact_name }}*
           draft: false
           prerelease: false

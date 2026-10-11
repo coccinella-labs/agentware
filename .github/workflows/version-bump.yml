@@ -21,7 +21,20 @@ jobs:
           fetch-tags: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Check release token
+        # Tags and releases created with GITHUB_TOKEN do not trigger new
+        # workflow runs, so release.yml would never build them. A PAT in
+        # RELEASE_TOKEN restores the trigger. Without it the release is
+        # created empty, which is what happened to every automated release
+        # since the bot flow took over tag creation.
+        run: |
+          if [ -z "${{ secrets.RELEASE_TOKEN }}" ]; then
+            echo "::warning::RELEASE_TOKEN is not set. The tag and release "
+            echo "::warning::will be created with GITHUB_TOKEN, which cannot trigger "
+            echo "::warning::the build workflow, so the release will have no binaries."
+          fi
+
       - uses: ./.github/actions/bump-version
         with:
           pr-number: ${{ github.event.pull_request.number }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_TOKEN != '' && secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
