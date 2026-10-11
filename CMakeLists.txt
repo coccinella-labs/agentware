@@ -422,6 +422,20 @@ if(NOT CPR_FOUND)
     else()
         message(FATAL_ERROR "Failed to find or build CPR. Please install it manually or check your network connection.")
     endif()
+
+    # CPR builds its own bundled curl, and after its configure step the
+    # CURL_LIBRARIES variable can point at the Xcode SDK stub even when the
+    # top level resolved Homebrew curl (stale cache restores amplify this).
+    # Re-assert the Homebrew paths afterwards so the final link never
+    # references the stub. CURL::libcurl itself is aliased by curl's build
+    # to its just-built target, which needs no repair.
+    if(APPLE AND NOT CURL_HOMEBREW_PREFIX STREQUAL "" AND
+        EXISTS "${CURL_HOMEBREW_PREFIX}/include/curl/curl.h" AND
+        EXISTS "${CURL_HOMEBREW_PREFIX}/lib/libcurl.dylib")
+        set(CURL_INCLUDE_DIRS "${CURL_HOMEBREW_PREFIX}/include")
+        set(CURL_LIBRARIES "${CURL_HOMEBREW_PREFIX}/lib/libcurl.dylib")
+        message(STATUS "Re-asserted Homebrew curl after CPR configure: ${CURL_HOMEBREW_PREFIX}")
+    endif()
 endif()
 # Enable testing
 enable_testing()

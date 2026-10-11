@@ -68,6 +68,19 @@ jobs:
             - removing build directory"
             rm -rf build
           fi
+          # A build directory configured by a different CMakeLists.txt carries
+          # stale absolute paths and dependency choices (e.g. an SDK stub that
+          # no longer exists). The stamp records which CMakeLists produced the
+          # cache; a missing or mismatched stamp means unprovable, so drop it.
+          STAMP="build/.cmake_lists_hash"
+          CURRENT="${{ hashFiles('CMakeLists.txt') }}"
+          if [ -d build ] && { [ ! -f "$STAMP" ] || [ "$(cat "$STAMP")" != "$CURRENT" ]; }; then
+            echo "CMakeLists.txt changed since the cached build was configured
+            - removing build directory"
+            rm -rf build
+          fi
+          mkdir -p build
+          echo "$CURRENT" > "$STAMP"
 
       - name: setup
         shell: bash
