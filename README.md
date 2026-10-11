@@ -4,31 +4,46 @@
 
 # agentware
 
-Code with AI help in C++. Small dev tools.
+A C++20 AI coding agent that runs in your terminal. It talks to hosted model providers, reads and edits code through MCP filesystem and git servers, and works offline against local models.
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+./build/bin/agentware-agent
+```
+
+On first run it prints a welcome screen and asks for a mode: online against a hosted provider, or offline against a local model.
+
+## Providers
+
+Ten agent modes, one per provider or model family: Together, Llama 3B, Cerebras, Llama Latest, Llama 3.1, Fireworks, Groq, DeepSeek, and OpenAI. Each needs its API key in the environment; see `.env.example` for the full list. No key is needed for offline mode.
+
+## What it does
+
+Around twenty services behind one binary: agent orchestration, AI provider calls, auth, checkpoints, codebase search, command execution, configuration, context tracking, a database layer, file and multi-file operations, git and GitHub integration, MCP client support, memory management, sandboxing, theming, input validation, and a web service.
+
+Model Context Protocol servers are configured in `data/mcp_servers.json`. Two ship by default, both run through `npx`: a filesystem server rooted at the working directory and a git server.
 
 ## Scope
 
-- `src/` - implementation, public headers, tests, and automation
-- `CMakeLists.txt` and `Makefile` - build files
+`src/` holds the implementation, public headers under `src/include/`, tests under `src/tests/`, and automation under `src/scripts/`. `CMakeLists.txt` and `Makefile` both build the same targets; `make` wraps the CMake invocation.
 
-## Start
-
-```bash
-cmake -S . -B build
-cmake --build build
-```
-
-Or:
+## Tests
 
 ```bash
-make
+cmake --build build --target test
 ```
 
-## Test
+The suite is two tests: a framework sanity check and a version-string check. That is the honest extent of it. CI additionally runs build-matrix, coverage, lint, Docker end-to-end, and release jobs, but nothing here exercises the agent's behavior. The `e2e` job needs Docker; the `coverage` job needs its toolchain installed.
 
-See `.github/workflows/ci.yml` for current checks.
+## History
 
-## Contribute
+This repository was renamed. CI still carries a guard against poisoned cache from pre-rename builds, so if you see a `llamaware` reference in the workflow files, that is what it is for.
 
-- Report: open an issue for bugs or requests.
-- Change: small pull requests preferred.
+## Contributing
+
+`CONTRIBUTING.md` is the authority, not this file. External contributions are not accepted at this time; the project is maintained by collaborators. If that changes, the contributing guide will say so first.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
