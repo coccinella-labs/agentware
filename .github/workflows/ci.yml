@@ -103,7 +103,7 @@ jobs:
           else
             FLAGS=""
             [[ "$RUNNER_OS" == "macOS" ]] && \
-              FLAGS="-DCMAKE_PREFIX_PATH=/opt/homebrew -Dcpr_DIR=/nonexistent"
+              FLAGS="-DCMAKE_PREFIX_PATH=/opt/homebrew"
             cmake -S . -B build \
               -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} $FLAGS
           fi
