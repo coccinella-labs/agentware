@@ -9,10 +9,12 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <random>
 #include <regex>
 #include <sstream>
+#include <utility>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -35,9 +37,24 @@ void SandboxService::ensure_sandbox_directory() {
 }
 
 void SandboxService::initialize_default_configs() {
+  // The agent's working directory is mounted read-write at /workspace so
+  // sandboxed commands can see the project. Mounts stay limited to this
+  // directory: anything else must come from an explicitly validated
+  // custom config, never by accident.
+  std::string workspace_volume;
+  {
+    std::error_code ec;
+    auto cwd = std::filesystem::current_path(ec);
+    if (!ec) {
+      workspace_volume = cwd.string() + ":/workspace:rw";
+    }
+  }
+
   // Default sandbox for general use
   SandboxConfig default_config;
   default_config.name = "default";
+  // NOTE: mutable tags are trust-on-first-pull. Digest pinning is deferred
+  // to an owner decision on image-update policy; see the plan doc.
   default_config.image = "ubuntu:22.04";
   default_config.memory_limit_mb = 512;
   default_config.cpu_limit_percent = 50;
@@ -46,6 +63,9 @@ void SandboxService::initialize_default_configs() {
   default_config.working_directory = "/workspace";
   default_config.allowed_commands = {"ls",   "cat",  "echo", "grep",
                                      "find", "head", "tail", "wc"};
+  if (!workspace_volume.empty()) {
+    default_config.volumes = {workspace_volume};
+  }
   sandbox_configs_["default"] = default_config;
 
   // Python sandbox
@@ -59,6 +79,9 @@ void SandboxService::initialize_default_configs() {
   python_config.working_directory = "/workspace";
   python_config.allowed_commands = {"python", "python3", "pip",
                                     "ls",     "cat",     "echo"};
+  if (!workspace_volume.empty()) {
+    python_config.volumes = {workspace_volume};
+  }
   sandbox_configs_["python"] = python_config;
 
   // Node.js sandbox
@@ -71,6 +94,9 @@ void SandboxService::initialize_default_configs() {
   node_config.network_access = false;
   node_config.working_directory = "/workspace";
   node_config.allowed_commands = {"node", "npm", "ls", "cat", "echo"};
+  if (!workspace_volume.empty()) {
+    node_config.volumes = {workspace_volume};
+  }
   sandbox_configs_["nodejs"] = node_config;
 
   // Secure shell sandbox
@@ -84,6 +110,9 @@ void SandboxService::initialize_default_configs() {
   shell_config.working_directory = "/workspace";
   shell_config.allowed_commands = {"sh",   "ls",   "cat",  "echo",
                                    "grep", "find", "head", "tail"};
+  if (!workspace_volume.empty()) {
+    shell_config.volumes = {workspace_volume};
+  }
   sandbox_configs_["shell"] = shell_config;
 }
 
@@ -132,6 +161,10 @@ void SandboxService::initialize() {
 
 bool SandboxService::create_sandbox_config(const std::string &name,
                                            const SandboxConfig &config) {
+  std::string error_message;
+  if (!validate_sandbox_config(config, error_message)) {
+    return false;
+  }
   sandbox_configs_[name] = config;
   return save_sandbox_config();
 }
@@ -195,70 +228,142 @@ SandboxResult SandboxService::execute_command(const std::string &command,
     return result;
   }
 
-  // Build docker command
-  std::string container_name = generate_container_name();
-  std::stringstream docker_cmd;
-
-  docker_cmd << "docker run --rm";
-  docker_cmd << " --name " << container_name;
-  docker_cmd << " --memory=" << config.memory_limit_mb << "m";
-  docker_cmd << " --cpus=" << (config.cpu_limit_percent / 100.0);
-
-  if (!config.network_access) {
-    docker_cmd << " --network=none";
+  // Resolve the effective config (explicit working directory wins).
+  SandboxConfig resolved = config;
+  if (!working_dir.empty()) {
+    resolved.working_directory = working_dir;
   }
 
-  // Set working directory
-  std::string work_dir =
-      working_dir.empty() ? config.working_directory : working_dir;
-  docker_cmd << " --workdir=" << work_dir;
-
-  // Add environment variables
-  for (const auto &[key, value] : config.environment_vars) {
-    docker_cmd << " -e " << key << "=" << escape_shell_arg(value);
-  }
-
-  // Add volumes (be careful with security)
-  for (const auto &volume : config.volumes) {
-    docker_cmd << " -v " << volume;
-  }
-
-  docker_cmd << " " << config.image;
-  docker_cmd << " sh -c " << escape_shell_arg(command);
-
-  // Execute with timeout
-  auto start_time = std::chrono::high_resolution_clock::now();
-
-  std::string full_command = docker_cmd.str() + " 2>&1";
-  FILE *pipe = Utils::Platform::open_process(full_command, "r");
-
-  if (!pipe) {
-    result.error_message = "Failed to execute docker command";
+  // Enforce configuration validation at the single execution choke point:
+  // hostile configs must fail here even if they arrived via config file.
+  // Every later step trusts this copy.
+  std::string config_error;
+  if (!validate_sandbox_config(resolved, config_error)) {
+    result.error_message = "Invalid sandbox configuration: " + config_error;
     result.exit_code = -1;
     return result;
   }
 
-  std::stringstream output;
-  char buffer[128];
-  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-    output << buffer;
+  // Build docker command
+  std::string container_name = generate_container_name();
+  std::string full_command =
+      build_docker_command(resolved, command, container_name) + " 2>&1";
+
+  // Execute with an enforced deadline: on expiry the container is stopped
+  // so a hung command returns control to the REPL instead of hanging it.
+  auto start_time = std::chrono::high_resolution_clock::now();
+  auto run_task = std::async(std::launch::async, [&full_command]() {
+    std::stringstream output;
+    int code = -1;
+    FILE *pipe = Utils::Platform::open_process(full_command, "r");
+    if (pipe) {
+      char buffer[4096];
+      while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        output << buffer;
+      }
+      int status = Utils::Platform::close_process(pipe);
+#ifdef _WIN32
+      code = status;
+#else
+      // Decode the wait status: callers and output report real exit codes,
+      // not the raw waitpid encoding.
+      code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+#endif
+    }
+    return std::make_pair(output.str(), code);
+  });
+
+  if (run_task.wait_for(std::chrono::seconds(config.timeout_seconds)) ==
+      std::future_status::timeout) {
+    FILE *kill_pipe = Utils::Platform::open_process(
+        "docker stop " + container_name + " 2>&1", "r");
+    if (kill_pipe) {
+      char buffer[128];
+      while (fgets(buffer, sizeof(buffer), kill_pipe) != nullptr) {
+      }
+      Utils::Platform::close_process(kill_pipe);
+    }
+    auto [output, code] = run_task.get();
+    (void)code;
+    result.stdout_output = output;
+    result.exit_code = -1;
+    result.timed_out = true;
+    result.error_message = "Command execution timed out after " +
+                           std::to_string(config.timeout_seconds) +
+                           "s; container stopped";
+    return result;
   }
 
-  result.exit_code = Utils::Platform::close_process(pipe);
-  result.stdout_output = output.str();
+  auto [output, code] = run_task.get();
+  result.stdout_output = output;
+  result.exit_code = code;
 
   auto end_time = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
       end_time - start_time);
   result.execution_time_seconds = duration.count() / 1000.0;
 
-  // Check for timeout
-  if (result.execution_time_seconds > config.timeout_seconds) {
-    result.timed_out = true;
-    result.error_message = "Command execution timed out";
+  return result;
+}
+
+std::string SandboxService::build_docker_command(
+    const SandboxConfig &config, const std::string &command,
+    const std::string &container_name) {
+  // Every config-derived field is shell-quoted: the assembled string still
+  // passes through a host shell via popen, so quoting (not trust) is what
+  // keeps hostile values inert.
+  std::stringstream docker_cmd;
+
+  docker_cmd << "docker run --rm";
+  docker_cmd << " --name " << escape_shell_arg(container_name);
+  docker_cmd << " --memory=" << config.memory_limit_mb << "m";
+  docker_cmd << " --cpus=" << (config.cpu_limit_percent / 100.0);
+  docker_cmd << " --cap-drop ALL --security-opt=no-new-privileges"
+                " --pids-limit 256";
+
+  if (!config.network_access) {
+    docker_cmd << " --network=none";
   }
 
-  return result;
+  // Set working directory
+  std::string work_dir = config.working_directory.empty()
+                             ? "/workspace"
+                             : config.working_directory;
+  docker_cmd << " --workdir=" << escape_shell_arg(work_dir);
+
+  // Add environment variables
+  for (const auto &[key, value] : config.environment_vars) {
+    docker_cmd << " -e " << escape_shell_arg(key + "=" + value);
+  }
+
+  // Add volumes
+  for (const auto &volume : config.volumes) {
+    docker_cmd << " -v " << escape_shell_arg(volume);
+  }
+
+  docker_cmd << " " << escape_shell_arg(config.image);
+  docker_cmd << " sh -c " << escape_shell_arg(command);
+  return docker_cmd.str();
+}
+
+std::string SandboxService::format_result(const SandboxResult &result) {
+  std::string out = result.stdout_output;
+  auto append_line = [&out](const std::string &line) {
+    if (!out.empty()) {
+      out += "\n";
+    }
+    out += line;
+  };
+  if (result.timed_out) {
+    append_line("[Command timed out]");
+  }
+  if (result.exit_code != 0) {
+    append_line("Exit code: " + std::to_string(result.exit_code));
+  }
+  if (!result.error_message.empty()) {
+    append_line("Error: " + result.error_message);
+  }
+  return out.empty() ? "Command completed" : out;
 }
 
 SandboxResult SandboxService::execute_script(const std::string &script_content,
@@ -438,14 +543,18 @@ void SandboxService::cleanup_old_containers() {
 }
 
 bool SandboxService::is_command_safe(const std::string &command) {
-  // List of dangerous commands/patterns
+  // Substring denylist: defense in depth only, never a substitute for
+  // container isolation. NOTE: a bare "." entry was removed here — it
+  // blocked nearly every realistic command containing a dot (e.g.
+  // "cat README.md") while missing whole dangerous classes. Keep entries
+  // structural; prove each one with a test before adding.
   std::vector<std::string> dangerous_patterns = {
       "rm -rf",    "format",   "del /f",  "sudo",     "su -",      "chmod 777",
       "wget",      "curl",     "nc ",     "netcat",   "telnet",    "ssh",
       "scp",       "iptables", "ufw",     "firewall", "systemctl", "service",
       "mount",     "umount",   "fdisk",   "mkfs",     "dd if=",    "dd of=",
       ">/dev/",    "< /dev/",  "| /dev/", "& /dev/",  "$(",        "`",
-      "eval",      "exec",     "source",  ".",        "bash -c",   "sh -c",
+      "eval",      "exec",     "source",  "bash -c",  "sh -c",
       "python -c", "perl -e",  "ruby -e"};
 
   std::string lower_command = command;
@@ -461,8 +570,72 @@ bool SandboxService::is_command_safe(const std::string &command) {
   return true;
 }
 
+namespace {
+// Container paths are POSIX-style inside the image. A leading '/' (or a
+// Windows drive prefix for Docker Desktop hosts) marks absolute.
+bool is_absolute_container_path(const std::string &path) {
+  if (path.empty()) {
+    return false;
+  }
+  if (path[0] == '/') {
+    return true;
+  }
+  return path.size() > 2 && path[1] == ':' &&
+         (path[2] == '/' || path[2] == '\\');
+}
+
+// Image references must be single tokens: quoting neutralizes shell
+// metacharacters, but whitespace/control characters indicate a malformed
+// or hostile value, so reject them outright.
+bool is_safe_image_reference(const std::string &image,
+                             std::string &error_message) {
+  if (image.empty()) {
+    error_message = "Docker image cannot be empty";
+    return false;
+  }
+  for (unsigned char c : image) {
+    if (std::isspace(c) || std::iscntrl(c)) {
+      error_message = "Docker image contains invalid characters";
+      return false;
+    }
+  }
+  return true;
+}
+
+// Volume specs must be host:container[:options] with non-empty parts.
+// Extra colons are rejected rather than misparsed (fail closed). Note a
+// Windows drive letter (C:\...) contains a colon, so Windows-style host
+// paths are rejected: run Docker Desktop hosts with POSIX-style mounts.
+bool is_safe_volume_spec(const std::string &volume,
+                         std::string &error_message) {
+  std::vector<std::string> parts;
+  size_t pos = 0;
+  while (true) {
+    size_t colon = volume.find(':', pos);
+    parts.push_back(volume.substr(pos, colon == std::string::npos
+                                           ? std::string::npos
+                                           : colon - pos));
+    if (colon == std::string::npos) {
+      break;
+    }
+    pos = colon + 1;
+  }
+  if (parts.size() < 2 || parts.size() > 3 || parts[0].empty() ||
+      parts[1].empty()) {
+    error_message =
+        "Volume must have host:container[:options] form: " + volume;
+    return false;
+  }
+  if (!is_absolute_container_path(parts[1])) {
+    error_message = "Volume container path must be absolute: " + volume;
+    return false;
+  }
+  return true;
+}
+} // namespace
+
 bool SandboxService::validate_sandbox_config(const SandboxConfig &config,
-                                             std::string &error_message) {
+                                              std::string &error_message) {
   if (config.name.empty()) {
     error_message = "Sandbox name cannot be empty";
     return false;
@@ -486,6 +659,22 @@ bool SandboxService::validate_sandbox_config(const SandboxConfig &config,
   if (config.timeout_seconds < 1 || config.timeout_seconds > 3600) {
     error_message = "Timeout must be between 1 and 3600 seconds";
     return false;
+  }
+
+  if (config.working_directory.empty() ||
+      !is_absolute_container_path(config.working_directory)) {
+    error_message = "Working directory must be a non-empty absolute path";
+    return false;
+  }
+
+  if (!is_safe_image_reference(config.image, error_message)) {
+    return false;
+  }
+
+  for (const auto &volume : config.volumes) {
+    if (!is_safe_volume_spec(volume, error_message)) {
+      return false;
+    }
   }
 
   return true;

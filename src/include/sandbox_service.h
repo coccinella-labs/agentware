@@ -11,6 +11,8 @@ struct SandboxConfig {
   std::string image;
   std::vector<std::string> volumes;
   std::map<std::string, std::string> environment_vars;
+  // Informational only: execution does not consult this list. Nothing
+  // user-visible may claim otherwise.
   std::vector<std::string> allowed_commands;
   size_t memory_limit_mb = 512;
   size_t cpu_limit_percent = 50;
@@ -35,7 +37,6 @@ private:
   static void ensure_sandbox_directory();
   static void initialize_default_configs();
   static std::string generate_container_name();
-  static bool is_docker_available();
   static std::string escape_shell_arg(const std::string &arg);
 
 public:
@@ -76,6 +77,14 @@ public:
 
   // Security validation
   static bool is_command_safe(const std::string &command);
+  static bool is_docker_available();
+  // Test seam: renders the exact docker invocation for a config. Every
+  // config-derived field is shell-quoted so hostile values are inert.
+  static std::string
+  build_docker_command(const SandboxConfig &config, const std::string &command,
+                       const std::string &container_name);
+  // Renders a SandboxResult the way callers display it. Pure.
+  static std::string format_result(const SandboxResult &result);
   static bool validate_sandbox_config(const SandboxConfig &config,
                                       std::string &error_message);
   static std::vector<std::string>
