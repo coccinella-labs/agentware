@@ -291,6 +291,16 @@ void Agent::process_user_input(const std::string &input) {
     return;
   }
 
+  // Bare session words are advertised without a colon, so route exactly
+  // these three to direct dispatch. Anything else (including near-matches
+  // like "memoryfoo") keeps the existing behavior below. The prefix
+  // matching inside handle_direct_command is a known residual quirk.
+  if (trimmed_input == "forget" || trimmed_input == "memory" ||
+      trimmed_input == "clear") {
+    handle_direct_command(trimmed_input);
+    return;
+  }
+
   // Check for direct commands (detect colon)
   if (trimmed_input.find(':') != std::string::npos) {
     handle_direct_command(trimmed_input);

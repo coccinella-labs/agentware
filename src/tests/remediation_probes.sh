@@ -18,6 +18,11 @@ cd "$WORK" || exit 1
 # Hermetic key state: search must not depend on ambient SERPAPI_KEY.
 unset SERPAPI_KEY
 
+# Hermetic home: global memory must land in the temp dir, never in the
+# operator's real ~/.agentware.
+export HOME="$WORK"
+export USERPROFILE="$WORK"
+
 # Deterministic tool PATH: the stock probes must never see a real docker
 # (routing depends on its absence), while python3/curl stay available.
 # Fake-docker scenarios below prepend their stub dir explicitly.
@@ -128,6 +133,16 @@ probe "A3 issues API failure errors" 0 "Error:" \
   "2" "1" "github:issues:no-such-owner-xyz/no-such-repo-xyz" "exit"
 probe "A3 health API failure errors" 0 "Error:" \
   "2" "1" "github:health:no-such-owner-xyz/no-such-repo-xyz" "exit"
+
+# B2: exact bare words route to their handlers; near-matches do not.
+probe "B2 bare forget clears memory" 0 "Global memory cleared" \
+  "2" "1" "remember:probefact" "forget" "exit"
+probe "B2 bare memory reports cleared state" 0 "No global memories stored" \
+  "2" "1" "remember:probefact" "forget" "memory" "exit"
+probe "B2 bare clear wipes session" 0 "Session memory cleared" \
+  "2" "1" "clear" "exit"
+probe "B2 near-match leaves memory intact" 0 "probefact" \
+  "2" "1" "remember:probefact" "memoryfoo" "memory" "exit"
 
 # B1: git:log must show real log output, not trip on its own operators.
 # The handler inspects hardcoded "." (the probe CWD), so make it a repo.
