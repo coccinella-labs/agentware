@@ -146,10 +146,10 @@ if(APPLE)
     # Set deployment target based on environment
     if(DEFINED ENV{CI} OR DEFINED ENV{GITHUB_ACTIONS})
         # Use compatible version for CI environments
-        set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version" FORCE)
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum macOS version" FORCE)
     else()
         # Use current system version to avoid linker warnings with Homebrew libraries
-        set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version" FORCE)
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum macOS version" FORCE)
     endif()
 
     # Use Homebrew's OpenSSL on macOS/arm64
