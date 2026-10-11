@@ -62,9 +62,10 @@ cmake --build build --target test
 
 `ctest` runs two targets. `basic_tests` is the unit suite, currently 68 cases
 across 26 suites, covering parsing, file-access policy, project-root discovery,
-MCP and GitHub availability, review threads, sandbox construction and bounded
-execution, empty replace-pattern rejection, issue parsing, git log handling,
-memory persistence, input validation, and both search backends. `remediation_probes` is a shell harness
+MCP and GitHub availability, review threads, sandbox construction, spawn,
+bounded execution, safety, configuration, results, and Docker behavior, empty
+replace-pattern rejection, issue parsing, git log handling, memory persistence,
+input validation, and both search backends. `remediation_probes` is a shell harness
 that drives the built binary against known-bad input and asserts it refuses.
 
 CI additionally runs a build matrix, coverage, lint, Docker end-to-end, and
