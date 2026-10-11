@@ -604,9 +604,9 @@ if(LCOV_EXE)
     add_custom_target(coverage
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/coverage
         COMMAND ctest --output-on-failure
-        COMMAND ${LCOV_EXE} --capture --directory ${CMAKE_BINARY_DIR} --output-file ${CMAKE_BINARY_DIR}/coverage/coverage.info --exclude '/usr/*' --exclude '*/tests/*' --exclude '*/_deps/*'
-        COMMAND ${LCOV_EXE} --list ${CMAKE_BINARY_DIR}/coverage/coverage.info
-        COMMAND ${GENHTML_EXE} ${CMAKE_BINARY_DIR}/coverage/coverage.info --output-directory ${CMAKE_BINARY_DIR}/coverage/html
+        COMMAND ${LCOV_EXE} --ignore-errors inconsistent,unsupported,empty,format,unused --capture --directory ${CMAKE_BINARY_DIR} --output-file ${CMAKE_BINARY_DIR}/coverage/coverage.info --exclude '/usr/*' --exclude '*/tests/*' --exclude '*/_deps/*' --exclude '/opt/homebrew/*' --exclude '/Applications/*'
+        COMMAND ${LCOV_EXE} --ignore-errors inconsistent,unsupported,empty,format,unused --list ${CMAKE_BINARY_DIR}/coverage/coverage.info
+        COMMAND ${GENHTML_EXE} --ignore-errors inconsistent,unsupported,empty,format,corrupt ${CMAKE_BINARY_DIR}/coverage/coverage.info --output-directory ${CMAKE_BINARY_DIR}/coverage/html
         # ctest also runs remediation_probes, which launches the REPL binary.
         # Build both test executables before running the coverage target so a
         # fresh CI workspace does not fail with agentware-agent missing.
