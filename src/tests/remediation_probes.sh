@@ -142,7 +142,7 @@ probe "B2 bare memory reports cleared state" 0 "No global memories stored" \
 probe "B2 bare clear wipes session" 0 "Session memory cleared" \
   "2" "1" "clear" "exit"
 probe "B2 near-match leaves memory intact" 0 "probefact" \
-  "2" "1" "remember:probefact" "memoryfoo" "memory" "exit"
+  "2" "1" "remember:probefact" "memoryfoo" "memory" "forget" "exit"
 
 # B1: git:log must show real log output, not trip on its own operators.
 # The handler inspects hardcoded "." (the probe CWD), so make it a repo.
@@ -277,6 +277,70 @@ probe "threads usage on missing pr" 0 "Usage: github:threads:owner/repo:pr" \
   "2" "1" "github:threads:o/r" "exit"
 probe "threads help lists subcommand" 0 "github:threads:o/r:pr" \
   "2" "1" "/tools" "exit"
+
+# Consistency matrix: recognition (accepted, not Unknown), dispatch to the
+# intended handler, and controlled failure. All deterministic, no network:
+# network-backed commands use invalid-arg or missing-input variants that
+# stop before any request. Execution of live capabilities is covered by
+# the focused probes above, not re-proven here.
+probe "MX unknown direct command" 0 "Unknown command" \
+  "2" "1" "frobnicate:xyz" "exit"
+probe "MX unknown meta command" 0 "Unknown meta command" \
+  "2" "1" "/frobnicate" "exit"
+probe "MX meta help lists" 0 "Available meta commands" \
+  "2" "1" "/help" "exit"
+probe "MX tools list" 0 "Available tools" \
+  "2" "1" "/tools" "exit"
+probe "MX search empty query errors" 0 "Error:" \
+  "2" "1" "search:" "exit"
+probe "MX write bare usage" 0 "Usage: write:filename content" \
+  "2" "1" "write:" "exit"
+probe "MX replace short usage" 0 "Usage: replace:" \
+  "2" "1" "replace:onlyfile" "exit"
+probe "MX read missing file errors" 0 "File does not exist" \
+  "2" "1" "read:/nonexistent_xyz_123" "exit"
+probe "MX fetch bare usage" 0 "Usage: /fetch" \
+  "2" "1" "/fetch" "exit"
+probe_absent "MX bare verbs reach handlers" 0 "Unknown meta command" \
+  "2" "1" "/mcp" "exit"
+probe_absent "MX bare theme reaches handler" 0 "Unknown meta command" \
+  "2" "1" "/theme" "exit"
+probe_absent "MX bare auth reaches handler" 0 "Unknown meta command" \
+  "2" "1" "/auth" "exit"
+probe_absent "MX bare sandbox reaches handler" 0 "Unknown meta command" \
+  "2" "1" "/sandbox" "exit"
+probe_absent "MX bare error reaches handler" 0 "Unknown meta command" \
+  "2" "1" "/error" "exit"
+probe_absent "MX bare checkpoint reaches handler" 0 "Unknown meta command" \
+  "2" "1" "/checkpoint" "exit"
+probe_absent "MX bare files reaches handler" 0 "Unknown meta command" \
+  "2" "1" "/files" "exit"
+probe_absent "MX bare chat reaches handler" 0 "Unknown meta command" \
+  "2" "1" "/chat" "exit"
+probe_absent "MX bare restore reaches handler" 0 "Unknown meta command" \
+  "2" "1" "/restore" "exit"
+probe_absent "MX bare context reaches handler" 0 "Unknown meta command" \
+  "2" "1" "/context" "exit"
+probe "MX fetch bad url errors" 0 "Invalid URL" \
+  "2" "1" "/fetch notaurl" "exit"
+probe "MX injection missing file marked" 0 "File not found" \
+  "2" "1" "@missing_xyz_123 hi" "read:data/memory.txt" "exit"
+probe "MX checkpoint list empty" 0 "No checkpoints found" \
+  "2" "1" "/checkpoint list" "exit"
+probe "MX mcp servers listed" 0 "filesystem" \
+  "2" "1" "/mcp servers" "exit"
+probe "MX theme list" 0 "Available themes" \
+  "2" "1" "/theme list" "exit"
+probe "MX auth providers listed" 0 "Available authentication providers" \
+  "2" "1" "/auth providers" "exit"
+probe "MX error recent empty" 0 "No recent errors" \
+  "2" "1" "/error recent" "exit"
+probe "MX context show empty" 0 "No hierarchical context found" \
+  "2" "1" "/context show" "exit"
+probe "MX github bad spec usage" 0 "Usage: github:repo:owner/repo" \
+  "2" "1" "github:repo:bad" "exit"
+probe "MX bare bang usage" 0 "Usage: !<command>" \
+  "2" "1" "!" "exit"
 
 # Shell routing with no docker on PATH: deny by default, explicit opt-in.
 probe "routing denies without docker" 0 "Sandbox unavailable" \

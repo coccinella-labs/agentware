@@ -853,6 +853,20 @@ void Agent::handle_shell_command(const std::string &input) {
 void Agent::handle_meta_command(const std::string &input) {
   std::string command = trim_copy(input.substr(1));
 
+  // Bare subcommands ("fetch") carry no trailing space, so every
+  // parameterized branch below would miss and substr() would throw.
+  // Normalize exact verbs to the spaced form so handlers reach their
+  // existing usage paths instead of "Unknown meta command".
+  static const std::vector<std::string> spaced_verbs = {
+      "chat", "context", "files", "fetch", "checkpoint",
+      "restore", "mcp", "theme", "auth", "sandbox", "error"};
+  for (const auto &verb : spaced_verbs) {
+    if (command == verb) {
+      command += " ";
+      break;
+    }
+  }
+
   if (command == "help" || command == "?") {
     show_meta_help();
   } else if (command == "clear") {
