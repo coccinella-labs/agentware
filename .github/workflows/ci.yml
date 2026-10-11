@@ -223,9 +223,9 @@ jobs:
         shell: bash
         run: |
           if git diff --name-only HEAD~1 | grep -q "^VERSION$"; then
-            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           else
-            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
       - name: release
         if: steps.version_check.outputs.changed == 'true'

@@ -42,7 +42,6 @@ jobs:
       - name: Check build
         run: |
           STATUS="PASS"
-          DETAIL=""
           if ! cmake -S . -B build -DCMAKE_BUILD_TYPE=Release > cmake.log 2>&1; then
             STATUS="FAIL: cmake configure failed (tail of cmake.log)"
           elif ! cmake --build build -j"$(nproc)" > build.log 2>&1; then

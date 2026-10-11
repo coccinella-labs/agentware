@@ -33,8 +33,8 @@ jobs:
         run: |
           NAME=$(grep '^name:' .agent | awk '{print $2}')
           DESC=$(grep '^description:' .agent | cut -d':' -f2- | xargs)
-          echo "name=$NAME" >> $GITHUB_OUTPUT
-          echo "description=$DESC" >> $GITHUB_OUTPUT
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "description=$DESC" >> "$GITHUB_OUTPUT"
 
   health-check:
     needs: setup
@@ -64,19 +64,19 @@ jobs:
 
           # Check if cmake configuration succeeded
           if [ -f "build/CMakeCache.txt" ]; then
-            CONFIG_STATUS="Passed"; CONFIG_PERCENT=100
+            echo "CMake config: Passed"
           else
-            CONFIG_STATUS="Failed"; CONFIG_PERCENT=40
+            echo "CMake config: Failed"
           fi
 
           # Build and capture result (ignore CMake config warnings)
           BUILD_LOG=$(cmake --build build --config Release 2>&1 || true)
           # Check for actual compilation/link errors, not CMake config warnings
-          if echo "$BUILD_LOG" | grep -qE "error:.*\.(cpp|c|h|cc|cxx):[0-9]+:"; then
+          if echo "$BUILD_LOG" | grep -qE 'error:.*\.(cpp|c|h|cc|cxx):[0-9]+:'; then
             BUILD_STATUS="Failed"; BUILD_PERCENT=40
-          elif echo "$BUILD_LOG" | grep -qE "^make.*Error|^make.*error:|collect2: error:"; then
+          elif echo "$BUILD_LOG" | grep -qE '^make.*Error|^make.*error:|collect2: error:'; then
             BUILD_STATUS="Failed"; BUILD_PERCENT=40
-          elif echo "$BUILD_LOG" | grep -q "built successfully\|Build completed\|Linking\|Building"; then
+          elif echo "$BUILD_LOG" | grep -q 'built successfully\|Build completed\|Linking\|Building'; then
             BUILD_STATUS="Passed"; BUILD_PERCENT=100
           else
             BUILD_STATUS="Passed"; BUILD_PERCENT=100
@@ -134,9 +134,9 @@ jobs:
             echo "**Overall:** $OVERALL (${AVG}%)"
           } | tee report.md
 
-          echo "report<<EOF" >> $GITHUB_OUTPUT
-          cat report.md >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "report<<EOF" >> "$GITHUB_OUTPUT"
+          cat report.md >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: post health report
         uses: actions/github-script@v8
