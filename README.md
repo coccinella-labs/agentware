@@ -55,7 +55,8 @@ The suite is two tests: a framework sanity check and a version-string check. Tha
 
 ## History
 
-This repository was renamed. CI still carries a guard against poisoned cache from pre-rename builds, so if you see a `llamaware` reference in the workflow files, that is what it is for.
+This repository was renamed. CI drops any restored build cache that was
+generated in a different workspace, since CMake caches pin absolute paths.
 
 ## Contributing
 

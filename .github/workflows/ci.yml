@@ -55,14 +55,12 @@ jobs:
       - name: clean stale cache
         shell: bash
         run: |
-          if [ -d build ]; then
-            if [ -f build/CMakeCache.txt ] && grep -qi "llamaware" build/CMakeCache.txt 2>/dev/null; then
-              echo "Detected stale llamaware cache - removing build directory"
-              rm -rf build
-            elif [ -f build/CMakeCache.txt ] && ! grep -q "$GITHUB_WORKSPACE" build/CMakeCache.txt 2>/dev/null; then
-              echo "Detected mismatched workspace path in CMakeCache - removing build directory"
-              rm -rf build
-            fi
+          # A CMakeCache.txt restored from another workspace pins absolute paths
+          # and silently misconfigures the build. Detect and drop it.
+          if [ -d build ] && [ -f build/CMakeCache.txt ] &&
+            ! grep -q "$GITHUB_WORKSPACE" build/CMakeCache.txt 2>/dev/null; then
+            echo "Detected mismatched workspace path in CMakeCache - removing build directory"
+            rm -rf build
           fi
 
       - name: setup
@@ -90,13 +88,6 @@ jobs:
       - name: build
         shell: bash
         run: |
-          # Guard against poisoned cache from pre-rename (llamaware) builds
-          if [ -d build ]; then
-            if [ -f build/CMakeCache.txt ] && grep -qi "llamaware" build/CMakeCache.txt 2>/dev/null; then
-              echo "Removing poisoned CMakeCache containing llamaware"
-              rm -rf build
-            fi
-          fi
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             cmake -S . -B build \
               -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake \
