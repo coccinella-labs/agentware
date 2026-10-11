@@ -713,6 +713,8 @@ bool Services::AuthService::update_provider_config(
 
 bool Services::AuthService::test_provider_connection(
     const std::string &provider_name) {
+  // Presence-only check: verifies a key is stored, performs no network
+  // verification. Callers must not report this as a live connection (R-08).
   auto it = providers.find(provider_name);
   if (it == providers.end()) {
     return false;
@@ -739,7 +741,8 @@ Services::AuthService::get_provider_status(const std::string &provider_name) {
   }
 
   if (test_provider_connection(provider_name)) {
-    return "Connected";
+    // Presence-only check: no network verification is performed (R-08).
+    return "Key present (not verified)";
   }
 
   return "Disconnected";

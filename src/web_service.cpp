@@ -43,10 +43,8 @@ bool WebService::is_available() { return !get_api_key().empty(); }
 std::string WebService::search(const std::string &query) {
 
   try {
-    std::string api_key = get_api_key();
-    if (api_key.empty()) {
-      return "Error: SERPAPI_KEY is missing.";
-    }
+    // Backend is the DuckDuckGo Instant Answer API, which needs no key.
+    // SERPAPI_KEY is intentionally neither required nor sent here (R-09).
 
     // URL encode the query
     std::string encoded_query;
@@ -63,8 +61,8 @@ std::string WebService::search(const std::string &query) {
       encoded_query = query; // Fallback to unencoded query if curl init fails
     }
 
-    std::string search_url = "https://api.duckduckgo.com/?q=" + encoded_query +
-                             "&api_key=" + api_key;
+    std::string search_url =
+        "https://api.duckduckgo.com/?q=" + encoded_query;
 
     std::string response_str;
     std::string response_headers;

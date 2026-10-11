@@ -1,4 +1,5 @@
 #include "context_service.h"
+#include "github_service.h"
 #include "validation.h"
 #include "version.h"
 #include "memory_manager.h"
@@ -14,6 +15,7 @@ void record_interaction(Data::MemoryManager &memory, const std::string &tag,
                         const std::string &result);
 void record_global_fact(Data::MemoryManager &memory, const std::string &fact);
 } // namespace Core
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -21,6 +23,16 @@ void record_global_fact(Data::MemoryManager &memory, const std::string &fact);
 #include <set>
 #include <sstream>
 #include <string>
+
+// Subset forward declaration: including mcp_service.h here would pull
+// nlohmann/json.hpp onto the test include path, where it shadows the
+// FetchContent gtest headers with the Homebrew copy (ABI mismatch).
+namespace Services {
+class MCPService {
+public:
+  static std::string get_server_status(const std::string &server_name);
+};
+} // namespace Services
 
 // Basic test to verify the testing framework works
 TEST(BasicTest, SanityCheck) { EXPECT_EQ(1 + 1, 2); }
@@ -178,6 +190,51 @@ TEST(FindProjectRootTest, TerminatesWithoutMarkers) {
       Services::ContextService::find_project_root((dir / "sub").string());
   EXPECT_TRUE(root.empty() || fs::exists(fs::path(root), ec));
   fs::remove_all(dir, ec);
+}
+
+// MCP status wording must never imply a live process (R-07). Only the
+// states reachable through the public API without side effects are
+// asserted here; the registered-server states are covered by CLI probes
+// against the repo's data/mcp_servers.json fixture.
+TEST(MCPStatusTest, UnknownServerStatusIsHonest) {
+  std::string status =
+      Services::MCPService::get_server_status("__no_such_server__");
+  EXPECT_EQ(status, "Not registered");
+  EXPECT_EQ(status.find("Running"), std::string::npos);
+}
+
+// GitHub availability must depend only on GITHUB_TOKEN, never on the
+// unrelated search key (review gate item 2). setenv/unsetenv are POSIX;
+// skip on Windows rather than breaking that build.
+TEST(GitHubAvailabilityTest, DependsOnlyOnGithubToken) {
+#ifdef _WIN32
+  GTEST_SKIP() << "POSIX environment manipulation unavailable";
+#else
+  const char *old_gh = std::getenv("GITHUB_TOKEN");
+  const char *old_serp = std::getenv("SERPAPI_KEY");
+  const std::string saved_gh = old_gh != nullptr ? old_gh : "";
+  const std::string saved_serp = old_serp != nullptr ? old_serp : "";
+  const bool had_gh = old_gh != nullptr;
+  const bool had_serp = old_serp != nullptr;
+
+  unsetenv("GITHUB_TOKEN");
+  unsetenv("SERPAPI_KEY");
+  EXPECT_FALSE(Services::GitHubService::is_available());
+
+  setenv("GITHUB_TOKEN", "test-token", 1);
+  EXPECT_TRUE(Services::GitHubService::is_available());
+
+  if (had_gh) {
+    setenv("GITHUB_TOKEN", saved_gh.c_str(), 1);
+  } else {
+    unsetenv("GITHUB_TOKEN");
+  }
+  if (had_serp) {
+    setenv("SERPAPI_KEY", saved_serp.c_str(), 1);
+  } else {
+    unsetenv("SERPAPI_KEY");
+  }
+#endif
 }
 
 int main(int argc, char **argv) {

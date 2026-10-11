@@ -428,8 +428,10 @@ std::string GitHubService::find_related_issues(const std::string &owner,
 }
 
 bool GitHubService::is_available() {
-  std::string token = get_github_token();
-  return !token.empty() && WebService::is_available();
+  // GitHub availability depends only on its own credential. It must not
+  // depend on WebService::is_available(), which tracks the unrelated
+  // search key.
+  return !get_github_token().empty();
 }
 
 } // namespace Services

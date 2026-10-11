@@ -465,7 +465,9 @@ std::string MCPService::get_server_status(const std::string &server_name) {
   }
 
   if (ping_server(server_name)) {
-    return "Running";
+    // No live process exists behind this flag: start_mcp_server only
+    // simulates startup, so never report a real running state (R-07).
+    return "Simulated (no live process)";
   }
   return "Unresponsive";
 }

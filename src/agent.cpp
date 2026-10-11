@@ -1098,6 +1098,15 @@ void Agent::compress_context() {
 
     std::cout << "Generating AI-powered summary..." << std::endl;
 
+    // The AI service is created lazily on first chat; guard against a null
+    // service when /compress runs before any chat input (R-03).
+    if (!ai_service_ || !ai_service_->is_available()) {
+      std::cout << "AI service unavailable - start a chat session first so "
+                   "/compress can summarize."
+                << std::endl;
+      return;
+    }
+
     // Use AI service to generate summary
     std::string summary = ai_service_->chat(compression_prompt, "");
 
@@ -1130,7 +1139,6 @@ void Agent::show_session_stats() {
   std::cout << "  Shell Mode: " << (shell_mode_ ? "Active" : "Inactive")
             << std::endl;
   std::cout << "  Commands Processed: " << command_count_ << std::endl;
-  std::cout << "  Token Usage: " << token_usage_ << std::endl;
 }
 
 void Agent::handle_context_management(const std::string &command) {
@@ -1283,26 +1291,35 @@ void Agent::handle_web_fetch_command(const std::string &command) {
       result = "Error: " + response.error_message;
     }
   } else { // default to text
+    // Fall through to the shared print/save tail below (R-04: the result
+    // must reach the operator and memory, not be discarded).
     result = Services::WebService::fetch_text(url);
-    return;
   }
 
   // Process the fetched content with AI if needed
   if (result.length() > 1000) { // Only process large content with AI
-    std::atomic<bool> done(false);
-    std::thread spin([&done]() { Utils::UI::spinner(done); });
+    // The AI service is created lazily on first chat; fall back to plain
+    // output when it is unavailable (R-05).
+    if (!ai_service_ || !ai_service_->is_available()) {
+      std::cout << "AI service unavailable - showing fetched content without "
+                   "AI summary."
+                << std::endl;
+    } else {
+      std::atomic<bool> done(false);
+      std::thread spin([&done]() { Utils::UI::spinner(done); });
 
-    std::string context = memory_->get_context_string();
-    std::string ai_prompt = "Summarize the following content:\n\n" + result;
-    std::string response = ai_service_->chat(ai_prompt, context);
+      std::string context = memory_->get_context_string();
+      std::string ai_prompt = "Summarize the following content:\n\n" + result;
+      std::string response = ai_service_->chat(ai_prompt, context);
 
-    done = true;
-    if (spin.joinable())
-      spin.join();
+      done = true;
+      if (spin.joinable())
+        spin.join();
 
-    if (!response.empty()) {
-      std::cout << "\nAI Summary:\n" << response << std::endl;
-      record_interaction(*memory_, "web_fetch_summary", response);
+      if (!response.empty()) {
+        std::cout << "\nAI Summary:\n" << response << std::endl;
+        record_interaction(*memory_, "web_fetch_summary", response);
+      }
     }
   }
 
@@ -1576,13 +1593,14 @@ void Agent::handle_mcp_command(const std::string &command) {
       std::cout << "Starting MCP server '" << server_name << "'..."
                 << std::endl;
       if (Services::MCPService::is_server_running(server_name)) {
-        std::cout << "Server is already running." << std::endl;
-      } else {
-        // This would start the actual server in a full implementation
-        std::cout << " MCP server '" << server_name << "' started (simulated)"
+        std::cout << "Server is already marked running (simulated)."
                   << std::endl;
-        std::cout << "Note: Full MCP server integration requires process "
-                     "management implementation."
+      } else {
+        // The service layer only simulates lifecycle; say so plainly and
+        // do not imply MCP interoperability (R-07).
+        std::cout << " MCP server '" << server_name
+                  << "' start requested (simulated - no server process is "
+                     "started; MCP transport is not implemented)"
                   << std::endl;
       }
 
@@ -1596,7 +1614,9 @@ void Agent::handle_mcp_command(const std::string &command) {
 
       std::cout << "Stopping MCP server '" << server_name << "'..."
                 << std::endl;
-      std::cout << " MCP server '" << server_name << "' stopped (simulated)"
+      std::cout << " MCP server '" << server_name
+                << "' stop requested (simulated - no server process is "
+                   "stopped; MCP transport is not implemented)"
                 << std::endl;
 
     } else if (action == "resources") {
@@ -1949,11 +1969,10 @@ void Agent::handle_auth_command(const std::string &command) {
       }
 
       if (Services::AuthService::test_provider_connection(provider_name)) {
-        std::cout << " Connection test successful for: " << provider_name
-                  << std::endl;
+        std::cout << " Key present for: " << provider_name
+                  << " (not verified - no live check performed)" << std::endl;
       } else {
-        std::cout << " Connection test failed for: " << provider_name
-                  << std::endl;
+        std::cout << " No key configured for: " << provider_name << std::endl;
       }
 
     } else {

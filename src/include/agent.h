@@ -30,7 +30,6 @@ private:
   // Tool capabilities detected once at startup; see detect_search_capabilities.
   Services::SearchCapabilities search_caps_;
   int command_count_{0};
-  long long token_usage_{0};
 
 public:
   // Move operations
