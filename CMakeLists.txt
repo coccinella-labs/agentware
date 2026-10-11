@@ -82,7 +82,35 @@ find_package(Threads REQUIRED)
 # Find zlib with platform-specific logic, fallback to FetchContent
 set(zlib_is_found FALSE)
 if(APPLE)
+    # On macOS, prefer Homebrew's zlib first: it always ships headers, unlike
+    # the SDK stub, and avoids building old zlib sources against new SDKs
+    # (the FetchContent fallback breaks on the fdopen declaration).
+    if(NOT TARGET homebrew_zlib)
+        find_program(HOMEBREW NAMES brew)
+        if(HOMEBREW)
+            execute_process(
+                COMMAND ${HOMEBREW} --prefix zlib
+                OUTPUT_VARIABLE _zlib_prefix
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                RESULT_VARIABLE _zlib_prefix_result
+            )
+            if(_zlib_prefix_result EQUAL 0 AND
+                EXISTS "${_zlib_prefix}/include/zlib.h")
+                message(STATUS "Using Homebrew zlib: ${_zlib_prefix}")
+                add_library(homebrew_zlib INTERFACE IMPORTED)
+                target_include_directories(homebrew_zlib INTERFACE "${_zlib_prefix}/include")
+                if(EXISTS "${_zlib_prefix}/lib/libz.dylib")
+                    target_link_libraries(homebrew_zlib INTERFACE "${_zlib_prefix}/lib/libz.dylib")
+                else()
+                    target_link_libraries(homebrew_zlib INTERFACE "${_zlib_prefix}/lib/libz.a")
+                endif()
+                set(ZLIB_TARGET homebrew_zlib)
+                set(zlib_is_found TRUE)
+            endif()
+        endif()
+    endif()
     # On macOS, prefer pkg-config as it's more reliable with Homebrew
+    if(NOT zlib_is_found)
     find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)
         pkg_check_modules(ZLIB QUIET IMPORTED_TARGET zlib)
@@ -99,6 +127,7 @@ if(APPLE)
                 message(STATUS "pkg-config zlib include dir missing, will build from source")
             endif()
         endif()
+    endif()
     endif()
 elseif(WIN32)
     # On Windows, first try to find zlib via vcpkg
@@ -163,12 +192,37 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
             set(CURL_HOMEBREW_PREFIX ${_curl_prefix})
             set(CURL_ROOT_DIR ${_curl_prefix} CACHE PATH "curl root directory" FORCE)
             list(APPEND CMAKE_PREFIX_PATH ${_curl_prefix})
+            # Seed the exact paths too: FindCURL honors explicit
+            # CURL_INCLUDE_DIR/CURL_LIBRARY over any SDK stub.
+            if(EXISTS "${_curl_prefix}/lib/libcurl.dylib")
+                set(CURL_INCLUDE_DIR "${_curl_prefix}/include" CACHE PATH "curl include directory" FORCE)
+                set(CURL_LIBRARY "${_curl_prefix}/lib/libcurl.dylib" CACHE FILEPATH "curl library" FORCE)
+            endif()
         endif()
     endif()
 endif()
 
 # Find libcurl
 find_package(CURL REQUIRED)
+
+# The Xcode SDK libcurl stub can advertise an INTERFACE_INCLUDE_DIRECTORIES
+# entry that no longer exists, which fails the generate step for any target
+# linking CURL::libcurl (including CPR's subdirectory configure). Drop
+# missing directories so one stale SDK path cannot break the build.
+if(TARGET CURL::libcurl)
+    get_target_property(_curl_iface_incs CURL::libcurl INTERFACE_INCLUDE_DIRECTORIES)
+    if(_curl_iface_incs)
+        set(_curl_iface_incs_fixed "")
+        foreach(_d IN LISTS _curl_iface_incs)
+            if(EXISTS "${_d}")
+                list(APPEND _curl_iface_incs_fixed "${_d}")
+            else()
+                message(STATUS "Dropping non-existent CURL include dir: ${_d}")
+            endif()
+        endforeach()
+        set_target_properties(CURL::libcurl PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_curl_iface_incs_fixed}")
+    endif()
+endif()
 
 # Find OpenSSL, fallback to FetchContent
 set(openssl_is_found FALSE)

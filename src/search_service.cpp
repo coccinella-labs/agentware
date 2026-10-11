@@ -208,13 +208,15 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
     // the whole result. ripgrep skips non-regular files on its own.
     std::string command =
         "rg --vimgrep --no-heading --max-count " +
-        std::to_string(options.max_matches) + " -e " +
-        shell_quote(options.pattern) + " -- " +
-        shell_quote(options.directory);
+        std::to_string(options.max_matches);
+    // Options must precede the "--" separator: anything after it is a path,
+    // so appending -g/--ignore-case there silently disables filtering.
     if (options.file_filter != "*")
       command += " -g " + shell_quote(options.file_filter);
     if (!options.case_sensitive)
       command += " --ignore-case";
+    command += " -e " + shell_quote(options.pattern) + " -- " +
+               shell_quote(options.directory);
 
     bool truncated = false;
     std::string output =

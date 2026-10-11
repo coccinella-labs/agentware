@@ -1267,6 +1267,59 @@ TEST(RipgrepBackend, MatchesNative) {
   std::filesystem::remove_all(dir);
 }
 
+TEST(RipgrepBackend, HonorsFileFilter) {
+  auto live = Services::detect_search_capabilities();
+  if (!live.has_ripgrep) {
+    GTEST_SKIP() << "ripgrep not on PATH";
+  }
+
+  auto dir = fresh_temp_dir("rg_filter");
+  const std::string marker = "filter-marker-jkl012";
+  {
+    std::ofstream f(dir / "match.txt");
+    f << "line with " << marker << "\n";
+  }
+  {
+    std::ofstream f(dir / "excluded.log");
+    f << "line with " << marker << "\n";
+  }
+
+  Services::SearchOptions options;
+  options.directory = dir.string();
+  options.pattern = marker;
+  options.file_filter = "*.txt";
+
+  auto result = Services::search_code(live, options);
+  EXPECT_EQ(result.backend_used, "ripgrep");
+  ASSERT_EQ(result.matches.size(), 1u);
+  EXPECT_NE(result.matches[0].file_path.find("match.txt"), std::string::npos);
+
+  std::filesystem::remove_all(dir);
+}
+
+TEST(RipgrepBackend, CaseInsensitiveByDefault) {
+  auto live = Services::detect_search_capabilities();
+  if (!live.has_ripgrep) {
+    GTEST_SKIP() << "ripgrep not on PATH";
+  }
+
+  auto dir = fresh_temp_dir("rg_case");
+  {
+    std::ofstream f(dir / "match.txt");
+    f << "line with MIXED-CASE-MARKER-mno345\n";
+  }
+
+  Services::SearchOptions options;
+  options.directory = dir.string();
+  options.pattern = "mixed-case-marker-mno345";
+
+  auto result = Services::search_code(live, options);
+  EXPECT_EQ(result.backend_used, "ripgrep");
+  ASSERT_EQ(result.matches.size(), 1u);
+
+  std::filesystem::remove_all(dir);
+}
+
 TEST(FindFiles, RespectsSkipDirs) {
   auto dir = fresh_temp_dir("find_files");
   auto write = [&](const std::string &rel) {
