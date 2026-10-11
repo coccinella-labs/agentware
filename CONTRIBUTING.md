@@ -58,6 +58,21 @@ not `env.`:
 if: vars.TRACKING_ISSUE_NUMBER != ''
 ```
 
+### Required secrets
+
+Four secrets are referenced by the workflows. `GITHUB_TOKEN` is supplied by
+GitHub and needs no setup. The other three do:
+
+| Secret | Used by | Without it |
+| --- | --- | --- |
+| `RELEASE_TOKEN` | `version-bump.yml` | Falls back to `GITHUB_TOKEN` with a warning.<br>Every automated release then ships with no binaries, because tags and releases created with `GITHUB_TOKEN` do not trigger the build workflow.<br>Needs a PAT with contents write. |
+| `CLA_BOT_TOKEN` | `cla.yml` | Cannot check out the private `bniladridas/cla-bot` action, so the CLA check does not run. |
+| `CLA_SIGNED_JSON` | `cla.yml` | The CLA bot runs without a signer list and cannot tell whether a contributor signed. |
+
+`cla.yml` also needs a `signed.json` file at the repository root. It is
+checked out sparsely and copied over the bot's own copy, which is why the
+secret and the file must agree.
+
 ### Package names
 
 Use `libattr1-dev`, not `libxattr-dev`, on Ubuntu.
