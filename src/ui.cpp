@@ -55,119 +55,91 @@ void UI::print_logo() {
 
 // ===== Help Menu =====
 void UI::print_help() {
-
   std::cout << Color::BOLD << "Commands\n" << Color::RESET;
   print_divider();
 
-  // File Operations
   std::cout << Color::GREEN << "Files\n" << Color::RESET;
-  std::cout << Color::CYAN << "  @file <path>" << Color::RESET
-            << "             - Inject file\n";
-  std::cout << Color::CYAN << "  @directory <path>" << Color::RESET
-            << "        - Inject directory\n";
-  std::cout << Color::CYAN << "  read:<file>" << Color::RESET
-            << "              - Read file\n";
-  std::cout << Color::CYAN << "  read:<file>:<start>:<count>" << Color::RESET
-            << " - Read range\n";
+  std::cout << Color::CYAN << "  @<path> <prompt>" << Color::RESET
+            << "        - Inject a file or directory into chat\n";
+  std::cout << Color::CYAN << "  read:<file>[:start[:count]]" << Color::RESET
+            << " - Read a file or range\n";
   std::cout << Color::CYAN << "  write:<file> <content>" << Color::RESET
-            << "   - Write file\n";
-  std::cout << Color::CYAN << "  replace:<file>:<old>:<new>" << Color::RESET
-            << " - Replace text\n";
+            << "   - Write a file\n";
+  std::cout << Color::CYAN << "  replace:<file>:<old>:<new>[:count]"
+            << Color::RESET << " - Replace text\n";
   std::cout << Color::CYAN << "  grep:<pattern>[:dir[:filter]]" << Color::RESET
             << " - Search text\n";
+  std::cout << Color::CYAN << "  /files <path...> [options]" << Color::RESET
+            << " - Read multiple files\n";
 
-  // Sessions
   std::cout << "\n" << Color::GREEN << "Sessions\n" << Color::RESET;
-  std::cout << Color::CYAN << "  /save <name> [tags]" << Color::RESET
-            << "       - Save session\n";
-  std::cout << Color::CYAN << "  /resume <name>" << Color::RESET
-            << "           - Resume session\n";
-  std::cout << Color::CYAN << "  /sessions" << Color::RESET
-            << "               - List sessions\n";
+  std::cout << Color::CYAN << "  /chat save|resume <tag>" << Color::RESET
+            << "    - Save or resume a conversation\n";
+  std::cout << Color::CYAN << "  /chat list" << Color::RESET
+            << "                 - List saved conversations\n";
   std::cout << Color::CYAN << "  /compress" << Color::RESET
             << "               - Compress context\n";
   std::cout << Color::CYAN << "  remember:<fact>" << Color::RESET
             << "          - Remember fact\n";
-  std::cout << Color::CYAN << "  memory" << Color::RESET
-            << "                  - Show memory\n";
-  std::cout << Color::CYAN << "  clear" << Color::RESET
-            << "                   - Clear session\n";
-  std::cout << Color::CYAN << "  forget" << Color::RESET
-            << "                  - Clear memory\n";
+  std::cout << Color::CYAN << "  memory | forget | clear" << Color::RESET
+            << "      - Show or clear memory\n";
+  std::cout << Color::CYAN << "  /memory show|add <text>" << Color::RESET
+            << "  - Inspect or add memory\n";
+  std::cout << Color::CYAN << "  /context show|refresh|create" << Color::RESET
+            << " - Manage project context\n";
 
-  // Web
-  std::cout << "\n" << Color::GREEN << "Web\n" << Color::RESET;
-  std::cout << Color::CYAN << "  /fetch <url> [format]" << Color::RESET
-            << "     - Fetch content\n";
+  std::cout << "\n" << Color::GREEN << "Project\n" << Color::RESET;
+  std::cout << Color::CYAN << "  analyze: | components: | todos: | tree:"
+            << Color::RESET << " - Inspect the project\n";
+  std::cout << Color::CYAN << "  git:status | git:log | git:analyze"
+            << Color::RESET << " - Inspect Git\n";
+
+  std::cout << "\n" << Color::GREEN << "Web and GitHub\n" << Color::RESET;
+  std::cout << Color::CYAN << "  /fetch <url> [text|json|raw]" << Color::RESET
+            << " - Fetch content\n";
   std::cout << Color::CYAN << "  search:<query>" << Color::RESET
-            << "            - Search web\n";
-  std::cout << Color::CYAN << "  /mcp servers" << Color::RESET
-            << "             - List servers\n";
-  std::cout << Color::CYAN << "  /mcp resources <server>" << Color::RESET
-            << "   - List resources\n";
-  std::cout << Color::CYAN << "  /mcp tools <server>" << Color::RESET
-            << "       - List tools\n";
+            << "            - Search the web\n";
+  std::cout << Color::CYAN << "  github:repo:<owner>/<repo>" << Color::RESET
+            << "  - Show repository details\n";
+  std::cout << Color::CYAN << "  github:issues:<owner>/<repo>" << Color::RESET
+            << " - List issues\n";
+  std::cout << Color::CYAN << "  github:health:<owner>/<repo>" << Color::RESET
+            << " - Run repository health checks\n";
+  std::cout << Color::CYAN << "  github:threads:<owner>/<repo>:<pr>[:query]"
+            << Color::RESET << " - List review threads\n";
+  std::cout << Color::CYAN << "  /mcp <command>" << Color::RESET
+            << "             - Inspect MCP configuration\n";
 
-  // Checkpoints
   std::cout << "\n" << Color::GREEN << "Checkpoints\n" << Color::RESET;
-  std::cout << Color::CYAN << "  /checkpoint <name>" << Color::RESET
-            << "        - Create checkpoint\n";
-  std::cout << Color::CYAN << "  /restore <name>" << Color::RESET
-            << "          - Restore checkpoint\n";
-  std::cout << Color::CYAN << "  /checkpoints" << Color::RESET
-            << "             - List checkpoints\n";
+  std::cout << Color::CYAN << "  /checkpoint <command>" << Color::RESET
+            << "      - Create, list, inspect, or delete checkpoints\n";
+  std::cout << Color::CYAN << "  /restore [id]" << Color::RESET
+            << "               - List or restore a checkpoint\n";
 
-  // Themes
-  std::cout << "\n" << Color::GREEN << "Themes\n" << Color::RESET;
-  std::cout << Color::CYAN << "  /theme list" << Color::RESET
-            << "              - List themes\n";
-  std::cout << Color::CYAN << "  /theme set <name>" << Color::RESET
-            << "         - Set theme\n";
-  std::cout << Color::CYAN << "  /theme preview <name>" << Color::RESET
-            << "     - Preview theme\n";
+  std::cout << "\n" << Color::GREEN << "Settings and diagnostics\n"
+            << Color::RESET;
+  std::cout << Color::CYAN << "  /theme <command>" << Color::RESET
+            << "           - Manage themes\n";
+  std::cout << Color::CYAN << "  /auth <command>" << Color::RESET
+            << "            - Manage provider credentials\n";
+  std::cout << Color::CYAN << "  /sandbox <command>" << Color::RESET
+            << "         - Manage or run sandboxes\n";
+  std::cout << Color::CYAN << "  /error <command>" << Color::RESET
+            << "           - Inspect diagnostics\n";
+  std::cout << Color::CYAN << "  /stats" << Color::RESET
+            << "                     - Show session statistics\n";
 
-  // Security
-  std::cout << "\n" << Color::GREEN << "Security\n" << Color::RESET;
-  std::cout << Color::CYAN << "  /auth providers" << Color::RESET
-            << "           - List providers\n";
-  std::cout << Color::CYAN << "  /auth set <provider>" << Color::RESET
-            << "      - Set provider\n";
-  std::cout << Color::CYAN << "  /auth key <provider> <key>" << Color::RESET
-            << " - Set key\n";
-  std::cout << Color::CYAN << "  /sandbox run <command>" << Color::RESET
-            << "    - Run sandboxed\n";
-  std::cout << Color::CYAN << "  /sandbox status" << Color::RESET
-            << "           - Check status\n";
-
-  // Errors
-  std::cout << "\n" << Color::GREEN << "Errors\n" << Color::RESET;
-  std::cout << Color::CYAN << "  /error report" << Color::RESET
-            << "             - View errors\n";
-  std::cout << Color::CYAN << "  /error recent <count>" << Color::RESET
-            << "     - Show recent\n";
-  std::cout << Color::CYAN << "  /error export <file>" << Color::RESET
-            << "      - Export log\n";
-
-  // System
   std::cout << "\n" << Color::GREEN << "System\n" << Color::RESET;
   std::cout << Color::CYAN << "  cmd:<command>" << Color::RESET
-            << "             - Run command\n";
+            << "             - Run a command\n";
+  std::cout << Color::CYAN << "  !<command>" << Color::RESET
+            << "              - Run a shell command\n";
   std::cout << Color::CYAN << "  /tools" << Color::RESET
-            << "                   - Show tools\n";
-  std::cout << Color::CYAN << "  !" << Color::RESET
-            << "                        - Toggle shell\n";
-  std::cout << Color::CYAN << "  help" << Color::RESET
-            << "                    - Show help\n";
-  std::cout << Color::CYAN << "  quit" << Color::RESET
-            << "                    - Exit\n";
-
-  std::cout << "\n" << Color::BOLD << "Notes\n" << Color::RESET;
-  std::cout << Color::DIM << "Set theme with /theme set dark\n" << Color::RESET;
-  std::cout << Color::DIM << "Configure auth with /auth key\n" << Color::RESET;
-  std::cout << Color::DIM << "Create checkpoints before changes\n"
-            << Color::RESET;
-  std::cout << Color::DIM << "Use /sandbox for safe execution\n"
-            << Color::RESET;
+            << "                   - Show direct tools\n";
+  std::cout << Color::CYAN << "  help | /help | /?" << Color::RESET
+            << "        - Show command help\n";
+  std::cout << Color::CYAN << "  version | exit | quit" << Color::RESET
+            << "        - Show version or leave\n";
   print_divider();
 }
 

@@ -269,7 +269,8 @@ probe_absent "R-10 stats reports no phantom token usage" 0 "Token Usage" \
 probe "R-10 stats still reports commands" 0 "Commands Processed" \
   "2" "1" "/stats" "exit"
 
-# github:threads usage errors need no network and must not crash.probe "threads usage on bad spec" 0 "Usage: github:threads:owner/repo:pr" \
+# github:threads usage errors need no network and must not crash.
+probe "threads usage on bad spec" 0 "Usage: github:threads:owner/repo:pr" \
   "2" "1" "github:threads:bad" "exit"
 probe "threads usage on non-numeric pr" 0 "Usage: github:threads:owner/repo:pr" \
   "2" "1" "github:threads:o/r:abc" "exit"
@@ -288,6 +289,18 @@ probe "MX unknown direct command" 0 "Unknown command" \
 probe "MX unknown meta command" 0 "Unknown meta command" \
   "2" "1" "/frobnicate" "exit"
 probe "MX meta help lists" 0 "Available meta commands" \
+  "2" "1" "/help" "exit"
+probe "PX main help uses chat session syntax" 0 "/chat save|resume <tag>" \
+  "2" "1" "help" "exit"
+probe_absent "PX main help omits stale session command" 0 "/save <name>" \
+  "2" "1" "help" "exit"
+probe_absent "PX main help does not promise shell toggle" 0 "Toggle shell" \
+  "2" "1" "help" "exit"
+probe "PX main help uses direct GitHub syntax" 0 "github:threads:<owner>/<repo>:<pr>" \
+  "2" "1" "help" "exit"
+probe "PX meta help uses direct GitHub syntax" 0 "github:repo:owner/repo" \
+  "2" "1" "/help" "exit"
+probe_absent "PX meta help omits slash GitHub syntax" 0 "/github repo:" \
   "2" "1" "/help" "exit"
 probe "MX tools list" 0 "Available tools" \
   "2" "1" "/tools" "exit"

@@ -1085,10 +1085,12 @@ void Agent::show_meta_help() {
             << std::endl;
   std::cout << "  /error <cmd>          - Error management and reporting"
             << std::endl;
-  std::cout << "  /github repo:owner/repo - Get repository info" << std::endl;
-  std::cout << "  /github issues:owner/repo - List repository issues"
+  std::cout << "  github:repo:owner/repo  - Get repository info" << std::endl;
+  std::cout << "  github:issues:owner/repo - List repository issues"
             << std::endl;
-  std::cout << "  /github health:owner/repo - Run health check" << std::endl;
+  std::cout << "  github:health:owner/repo - Run health check" << std::endl;
+  std::cout << "  github:threads:owner/repo:pr[:query] - List review threads"
+            << std::endl;
   std::cout << "  /quit or /exit        - Exit the program" << std::endl;
   std::cout << std::endl;
   std::cout << "File injection commands:" << std::endl;
