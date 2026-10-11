@@ -1,5 +1,11 @@
 extends: default
 
+# Vendored and generated trees. Not tracked by git, but present after a build,
+# so a bare `yamllint .` would otherwise lint downloaded dependencies.
+ignore: |
+  /build/
+  /.git/
+
 rules:
   # Strict line length
   line-length:
