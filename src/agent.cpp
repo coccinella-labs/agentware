@@ -1602,8 +1602,8 @@ void Agent::handle_checkpoint_command(const std::string &command) {
       }
       } catch (const std::exception &e) {
         std::cout << "Error: " << e.what() << std::endl;
-        std::cout << "Tip: info needs the checkpoint ID from "
-                     "/checkpoint list, not the name."
+        std::cout << "Tip: if you used a name, retry with the checkpoint ID "
+                     "from /checkpoint list."
                   << std::endl;
       }
 
@@ -1620,8 +1620,8 @@ void Agent::handle_checkpoint_command(const std::string &command) {
       } else {
         std::cout << "Error: Failed to delete checkpoint " << checkpoint_id
                   << std::endl;
-        std::cout << "Tip: delete needs the checkpoint ID from "
-                     "/checkpoint list, not the name."
+        std::cout << "Tip: if you used a name, retry with the checkpoint ID "
+                     "from /checkpoint list."
                   << std::endl;
       }
 
@@ -1677,8 +1677,8 @@ void Agent::handle_checkpoint_command(const std::string &command) {
       } else {
         std::cout << "Error: Failed to restore from checkpoint "
                   << checkpoint_id << std::endl;
-        std::cout << "Tip: restore needs the checkpoint ID from "
-                     "/checkpoint list, not the name."
+        std::cout << "Tip: if you used a name, retry with the checkpoint ID "
+                     "from /checkpoint list."
                   << std::endl;
       }
 
