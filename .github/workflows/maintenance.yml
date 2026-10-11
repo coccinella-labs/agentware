@@ -124,7 +124,10 @@ jobs:
           UNREACHABLE=0
           while IFS= read -r url; do
             [ -z "$url" ] && continue
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 -I "$url" 2>/dev/null || echo "000")
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 -I "$url" 2>/dev/null || true)
+            case "$code" in
+              ""|*[!0-9]*) code="000" ;;  # curl already printed 000 on failure
+            esac
             case "$code" in
               404|410)
                 echo "- DEAD ($code): $url" >> report_links_body.md
@@ -139,7 +142,8 @@ jobs:
             esac
           done < <(grep -rhoE 'https?://[^)"<> ]+' \
             --include='*.md' --exclude-dir=maintenance --exclude-dir=build --exclude-dir=.git . | \
-            sed 's/[.,;:!?]*$//' | grep -v '^\s*$' | grep -v '[{}]' | sort -u)
+            sed 's/[`.,;:!?]*$//' | grep -v '^\s*$' | grep -v '[{}]' | \
+            grep -vE '^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])' | sort -u)
           {
             echo "## Links"
             if [ "$DEAD" -gt 0 ]; then

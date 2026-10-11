@@ -53,11 +53,6 @@ cmake --build build --target test
 
 The suite is two tests: a framework sanity check and a version-string check. That is the honest extent of it. CI additionally runs build-matrix, coverage, lint, Docker end-to-end, and release jobs, but nothing here exercises the agent's behavior. The `e2e` job needs Docker; the `coverage` job needs its toolchain installed.
 
-## History
-
-This repository was renamed. CI drops any restored build cache that was
-generated in a different workspace, since CMake caches pin absolute paths.
-
 ## Contributing
 
 `CONTRIBUTING.md` is the authority, not this file. External contributions are not accepted at this time; the project is maintained by collaborators. If that changes, the contributing guide will say so first.
