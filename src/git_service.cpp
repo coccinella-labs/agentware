@@ -146,6 +146,9 @@ std::string GitService::analyze_repository(const std::string &path) {
 
   // Get commit count
   std::string count_cmd = "cd \"" + path + "\" && git rev-list --count HEAD";
+  if (!is_safe_shell_path(path)) {
+    return analysis.str();
+  }
   pipe = Utils::Platform::open_process(count_cmd, "r");
   if (pipe) {
     char buffer[128];
