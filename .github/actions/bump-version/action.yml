@@ -86,6 +86,8 @@ runs:
         git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         git checkout -B "$BRANCH_NAME"
+        # Restore workflow files to main branch state to avoid pushing workflow changes
+        git restore -s origin/main -- .github/workflows/ 2>/dev/null || true
         git add VERSION CHANGELOG.md
         git commit -m "chore: bump version to ${VERSION}"
         git push --force-with-lease origin "$BRANCH_NAME"
@@ -106,6 +108,8 @@ runs:
         if git ls-remote --tags --exit-code origin "${TAG_PREFIX}${VERSION}"; then
           echo "Tag ${TAG_PREFIX}${VERSION} already exists."
         else
+          # Restore workflow files to main branch state
+          git restore -s origin/main -- .github/workflows/ 2>/dev/null || true
           git tag "${TAG_PREFIX}${VERSION}"
           git push origin "${TAG_PREFIX}${VERSION}"
         fi
