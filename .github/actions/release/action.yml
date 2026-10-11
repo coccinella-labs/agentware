@@ -55,15 +55,19 @@ runs:
           sed "s/{previous_tag}/$PREVIOUS_TAG/g" | \
           sed "s/{current_tag}/$TAG/g")
 
-        # The template alone ships blank sections, so fill the changelog from
-        # merged pull requests. Without this the published body is an empty form.
-        # sed's r command inserts the file verbatim, which avoids quoting traps
-        # with authors, URLs, and markdown in the generated text.
+        # Use the commit log between tags rather than GitHub's
+        # generate-notes API. That API only lists PRs merged between
+        # two tags, so commits pushed directly to main are invisible.
+        # The commit log captures both, and %s keeps the "(#123)" PR
+        # suffix when a commit did arrive through a pull request.
         NOTES_FILE=$(mktemp)
-        gh api "repos/${{ github.repository }}/releases/generate-notes" \
-          -f tag_name="$TAG" -f previous_tag_name="$PREVIOUS_TAG" --jq '.body' > "$NOTES_FILE" 2>/dev/null || true
+        if git rev-parse --verify "$PREV_TAG" >/dev/null 2>&1; then
+          git log --pretty=format:'* %s (%h)' "${PREV_TAG}..${TAG}" > "$NOTES_FILE"
+        else
+          git log --pretty=format:'* %s (%h)' "$TAG" > "$NOTES_FILE"
+        fi
         if [ ! -s "$NOTES_FILE" ]; then
-          printf '%s\n' '(no merged pull requests since the previous tag)' > "$NOTES_FILE"
+          printf '%s\n' '(no commits since the previous tag)' > "$NOTES_FILE"
         fi
         RELEASE_NOTES=$(printf '%s\n' "$RELEASE_NOTES" | \
           sed -e "/{generated_notes}/ {" -e "r $NOTES_FILE" -e "d" -e "}")
