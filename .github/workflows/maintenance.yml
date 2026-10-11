@@ -28,22 +28,35 @@ jobs:
         run: echo "CHECKED_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Install dependencies
+        # Must match the package set in ci.yml. A missing dependency here fails
+        # the build for a reason unrelated to repo health, producing a red daily
+        # report that says nothing true about the code.
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq cmake build-essential nlohmann-json3-dev > /dev/null
+          sudo apt-get install -y -qq \
+            cmake build-essential nlohmann-json3-dev \
+            libcurl4-openssl-dev libpqxx-dev > /dev/null
 
       - name: Check build
         run: |
           STATUS="PASS"
           DETAIL=""
-          if ! cmake -S . -B build -DCMAKE_BUILD_TYPE=Release > /tmp/cmake.log 2>&1; then
-            STATUS="FAIL: cmake configure failed (see CI log)"
-          elif ! cmake --build build -j"$(nproc)" > /tmp/build.log 2>&1; then
-            STATUS="FAIL: build failed (see CI log)"
+          if ! cmake -S . -B build -DCMAKE_BUILD_TYPE=Release > cmake.log 2>&1; then
+            STATUS="FAIL: cmake configure failed (tail of cmake.log)"
+          elif ! cmake --build build -j"$(nproc)" > build.log 2>&1; then
+            STATUS="FAIL: build failed (tail of build.log)"
           fi
           {
             echo "## Build"
             echo "- result: $STATUS"
+            if [ "$STATUS" != "PASS" ]; then
+              # Echo the real error. The full log stays on the runner, but a
+              # report that only says "see CI log" is not a diagnosis.
+              echo ""
+              echo '```'
+              tail -25 cmake.log build.log 2>/dev/null | grep -iE "error|fatal|could not find" | head -10
+              echo '```'
+            fi
           } > report_build.md
           [ "$STATUS" = "PASS" ]
 
@@ -51,10 +64,10 @@ jobs:
         run: |
           STATUS="PASS"
           DETAIL=""
-          if ! ctest --test-dir build --output-on-failure > /tmp/ctest.log 2>&1; then
+          if ! ctest --test-dir build --output-on-failure > ctest.log 2>&1; then
             STATUS="FAIL: ctest reported failures (see CI log)"
           else
-            DETAIL=$(grep -E "tests passed" /tmp/ctest.log | tail -1)
+            DETAIL=$(grep -E "tests passed" ctest.log | tail -1)
           fi
           {
             echo "## Tests"
@@ -188,5 +201,8 @@ jobs:
           git commit -m "Daily maintenance report $(date -u +%F)"
           git fetch origin main
           git rebase origin/main || { echo "::error::rebase failed; human intervention needed"; exit 1; }
-          git push origin HEAD:main || \
+          # Fully qualified refspec. The repo carries a tag literally named
+          # "main", so the short form "HEAD:main" is ambiguous and git refuses
+          # with "dst refspec main matches more than one".
+          git push origin HEAD:refs/heads/main || \
             { echo "::error::push rejected after rebase; human intervention needed"; exit 1; }
