@@ -1,7 +1,7 @@
+#include "validation.h"
 #include "version.h"
 #include "memory_manager.h"
 #include "search_service.h"
-#include "validation.h"
 // NOTE: do not include agent.h here. It defines Agent with defaulted move
 // operations over unique_ptr<Services::AIService>, which is only forward
 // declared there; MSVC instantiates the deleter eagerly and fails, while
@@ -28,6 +28,138 @@ TEST(BasicTest, SanityCheck) { EXPECT_EQ(1 + 1, 2); }
 TEST(VersionTest, VersionCommand) {
   const char *version = Version::get_version();
   EXPECT_STREQ(version, agentware_version_string);
+}
+
+// Strict integer parsing used by read:/replace: handlers (R-01, R-02)
+TEST(TryParseIntTest, AcceptsPlainIntegers) {
+  int out = 0;
+  EXPECT_TRUE(Utils::Validator::try_parse_int("12", out));
+  EXPECT_EQ(out, 12);
+  EXPECT_TRUE(Utils::Validator::try_parse_int("-3", out));
+  EXPECT_EQ(out, -3);
+  EXPECT_TRUE(Utils::Validator::try_parse_int("0", out));
+  EXPECT_EQ(out, 0);
+}
+
+TEST(TryParseIntTest, RejectsNonNumeric) {
+  int out = 99;
+  EXPECT_FALSE(Utils::Validator::try_parse_int("", out));
+  EXPECT_FALSE(Utils::Validator::try_parse_int("abc", out));
+  EXPECT_FALSE(Utils::Validator::try_parse_int("12abc", out));
+  EXPECT_FALSE(Utils::Validator::try_parse_int("1.5", out));
+  EXPECT_FALSE(Utils::Validator::try_parse_int(" 12", out));
+  EXPECT_FALSE(Utils::Validator::try_parse_int("12 ", out));
+  // Failed parses leave the output untouched.
+  EXPECT_EQ(out, 99);
+}
+
+// Access policy: project-root containment with canonical paths (R-06).
+// Each test builds an isolated root under the system temp directory.
+namespace {
+std::filesystem::path MakeAccessRoot() {
+  auto root = std::filesystem::temp_directory_path() /
+              "agentware_access_test";
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  std::filesystem::create_directories(root / "sub", ec);
+  return root;
+}
+} // namespace
+
+TEST(FileAccessTest, RelativeInsideRootAllowed) {
+  auto root = MakeAccessRoot();
+  EXPECT_TRUE(
+      Utils::Validator::validate_file_access("sub", root.string()).is_valid);
+  EXPECT_TRUE(Utils::Validator::validate_file_access(
+                                                     "sub/../sub", root.string())
+                  .is_valid);
+}
+
+TEST(FileAccessTest, TraversalEscapeRejected) {
+  auto root = MakeAccessRoot();
+  auto result =
+      Utils::Validator::validate_file_access("../outside.txt", root.string());
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_NE(result.error_message.find("permitted root"), std::string::npos);
+}
+
+TEST(FileAccessTest, AbsoluteInsideRootAllowed) {
+  auto root = MakeAccessRoot();
+  EXPECT_TRUE(Utils::Validator::validate_file_access(
+                                                     (root / "sub").string(), root.string())
+                  .is_valid);
+}
+
+TEST(FileAccessTest, AbsoluteOutsideNonSensitiveAllowed) {
+  auto root = MakeAccessRoot();
+  auto sibling = root.parent_path() / "agentware_access_sibling.txt";
+  EXPECT_TRUE(
+      Utils::Validator::validate_file_access(sibling.string(), root.string())
+          .is_valid);
+}
+
+TEST(FileAccessTest, RestrictedAbsoluteRejected) {
+  auto root = MakeAccessRoot();
+#ifdef _WIN32
+  const char *paths[] = {"C:/Windows/System32",
+                         "C:/Windows/System32/drivers/etc/hosts"};
+#else
+  const char *paths[] = {"/proc/self/status", "/sys/kernel", "/dev/null"};
+#endif
+  for (const char *p : paths) {
+    auto result = Utils::Validator::validate_file_access(p, root.string());
+    EXPECT_FALSE(result.is_valid) << p;
+  }
+}
+
+TEST(FileAccessTest, SymlinkEscapeRejected) {
+  auto root = MakeAccessRoot();
+  auto outside = root.parent_path() / "agentware_access_outside.txt";
+  std::error_code ec;
+  // The target must exist: only then does canonicalization resolve the
+  // link to the outside location (matching what open() would follow).
+  std::ofstream(outside.string()) << "outside";
+  std::filesystem::create_symlink(outside, root / "link.txt", ec);
+  if (ec) {
+    GTEST_SKIP() << "symlinks unavailable: " << ec.message();
+  }
+  auto result = Utils::Validator::validate_file_access("link.txt",
+                                                       root.string());
+  EXPECT_FALSE(result.is_valid);
+  std::filesystem::remove_all(root, ec);
+  std::filesystem::remove(outside, ec);
+}
+
+TEST(FileAccessTest, EmptyPathRejected) {
+  auto root = MakeAccessRoot();
+  EXPECT_FALSE(
+      Utils::Validator::validate_file_access("", root.string()).is_valid);
+}
+
+TEST(FileAccessTest, SymlinkedParentEscapeRejected) {
+  auto root = MakeAccessRoot();
+  std::error_code ec;
+  auto outside = std::filesystem::temp_directory_path() /
+                 "agentware_access_outside_dir";
+  std::filesystem::remove_all(outside, ec);
+  std::filesystem::create_directories(outside, ec);
+  std::filesystem::create_symlink(outside, root / "linkdir", ec);
+  if (ec) {
+    GTEST_SKIP() << "symlinks unavailable: " << ec.message();
+  }
+  // The parent linkdir resolves outside root, so any path beneath it
+  // escapes even though the destination file does not exist yet.
+  EXPECT_FALSE(Utils::Validator::validate_file_access("linkdir/evil.txt",
+                                                      root.string())
+                   .is_valid);
+  std::filesystem::remove_all(outside, ec);
+}
+
+TEST(FileAccessTest, NonexistentNestedInsideAllowed) {
+  auto root = MakeAccessRoot();
+  EXPECT_TRUE(Utils::Validator::validate_file_access("newdir/note.txt",
+                                                     root.string())
+                  .is_valid);
 }
 
 int main(int argc, char **argv) {

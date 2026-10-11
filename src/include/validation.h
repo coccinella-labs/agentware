@@ -19,6 +19,15 @@ public:
   static ValidationResult validate_file_exists(const std::string &path);
   static ValidationResult validate_file_writable(const std::string &path);
 
+  // Access policy for user-supplied paths. Relative paths must resolve
+  // inside `root` (the current working directory when empty); absolute
+  // paths outside `root` must pass the restricted-path rules. The path is
+  // canonicalized (resolving `..` and symlinks) before deciding, so
+  // string-prefix checks cannot be bypassed. Never throws.
+  static ValidationResult
+  validate_file_access(const std::string &path,
+                       const std::string &root = "");
+
   // Text validation
   static ValidationResult
   validate_non_empty(const std::string &text,
@@ -33,6 +42,11 @@ public:
   static ValidationResult validate_line_range(int start_line, int line_count,
                                               int total_lines);
   static ValidationResult validate_replacement_count(int expected, int actual);
+
+  // Strict integer parsing: the whole string must be a valid int, with no
+  // leading/trailing content. Returns false and leaves `out` untouched on
+  // failure. Never throws.
+  static bool try_parse_int(const std::string &text, int &out);
 
   // Composite validation
   static ValidationResult

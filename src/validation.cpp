@@ -2,6 +2,7 @@
 #include "file_service.h"
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <filesystem>
 #include <regex>
 
@@ -47,6 +48,102 @@ ValidationResult Validator::validate_file_exists(const std::string &path) {
   if (!Services::FileService::file_exists(path)) {
     result.is_valid = false;
     result.error_message = "File does not exist: " + path;
+  }
+
+  return result;
+}
+
+namespace {
+// Component-wise prefix check: true when every component of `prefix`
+// matches the leading components of `path`. Separator-agnostic.
+bool is_component_prefix(const std::filesystem::path &prefix,
+                         const std::filesystem::path &path) {
+  auto prefix_it = prefix.begin();
+  auto path_it = path.begin();
+  const auto prefix_end = prefix.end();
+  const auto path_end = path.end();
+  while (prefix_it != prefix_end && path_it != path_end) {
+    if (*prefix_it != *path_it) {
+      return false;
+    }
+    ++prefix_it;
+    ++path_it;
+  }
+  return prefix_it == prefix_end;
+}
+
+// True when the canonical path names a restricted location. Matched on
+// the canonical form so `..` and symlinks cannot dodge the rules.
+bool is_restricted_location(const std::filesystem::path &canonical) {
+  static const std::vector<std::string> restricted = {
+      "/etc", "/sys", "/proc", "/dev",
+      // Canonical targets of well-known symlinks: macOS /etc -> /private/etc.
+      "/private/etc", "c:/windows", "c:/system32"};
+  std::string text = canonical.generic_string();
+  std::transform(text.begin(), text.end(), text.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  for (const auto &entry : restricted) {
+    if (text == entry || text.rfind(entry + "/", 0) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+} // namespace
+
+ValidationResult
+Validator::validate_file_access(const std::string &path,
+                                const std::string &root) {
+  ValidationResult result = {true, "", {}};
+
+  if (path.empty()) {
+    result.is_valid = false;
+    result.error_message = "File path cannot be empty";
+    return result;
+  }
+
+  std::error_code ec;
+  std::filesystem::path base =
+      root.empty() ? std::filesystem::current_path(ec)
+                   : std::filesystem::path(root);
+  if (ec) {
+    result.is_valid = false;
+    result.error_message = "Cannot resolve working directory";
+    return result;
+  }
+  base = std::filesystem::weakly_canonical(base, ec);
+  if (ec) {
+    result.is_valid = false;
+    result.error_message = "Cannot resolve working directory";
+    return result;
+  }
+
+  std::filesystem::path candidate(path);
+  if (candidate.is_relative()) {
+    candidate = base / candidate;
+  }
+  std::filesystem::path canonical =
+      std::filesystem::weakly_canonical(candidate, ec);
+  if (ec) {
+    result.is_valid = false;
+    result.error_message = "Cannot resolve path: " + path;
+    return result;
+  }
+
+  if (is_component_prefix(base, canonical)) {
+    return result;
+  }
+
+  if (std::filesystem::path(path).is_relative()) {
+    result.is_valid = false;
+    result.error_message = "Path escapes the permitted root: " + path;
+    return result;
+  }
+
+  if (is_restricted_location(canonical)) {
+    result.is_valid = false;
+    result.error_message = "Restricted system path: " + path;
+    return result;
   }
 
   return result;
@@ -216,6 +313,21 @@ ValidationResult Validator::validate_replacement_count(int expected,
   }
 
   return result;
+}
+
+bool Validator::try_parse_int(const std::string &text, int &out) {
+  if (text.empty()) {
+    return false;
+  }
+  int value = 0;
+  const char *first = text.data();
+  const char *last = first + text.size();
+  auto [ptr, ec] = std::from_chars(first, last, value);
+  if (ec != std::errc() || ptr != last) {
+    return false;
+  }
+  out = value;
+  return true;
 }
 
 ValidationResult

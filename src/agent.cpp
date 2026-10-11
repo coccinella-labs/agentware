@@ -338,29 +338,53 @@ void Agent::handle_direct_command(const std::string &input) {
     size_t first_colon = params.find(':');
     if (first_colon != std::string::npos) {
       std::string filename = params.substr(0, first_colon);
-      auto validation = Utils::Validator::validate_file_exists(filename);
-      if (!validation.is_valid) {
-        result = "Error: " + validation.error_message;
+      auto access = Utils::Validator::validate_file_access(filename);
+      if (!access.is_valid) {
+        result = "Error: " + access.error_message;
       } else {
-        std::string range_params = params.substr(first_colon + 1);
-        size_t second_colon = range_params.find(':');
-
-        if (second_colon != std::string::npos) {
-          int start_line = std::stoi(range_params.substr(0, second_colon));
-          int line_count = std::stoi(range_params.substr(second_colon + 1));
-          result = Services::FileService::read_file_range(filename, start_line,
-                                                          line_count);
+        auto validation = Utils::Validator::validate_file_exists(filename);
+        if (!validation.is_valid) {
+          result = "Error: " + validation.error_message;
         } else {
-          int start_line = std::stoi(range_params);
-          result = Services::FileService::read_file_range(filename, start_line);
+          std::string range_params = params.substr(first_colon + 1);
+          size_t second_colon = range_params.find(':');
+
+          if (second_colon != std::string::npos) {
+            int start_line = 0;
+            int line_count = 0;
+            if (!Utils::Validator::try_parse_int(
+                    range_params.substr(0, second_colon), start_line) ||
+                !Utils::Validator::try_parse_int(
+                    range_params.substr(second_colon + 1), line_count)) {
+              result = "Error: invalid line range '" + range_params +
+                       "'. Use read:filename:start[:count] with numbers.";
+            } else {
+              result = Services::FileService::read_file_range(
+                  filename, start_line, line_count);
+            }
+          } else {
+            int start_line = 0;
+            if (!Utils::Validator::try_parse_int(range_params, start_line)) {
+              result = "Error: invalid start line '" + range_params +
+                       "'. Use read:filename:start[:count] with numbers.";
+            } else {
+              result = Services::FileService::read_file_range(filename,
+                                                               start_line);
+            }
+          }
         }
       }
     } else {
-      auto validation = Utils::Validator::validate_file_exists(params);
-      if (!validation.is_valid) {
-        result = "Error: " + validation.error_message;
+      auto access = Utils::Validator::validate_file_access(params);
+      if (!access.is_valid) {
+        result = "Error: " + access.error_message;
       } else {
-        result = Services::FileService::read_file(params);
+        auto validation = Utils::Validator::validate_file_exists(params);
+        if (!validation.is_valid) {
+          result = "Error: " + validation.error_message;
+        } else {
+          result = Services::FileService::read_file(params);
+        }
       }
     }
     record_interaction(*memory_, "read:" + params, result);
@@ -371,10 +395,11 @@ void Agent::handle_direct_command(const std::string &input) {
       std::string filename = trim_copy(input.substr(6, space_pos - 6));
       std::string content = input.substr(space_pos + 1);
 
-      // Validate the file is writable
-      auto validation = Utils::Validator::validate_file_writable(filename);
-      if (!validation.is_valid) {
-        result = "Error: " + validation.error_message;
+      // Enforce the access policy before the writability check, which can
+      // create parent directories as a side effect.
+      auto access = Utils::Validator::validate_file_access(filename);
+      if (!access.is_valid) {
+        result = "Error: " + access.error_message;
       } else {
         result = Services::FileService::write_file(filename, content);
         record_interaction(*memory_, "write:" + filename, result);
@@ -401,11 +426,23 @@ void Agent::handle_direct_command(const std::string &input) {
       const std::string &filename = parts[0];
       const std::string &old_text = parts[1];
       const std::string &new_text = parts[2];
-      int expected = (parts.size() > 3) ? std::stoi(parts[3]) : 1;
-
-      auto edit_result = Services::FileService::replace_text_in_file(
-          filename, old_text, new_text, expected);
-      result = edit_result.message;
+      // Enforce the access policy before parsing or mutating.
+      auto access = Utils::Validator::validate_file_access(filename);
+      if (!access.is_valid) {
+        result = "Error: " + access.error_message;
+      } else {
+        int expected = 1;
+        if (parts.size() > 3 &&
+            !Utils::Validator::try_parse_int(parts[3], expected)) {
+          result = "Error: invalid expected count '" + parts[3] +
+                   "'. Use replace:filename:old_text:new_text[:count] with a "
+                   "number.";
+        } else {
+          auto edit_result = Services::FileService::replace_text_in_file(
+              filename, old_text, new_text, expected);
+          result = edit_result.message;
+        }
+      }
       record_interaction(*memory_, "replace:" + filename, result);
     } else {
       result = "Usage: replace:filename:old_text:new_text[:expected_count]";
@@ -428,25 +465,31 @@ void Agent::handle_direct_command(const std::string &input) {
     std::string directory = (parts.size() > 1) ? parts[1] : ".";
     std::string filter = (parts.size() > 2) ? parts[2] : "*";
 
-    Services::SearchOptions search_options;
-    search_options.directory = directory;
-    search_options.pattern = pattern;
-    search_options.file_filter = filter;
-    auto search_result =
-        Services::search_code(search_caps_, search_options);
-
-    if (search_result.matches.empty()) {
-      result = "No matches found for pattern: " + pattern;
+    auto access = Utils::Validator::validate_file_access(directory);
+    if (!access.is_valid) {
+      result = "Error: " + access.error_message;
     } else {
-      result = "Found " + std::to_string(search_result.matches.size()) +
-               " matches (via " + search_result.backend_used + "):\n";
-      for (const auto &match : search_result.matches) {
-        result += match.file_path + ":" + std::to_string(match.line_number) +
-                  ": " + match.line_content + "\n";
-      }
-      if (search_result.truncated) {
-        result += "(output truncated at the search limit; narrow the pattern "
-                  "or directory for the rest)\n";
+      Services::SearchOptions search_options;
+      search_options.directory = directory;
+      search_options.pattern = pattern;
+      search_options.file_filter = filter;
+      auto search_result =
+          Services::search_code(search_caps_, search_options);
+
+      if (search_result.matches.empty()) {
+        result = "No matches found for pattern: " + pattern;
+      } else {
+        result = "Found " + std::to_string(search_result.matches.size()) +
+                 " matches (via " + search_result.backend_used + "):\n";
+        for (const auto &match : search_result.matches) {
+          result += match.file_path + ":" + std::to_string(match.line_number) +
+                    ": " + match.line_content + "\n";
+        }
+        if (search_result.truncated) {
+          result +=
+              "(output truncated at the search limit; narrow the pattern "
+              "or directory for the rest)\n";
+        }
       }
     }
     record_interaction(*memory_, "grep:" + pattern, result);
