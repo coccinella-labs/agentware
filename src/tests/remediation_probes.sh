@@ -375,6 +375,15 @@ probe "MX injection missing file marked" 0 "File not found" \
   "2" "1" "@missing_xyz_123 hi" "read:data/memory.txt" "exit"
 probe "MX checkpoint list empty" 0 "No checkpoints found" \
   "2" "1" "/checkpoint list" "exit"
+
+# Pass A checkpoint ID explicitness: failures name the ID requirement.
+# Placed after the empty-list probe since creating demo persists here.
+probe "checkpoint info by name hints at ID" 0 "checkpoint ID from" \
+  "2" "1" "/checkpoint info nosuchname" "exit"
+probe "checkpoint delete by name hints at ID" 0 "checkpoint ID from" \
+  "2" "1" "/checkpoint delete nosuchname" "exit"
+probe "checkpoint restore by name hints at ID" 0 "checkpoint ID from" \
+  "2" "1" "/checkpoint create demo" "/restore demo" "exit"
 probe "MX mcp servers listed" 0 "filesystem" \
   "2" "1" "/mcp servers" "exit"
 probe "MX theme list" 0 "Available themes" \

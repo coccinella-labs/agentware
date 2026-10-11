@@ -1577,9 +1577,10 @@ void Agent::handle_checkpoint_command(const std::string &command) {
         return;
       }
 
-      auto info =
-          Services::CheckpointService::get_checkpoint_info(checkpoint_id);
-      std::cout << "Checkpoint Details:" << std::endl;
+      try {
+        auto info =
+            Services::CheckpointService::get_checkpoint_info(checkpoint_id);
+        std::cout << "Checkpoint Details:" << std::endl;
       std::cout << "  ID: " << info.id << std::endl;
       std::cout << "  Name: " << info.name << std::endl;
       std::cout << "  Created: " << info.timestamp << std::endl;
@@ -1592,6 +1593,12 @@ void Agent::handle_checkpoint_command(const std::string &command) {
                 << "):" << std::endl;
       for (const auto &file : info.backed_up_files) {
         std::cout << "    " << file << std::endl;
+      }
+      } catch (const std::exception &e) {
+        std::cout << "Error: " << e.what() << std::endl;
+        std::cout << "Tip: info needs the checkpoint ID from "
+                     "/checkpoint list, not the name."
+                  << std::endl;
       }
 
     } else if (action == "delete") {
@@ -1606,6 +1613,9 @@ void Agent::handle_checkpoint_command(const std::string &command) {
         std::cout << " Checkpoint " << checkpoint_id << " deleted" << std::endl;
       } else {
         std::cout << "Error: Failed to delete checkpoint " << checkpoint_id
+                  << std::endl;
+        std::cout << "Tip: delete needs the checkpoint ID from "
+                     "/checkpoint list, not the name."
                   << std::endl;
       }
 
@@ -1661,6 +1671,9 @@ void Agent::handle_checkpoint_command(const std::string &command) {
       } else {
         std::cout << "Error: Failed to restore from checkpoint "
                   << checkpoint_id << std::endl;
+        std::cout << "Tip: restore needs the checkpoint ID from "
+                     "/checkpoint list, not the name."
+                  << std::endl;
       }
 
     } else {
