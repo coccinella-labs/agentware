@@ -1,33 +1,19 @@
+---
 name: CLA
 
-on:
+"on":
   pull_request:
     types: [opened, synchronize, reopened]
 
 jobs:
   cla:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.repository_owner == 'coccinella-labs'
     steps:
       - uses: actions/checkout@v6
-        with:
-          sparse-checkout: |
-            signed.json
-
-      - name: Checkout private cla-bot
-        uses: actions/checkout@v6
-        with:
-          repository: bniladridas/cla-bot
-          token: ${{ secrets.CLA_BOT_TOKEN }}
-          path: cla-bot
-
-      - name: Copy signed.json to cla-signers.json
-        run: |
-          cp signed.json cla-signers.json
-          cp signed.json cla-bot/cla-signers.json
 
       - name: Run CLA bot
-        uses: ./cla-bot/
+        uses: coccinella-labs/clabot@v1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          signed.json: ${{ secrets.CLA_SIGNED_JSON }}
+          cla-url: https://harpertoken.github.io/cla.html
