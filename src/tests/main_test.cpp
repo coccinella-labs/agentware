@@ -16,6 +16,7 @@ void record_interaction(Data::MemoryManager &memory, const std::string &tag,
                         const std::string &result);
 void record_global_fact(Data::MemoryManager &memory, const std::string &fact);
 } // namespace Core
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -417,58 +418,101 @@ TEST(ReviewThreadsTest, MalformedPageThrows) {
                std::runtime_error);
 }
 
-// Sandbox command construction: every config-derived field must be quoted
-// and the isolation flags present, so hostile config values stay inert.
-namespace {
-// Removes quoted spans to expose anything the host shell would interpret:
-// a single quote toggles single-quoting only outside double quotes, and
-// vice versa (this matches how '"'"' joins quoted segments).
-std::string StripQuoted(const std::string &s) {
-  std::string out;
-  bool in_sq = false;
-  bool in_dq = false;
-  for (char c : s) {
-    if (c == '\'' && !in_dq) {
-      in_sq = !in_sq;
-    } else if (c == '"' && !in_sq) {
-      in_dq = !in_dq;
-    } else if (!in_sq && !in_dq) {
-      out += c;
-    }
-  }
-  return out;
-}
-} // namespace
-
-TEST(SandboxCommandTest, QuotesHostileFields) {
+// Sandbox docker invocation: argv elements reach the child verbatim with
+// no shell involved, so hostile values are single inert elements.
+TEST(SandboxCommandTest, HostileValuesAreSingleElements) {
   Services::SandboxConfig config;
   config.name = "test";
   config.image = "ubuntu:22.04";
   config.working_directory = "/workspace'; touch /tmp/pwned; echo '";
   config.volumes = {"/host'; touch /tmp/pwned; echo ':/workspace:rw"};
-  config.environment_vars = {{"EVIL", "x'; touch /tmp/pwned; echo '"},
+  config.environment_vars = {{"EVIL& reboot", "x'; touch /tmp/pwned; echo '"},
                              {"BAD\nKEY", "v"}};
-  std::string cmd = Services::SandboxService::build_docker_command(
-      config, "echo hi'; touch /tmp/pwned; echo '", "c1");
-  EXPECT_NE(cmd.find("--cap-drop ALL"), std::string::npos);
-  EXPECT_NE(cmd.find("--security-opt=no-new-privileges"), std::string::npos);
-  EXPECT_NE(cmd.find("--pids-limit 256"), std::string::npos);
-  EXPECT_NE(cmd.find("--network=none"), std::string::npos);
-  // Outside quotes, nothing shell-meaningful may survive.
-  std::string bare = StripQuoted(cmd);
-  EXPECT_EQ(bare.find(';'), std::string::npos);
-  EXPECT_EQ(bare.find("touch"), std::string::npos);
-  EXPECT_EQ(bare.find('`'), std::string::npos);
-  EXPECT_EQ(bare.find("$("), std::string::npos);
+  std::vector<std::string> argv = Services::SandboxService::build_docker_argv(
+      config, "echo hi'; touch /tmp/pwned; echo '", "weird name; reboot");
+  auto has_element = [&](const std::string &want) {
+    return std::find(argv.begin(), argv.end(), want) != argv.end();
+  };
+  // Isolation flags present as exact elements.
+  EXPECT_TRUE(has_element("--cap-drop"));
+  EXPECT_TRUE(has_element("ALL"));
+  EXPECT_TRUE(has_element("--security-opt"));
+  EXPECT_TRUE(has_element("no-new-privileges"));
+  EXPECT_TRUE(has_element("--pids-limit"));
+  EXPECT_TRUE(has_element("256"));
+  EXPECT_TRUE(has_element("--network=none"));
+  // Hostile values survive only as single verbatim elements: nothing to
+  // split, quote, or interpret downstream.
+  EXPECT_TRUE(has_element("--workdir=/workspace'; touch /tmp/pwned; echo '"));
+  EXPECT_TRUE(has_element("/host'; touch /tmp/pwned; echo ':/workspace:rw"));
+  EXPECT_TRUE(has_element("EVIL& reboot=x'; touch /tmp/pwned; echo '"));
+  EXPECT_TRUE(has_element("weird name; reboot"));
+  EXPECT_TRUE(has_element("echo hi'; touch /tmp/pwned; echo '"));
+  // Fixed structure around them.
+  EXPECT_EQ(argv[0], "docker");
+  EXPECT_EQ(argv[1], "run");
+  EXPECT_EQ(argv.back(), "echo hi'; touch /tmp/pwned; echo '");
 }
 
-TEST(SandboxCommandTest, ContainerNameQuoted) {
-  Services::SandboxConfig config;
-  config.name = "test";
-  config.image = "ubuntu:22.04";
-  std::string cmd = Services::SandboxService::build_docker_command(
-      config, "echo hi", "weird name; reboot");
-  EXPECT_NE(cmd.find("'weird name; reboot'"), std::string::npos);
+TEST(SandboxSpawnTest, EchoRoundTrip) {
+#ifdef _WIN32
+  auto out = Services::SandboxService::spawn_capture(
+      {"cmd", "/c", "echo", "hello"});
+#else
+  auto out = Services::SandboxService::spawn_capture({"echo", "hello"});
+#endif
+  EXPECT_EQ(out.exit_code, 0);
+  EXPECT_NE(out.output.find("hello"), std::string::npos);
+}
+
+TEST(SandboxSpawnTest, FailureCodePreserved) {
+#ifdef _WIN32
+  auto out =
+      Services::SandboxService::spawn_capture({"cmd", "/c", "exit", "1"});
+#else
+  auto out = Services::SandboxService::spawn_capture({"false"});
+#endif
+  EXPECT_EQ(out.exit_code, 1);
+}
+
+TEST(SandboxSpawnTest, MissingBinaryFailsCleanly) {
+  auto out = Services::SandboxService::spawn_capture(
+      {"__agentware_no_such_binary__"});
+#ifdef _WIN32
+  EXPECT_EQ(out.exit_code, -1);
+#else
+  // execvp failed in the child: conventional 127, no crash, no hang.
+  EXPECT_EQ(out.exit_code, 127);
+#endif
+}
+
+TEST(SandboxBoundedTest, SuccessReturnsPromptly) {
+#ifdef _WIN32
+  auto result = Services::SandboxService::run_bounded(
+      {"cmd", "/c", "echo", "hi"}, {"cmd", "/c", "exit", "0"}, 10, 5);
+#else
+  auto result = Services::SandboxService::run_bounded(
+      {"echo", "hi"}, {"true"}, 10, 5);
+#endif
+  EXPECT_FALSE(result.timed_out);
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_NE(result.output.find("hi"), std::string::npos);
+}
+
+TEST(SandboxBoundedTest, HangReturnsControl) {
+  // A wedged child must not hang the caller: the stop attempt runs
+  // bounded, then control returns with timed_out set.
+  auto start = std::chrono::steady_clock::now();
+#ifdef _WIN32
+  auto result = Services::SandboxService::run_bounded(
+      {"ping", "-n", "30", "127.0.0.1"}, {"cmd", "/c", "exit", "0"}, 2, 5);
+#else
+  auto result = Services::SandboxService::run_bounded(
+      {"sleep", "60"}, {"true"}, 2, 5);
+#endif
+  auto elapsed = std::chrono::steady_clock::now() - start;
+  EXPECT_TRUE(result.timed_out);
+  EXPECT_LT(elapsed, std::chrono::seconds(60));
 }
 
 TEST(SandboxSafetyTest, DottedCommandsPassDenylist) {
@@ -520,8 +564,7 @@ TEST(SandboxConfigTest, RejectsHostileConfig) {
       Services::SandboxService::validate_sandbox_config(config, error));
 }
 
-TEST(SandboxResultTest, FormatsHonestly) {
-  Services::SandboxResult ok;
+TEST(SandboxResultTest, FormatsHonestly) {  Services::SandboxResult ok;
   ok.exit_code = 0;
   ok.stdout_output = "hi";
   EXPECT_EQ(Services::SandboxService::format_result(ok), "hi");
@@ -545,6 +588,149 @@ TEST(SandboxResultTest, FormatsHonestly) {
   timed_out.error_message = "Command execution timed out after 2s";
   text = Services::SandboxService::format_result(timed_out);
   EXPECT_NE(text.find("[Command timed out]"), std::string::npos);
+}
+
+// End-to-end routing through a fake docker on PATH: no daemon required.
+// POSIX-only (fake is a shell stub, PATH is manipulated); skipped on
+// Windows rather than breaking that build.
+TEST(SandboxDockerTest, ExecutesThroughFakeDocker) {
+#ifdef _WIN32
+  GTEST_SKIP() << "fake-docker stub needs a POSIX shell";
+#else
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  auto dir = fs::temp_directory_path() / "agentware_fakedocker_test";
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir / "bin", ec);
+  {
+    std::ofstream stub(dir / "bin" / "docker");
+    stub << "#!/bin/sh\n"
+            "if [ \"$1\" = \"--version\" ]; then\n"
+            "  echo \"Docker version 99.0-fake\"; exit 0\n"
+            "fi\n"
+            "if [ \"$1\" = \"stop\" ]; then exit 0; fi\n"
+            "echo \"fake-output\"\n"
+            "exit 0\n";
+  }
+  fs::permissions(dir / "bin" / "docker",
+                  fs::perms::owner_exec | fs::perms::owner_read, ec);
+  auto old_cwd = fs::current_path(ec);
+  fs::current_path(dir, ec);
+  ASSERT_FALSE(ec);
+  const char *old_path = std::getenv("PATH");
+  const std::string saved_path = old_path != nullptr ? old_path : "";
+  setenv("PATH", ((dir / "bin").string() + ":/usr/bin:/bin").c_str(), 1);
+
+  EXPECT_TRUE(Services::SandboxService::is_docker_available());
+
+  Services::SandboxConfig config;
+  config.name = "test-fake";
+  config.image = "ubuntu:22.04";
+  config.timeout_seconds = 30;
+  ASSERT_TRUE(Services::SandboxService::create_sandbox_config("test-fake", config));
+  Services::SandboxResult result =
+      Services::SandboxService::execute_command("echo hi", "test-fake");
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_NE(result.stdout_output.find("fake-output"), std::string::npos);
+  EXPECT_FALSE(result.timed_out);
+  EXPECT_TRUE(Services::SandboxService::remove_sandbox_config("test-fake"));
+
+  setenv("PATH", saved_path.c_str(), 1);
+  fs::current_path(old_cwd, ec);
+  fs::remove_all(dir, ec);
+#endif
+}
+
+TEST(SandboxDockerTest, DaemonFailureReported) {
+#ifdef _WIN32
+  GTEST_SKIP() << "fake-docker stub needs a POSIX shell";
+#else
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  auto dir = fs::temp_directory_path() / "agentware_fakedocker_fail";
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir / "bin", ec);
+  {
+    std::ofstream stub(dir / "bin" / "docker");
+    stub << "#!/bin/sh\n"
+            "if [ \"$1\" = \"--version\" ]; then\n"
+            "  echo \"Docker version 99.0-fake\"; exit 0\n"
+            "fi\n"
+            "echo \"fake: cannot connect\" >&2\n"
+            "exit 1\n";
+  }
+  fs::permissions(dir / "bin" / "docker",
+                  fs::perms::owner_exec | fs::perms::owner_read, ec);
+  auto old_cwd = fs::current_path(ec);
+  fs::current_path(dir, ec);
+  ASSERT_FALSE(ec);
+  const char *old_path = std::getenv("PATH");
+  const std::string saved_path = old_path != nullptr ? old_path : "";
+  setenv("PATH", ((dir / "bin").string() + ":/usr/bin:/bin").c_str(), 1);
+
+  Services::SandboxConfig config;
+  config.name = "test-fake-fail";
+  config.image = "ubuntu:22.04";
+  config.timeout_seconds = 30;
+  ASSERT_TRUE(
+      Services::SandboxService::create_sandbox_config("test-fake-fail", config));
+  Services::SandboxResult result =
+      Services::SandboxService::execute_command("echo hi", "test-fake-fail");
+  EXPECT_EQ(result.exit_code, 1);
+  EXPECT_FALSE(result.timed_out);
+  EXPECT_TRUE(Services::SandboxService::remove_sandbox_config("test-fake-fail"));
+
+  setenv("PATH", saved_path.c_str(), 1);
+  fs::current_path(old_cwd, ec);
+  fs::remove_all(dir, ec);
+#endif
+}
+
+TEST(SandboxDockerTest, HangEnforcesTimeout) {
+#ifdef _WIN32
+  GTEST_SKIP() << "fake-docker stub needs a POSIX shell";
+#else
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  auto dir = fs::temp_directory_path() / "agentware_fakedocker_hang";
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir / "bin", ec);
+  {
+    std::ofstream stub(dir / "bin" / "docker");
+    stub << "#!/bin/sh\n"
+            "if [ \"$1\" = \"--version\" ]; then\n"
+            "  echo \"Docker version 99.0-fake\"; exit 0\n"
+            "fi\n"
+            "if [ \"$1\" = \"stop\" ]; then exit 0; fi\n"
+            "sleep 120\n";
+  }
+  fs::permissions(dir / "bin" / "docker",
+                  fs::perms::owner_exec | fs::perms::owner_read, ec);
+  auto old_cwd = fs::current_path(ec);
+  fs::current_path(dir, ec);
+  ASSERT_FALSE(ec);
+  const char *old_path = std::getenv("PATH");
+  const std::string saved_path = old_path != nullptr ? old_path : "";
+  setenv("PATH", ((dir / "bin").string() + ":/usr/bin:/bin").c_str(), 1);
+
+  Services::SandboxConfig config;
+  config.name = "test-fake-hang";
+  config.image = "ubuntu:22.04";
+  config.timeout_seconds = 2;
+  ASSERT_TRUE(
+      Services::SandboxService::create_sandbox_config("test-fake-hang", config));
+  auto start = std::chrono::steady_clock::now();
+  Services::SandboxResult result =
+      Services::SandboxService::execute_command("echo hi", "test-fake-hang");
+  auto elapsed = std::chrono::steady_clock::now() - start;
+  EXPECT_TRUE(result.timed_out);
+  EXPECT_LT(elapsed, std::chrono::seconds(60));
+  EXPECT_TRUE(Services::SandboxService::remove_sandbox_config("test-fake-hang"));
+
+  setenv("PATH", saved_path.c_str(), 1);
+  fs::current_path(old_cwd, ec);
+  fs::remove_all(dir, ec);
+#endif
 }
 
 int main(int argc, char **argv) {

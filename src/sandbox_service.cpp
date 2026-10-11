@@ -2,6 +2,7 @@
 #include "platform.h"
 #include "validation.h"
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -127,31 +128,182 @@ std::string SandboxService::generate_container_name() {
 }
 
 bool SandboxService::is_docker_available() {
-  FILE *pipe = popen("docker --version 2>&1", "r");
-  if (!pipe)
-    return false;
-
-  char buffer[128];
-  bool success = false;
-  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-    if (strstr(buffer, "Docker version") != nullptr) {
-      success = true;
-      break;
-    }
-  }
-  pclose(pipe);
-  return success;
+  SpawnedResult result = spawn_capture({"docker", "--version"});
+  return result.exit_code == 0 &&
+         result.output.find("Docker version") != std::string::npos;
 }
 
-std::string SandboxService::escape_shell_arg(const std::string &arg) {
-  std::string escaped = arg;
-  // Basic shell escaping - replace single quotes
-  size_t pos = 0;
-  while ((pos = escaped.find("'", pos)) != std::string::npos) {
-    escaped.replace(pos, 1, "'\"'\"'");
-    pos += 5;
+SpawnedResult SandboxService::spawn_capture(
+    const std::vector<std::string> &argv) {
+  SpawnedResult result;
+  if (argv.empty()) {
+    result.exit_code = -1;
+    return result;
   }
-  return "'" + escaped + "'";
+#ifdef _WIN32
+  // Deterministic CRT quoting (CommandLineToArgvW inverse): backslashes
+  // are doubled before quotes and at the end; the whole argument is
+  // wrapped. No shell, no metacharacters.
+  std::string command_line;
+  for (const auto &arg : argv) {
+    if (!command_line.empty()) {
+      command_line += ' ';
+    }
+    command_line += '"';
+    size_t backslashes = 0;
+    for (char c : arg) {
+      if (c == '\\') {
+        ++backslashes;
+        command_line += '\\';
+      } else if (c == '"') {
+        command_line.append(backslashes + 1, '\\');
+        command_line += '"';
+        backslashes = 0;
+      } else {
+        backslashes = 0;
+        command_line += c;
+      }
+    }
+    command_line.append(backslashes * 2, '\\');
+    command_line += '"';
+  }
+  SECURITY_ATTRIBUTES attributes{};
+  attributes.nLength = sizeof(attributes);
+  attributes.bInheritHandle = TRUE;
+  HANDLE read_handle = nullptr;
+  HANDLE write_handle = nullptr;
+  if (!CreatePipe(&read_handle, &write_handle, &attributes, 0)) {
+    result.exit_code = -1;
+    return result;
+  }
+  SetHandleInformation(read_handle, HANDLE_FLAG_INHERIT, 0);
+  STARTUPINFOA startup{};
+  startup.cb = sizeof(startup);
+  startup.dwFlags = STARTF_USESTDHANDLES;
+  startup.hStdOutput = write_handle;
+  startup.hStdError = write_handle;
+  startup.hStdInput = nullptr;
+  PROCESS_INFORMATION proc{};
+  ZeroMemory(&proc, sizeof(proc));
+  std::vector<char> command_buffer(command_line.begin(), command_line.end());
+  command_buffer.push_back('\0');
+  BOOL started =
+      CreateProcessA(nullptr, command_buffer.data(), nullptr, nullptr, TRUE,
+                     CREATE_NO_WINDOW, nullptr, nullptr, &startup, &proc);
+  CloseHandle(write_handle);
+  if (!started) {
+    CloseHandle(read_handle);
+    result.exit_code = -1;
+    return result;
+  }
+  std::string output;
+  char buffer[4096];
+  DWORD got = 0;
+  while (ReadFile(read_handle, buffer, sizeof(buffer), &got, nullptr) &&
+         got > 0) {
+    output.append(buffer, got);
+  }
+  CloseHandle(read_handle);
+  WaitForSingleObject(proc.hProcess, INFINITE);
+  DWORD code = 0;
+  if (!GetExitCodeProcess(proc.hProcess, &code)) {
+    code = static_cast<DWORD>(-1);
+  }
+  CloseHandle(proc.hProcess);
+  CloseHandle(proc.hThread);
+  result.output = output;
+  result.exit_code = static_cast<int>(code);
+  return result;
+#else
+  int pipefd[2] = {-1, -1};
+  if (pipe(pipefd) != 0) {
+    result.exit_code = -1;
+    return result;
+  }
+  pid_t pid = fork();
+  if (pid < 0) {
+    close(pipefd[0]);
+    close(pipefd[1]);
+    result.exit_code = -1;
+    return result;
+  }
+  if (pid == 0) {
+    dup2(pipefd[1], STDOUT_FILENO);
+    dup2(pipefd[1], STDERR_FILENO);
+    close(pipefd[0]);
+    close(pipefd[1]);
+    std::vector<char *> exec_args;
+    exec_args.reserve(argv.size() + 1);
+    for (const auto &arg : argv) {
+      exec_args.push_back(const_cast<char *>(arg.c_str()));
+    }
+    exec_args.push_back(nullptr);
+    execvp(exec_args[0], exec_args.data());
+    _exit(127);
+  }
+  close(pipefd[1]);
+  std::string output;
+  char buffer[4096];
+  ssize_t count = 0;
+  while ((count = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
+    output.append(buffer, static_cast<size_t>(count));
+  }
+  close(pipefd[0]);
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
+  result.output = output;
+  result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  return result;
+#endif
+}
+
+BoundedResult SandboxService::run_bounded(
+    const std::vector<std::string> &argv,
+    const std::vector<std::string> &stop_argv, int timeout_seconds,
+    int stop_timeout_seconds) {
+  BoundedResult result;
+  std::promise<SpawnedResult> done;
+  std::future<SpawnedResult> finished = done.get_future();
+  // Detached worker owns its captures, so abandoning the future on a
+  // wedged daemon leaks only a reaped-at-exit thread, never the REPL.
+  std::thread(
+      [promise = std::move(done), argv]() mutable {
+        promise.set_value(spawn_capture(argv));
+      })
+      .detach();
+  if (finished.wait_for(std::chrono::seconds(timeout_seconds)) ==
+      std::future_status::ready) {
+    SpawnedResult spawned = finished.get();
+    result.output = spawned.output;
+    result.exit_code = spawned.exit_code;
+    return result;
+  }
+  // Deadline exceeded: bounded stop attempt, then a grace reap. If the
+  // daemon is wedged the wait below expires and control still returns.
+  std::promise<SpawnedResult> stop_done;
+  std::future<SpawnedResult> stop_finished = stop_done.get_future();
+  std::thread(
+      [promise = std::move(stop_done), stop_argv]() mutable {
+        promise.set_value(spawn_capture(stop_argv));
+      })
+      .detach();
+  stop_finished.wait_for(std::chrono::seconds(stop_timeout_seconds));
+  constexpr int kReapGraceSeconds = 10;
+  if (finished.wait_for(std::chrono::seconds(kReapGraceSeconds)) ==
+      std::future_status::ready) {
+    SpawnedResult spawned = finished.get();
+    result.output = spawned.output;
+    result.exit_code = spawned.exit_code;
+    result.timed_out = true;
+    result.error_message = "Command execution timed out; container stop requested";
+    return result;
+  }
+  result.timed_out = true;
+  result.error_message =
+      "Command execution timed out; container may still be running";
+  result.exit_code = -1;
+  return result;
 }
 
 void SandboxService::initialize() {
@@ -244,106 +396,69 @@ SandboxResult SandboxService::execute_command(const std::string &command,
     return result;
   }
 
-  // Build docker command
-  std::string container_name = generate_container_name();
-  std::string full_command =
-      build_docker_command(resolved, command, container_name) + " 2>&1";
-
-  // Execute with an enforced deadline: on expiry the container is stopped
-  // so a hung command returns control to the REPL instead of hanging it.
+  // Build the argv vector and run it bounded: on expiry run_bounded
+  // stops the container and returns control to the caller.
   auto start_time = std::chrono::high_resolution_clock::now();
-  auto run_task = std::async(std::launch::async, [&full_command]() {
-    std::stringstream output;
-    int code = -1;
-    FILE *pipe = Utils::Platform::open_process(full_command, "r");
-    if (pipe) {
-      char buffer[4096];
-      while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        output << buffer;
-      }
-      int status = Utils::Platform::close_process(pipe);
-#ifdef _WIN32
-      code = status;
-#else
-      // Decode the wait status: callers and output report real exit codes,
-      // not the raw waitpid encoding.
-      code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-#endif
-    }
-    return std::make_pair(output.str(), code);
-  });
-
-  if (run_task.wait_for(std::chrono::seconds(config.timeout_seconds)) ==
-      std::future_status::timeout) {
-    FILE *kill_pipe = Utils::Platform::open_process(
-        "docker stop " + container_name + " 2>&1", "r");
-    if (kill_pipe) {
-      char buffer[128];
-      while (fgets(buffer, sizeof(buffer), kill_pipe) != nullptr) {
-      }
-      Utils::Platform::close_process(kill_pipe);
-    }
-    auto [output, code] = run_task.get();
-    (void)code;
-    result.stdout_output = output;
-    result.exit_code = -1;
-    result.timed_out = true;
-    result.error_message = "Command execution timed out after " +
-                           std::to_string(config.timeout_seconds) +
-                           "s; container stopped";
-    return result;
-  }
-
-  auto [output, code] = run_task.get();
-  result.stdout_output = output;
-  result.exit_code = code;
+  std::string container_name = generate_container_name();
+  std::vector<std::string> argv =
+      build_docker_argv(resolved, command, container_name);
+  BoundedResult bounded = run_bounded(
+      argv, {"docker", "stop", container_name}, resolved.timeout_seconds, 15);
 
   auto end_time = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
       end_time - start_time);
   result.execution_time_seconds = duration.count() / 1000.0;
-
+  result.stdout_output = bounded.output;
+  result.exit_code = bounded.exit_code;
+  result.timed_out = bounded.timed_out;
+  result.error_message = bounded.error_message;
   return result;
 }
 
-std::string SandboxService::build_docker_command(
+std::vector<std::string> SandboxService::build_docker_argv(
     const SandboxConfig &config, const std::string &command,
     const std::string &container_name) {
-  // Every config-derived field is shell-quoted: the assembled string still
-  // passes through a host shell via popen, so quoting (not trust) is what
-  // keeps hostile values inert.
-  std::stringstream docker_cmd;
-
-  docker_cmd << "docker run --rm";
-  docker_cmd << " --name " << escape_shell_arg(container_name);
-  docker_cmd << " --memory=" << config.memory_limit_mb << "m";
-  docker_cmd << " --cpus=" << (config.cpu_limit_percent / 100.0);
-  docker_cmd << " --cap-drop ALL --security-opt=no-new-privileges"
-                " --pids-limit 256";
+  // Argv elements reach the child verbatim: no shell ever parses this
+  // vector, so hostile values cannot break out regardless of content.
+  std::vector<std::string> argv = {
+      "docker",      "run",         "--rm",
+      "--name",      container_name, "--memory",
+      std::to_string(config.memory_limit_mb) + "m"};
+  {
+    std::ostringstream cpus;
+    cpus << (config.cpu_limit_percent / 100.0);
+    argv.push_back("--cpus");
+    argv.push_back(cpus.str());
+  }
+  argv.insert(argv.end(), {"--cap-drop", "ALL", "--security-opt",
+                           "no-new-privileges", "--pids-limit", "256"});
 
   if (!config.network_access) {
-    docker_cmd << " --network=none";
+    argv.push_back("--network=none");
   }
 
   // Set working directory
   std::string work_dir = config.working_directory.empty()
                              ? "/workspace"
                              : config.working_directory;
-  docker_cmd << " --workdir=" << escape_shell_arg(work_dir);
+  argv.push_back("--workdir=" + work_dir);
 
   // Add environment variables
   for (const auto &[key, value] : config.environment_vars) {
-    docker_cmd << " -e " << escape_shell_arg(key + "=" + value);
+    argv.push_back("-e");
+    argv.push_back(key + "=" + value);
   }
 
   // Add volumes
   for (const auto &volume : config.volumes) {
-    docker_cmd << " -v " << escape_shell_arg(volume);
+    argv.push_back("-v");
+    argv.push_back(volume);
   }
 
-  docker_cmd << " " << escape_shell_arg(config.image);
-  docker_cmd << " sh -c " << escape_shell_arg(command);
-  return docker_cmd.str();
+  argv.push_back(config.image);
+  argv.insert(argv.end(), {"sh", "-c", command});
+  return argv;
 }
 
 std::string SandboxService::format_result(const SandboxResult &result) {
@@ -427,119 +542,53 @@ SandboxResult SandboxService::execute_file(const std::string &file_path,
 }
 
 bool SandboxService::copy_file_to_sandbox(const std::string &host_path,
-                                          const std::string &container_path,
-                                          const std::string &container_name) {
-  std::string command = "docker cp " + escape_shell_arg(host_path) + " " +
-                        container_name + ":" + escape_shell_arg(container_path);
-  FILE *pipe = popen(command.c_str(), "r");
-  if (!pipe)
-    return false;
-
-  // Read and discard output
-  char buffer[128];
-  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-  }
-
-  int status = pclose(pipe);
-#ifdef _WIN32
-  return status == 0; // On Windows, pclose returns the exit status directly
-#else
-  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
-#endif
+                                           const std::string &container_path,
+                                           const std::string &container_name) {
+  SpawnedResult result = spawn_capture(
+      {"docker", "cp", host_path, container_name + ":" + container_path});
+  return result.exit_code == 0;
 }
 
 bool SandboxService::copy_file_from_sandbox(const std::string &container_path,
                                             const std::string &host_path,
                                             const std::string &container_name) {
-  std::string command = "docker cp " + container_name + ":" +
-                        escape_shell_arg(container_path) + " " +
-                        escape_shell_arg(host_path);
-  FILE *pipe = popen(command.c_str(), "r");
-  if (!pipe)
-    return false;
-
-  // Read and discard output
-  char buffer[128];
-  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-  }
-
-  int status = pclose(pipe);
-#ifdef _WIN32
-  return status == 0; // On Windows, pclose returns the exit status directly
-#else
-  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
-#endif
+  SpawnedResult result = spawn_capture(
+      {"docker", "cp", container_name + ":" + container_path, host_path});
+  return result.exit_code == 0;
 }
 
 std::vector<std::string> SandboxService::list_active_containers() {
   std::vector<std::string> containers;
-
-  FILE *pipe = Utils::Platform::open_process(
-      "docker ps --filter name=agentware_sandbox_ --format '{{.Names}}'", "r");
-  if (pipe) {
-    char buffer[256];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-      std::string name(buffer);
-      name.erase(name.find_last_not_of(" \n\r\t") + 1);
-      if (!name.empty()) {
-        containers.push_back(name);
-      }
-    }
-    Utils::Platform::close_process(pipe);
+  SpawnedResult result = spawn_capture(
+      {"docker", "ps", "--filter", "name=agentware_sandbox_", "--format",
+       "{{.Names}}"});
+  if (result.exit_code != 0) {
+    return containers;
   }
-
+  std::istringstream lines(result.output);
+  std::string name;
+  while (std::getline(lines, name)) {
+    name.erase(name.find_last_not_of(" \n\r\t") + 1);
+    if (!name.empty()) {
+      containers.push_back(name);
+    }
+  }
   return containers;
 }
 
 bool SandboxService::stop_container(const std::string &container_name) {
-  std::string command = "docker stop " + escape_shell_arg(container_name);
-  FILE *pipe = popen(command.c_str(), "r");
-  if (!pipe)
-    return false;
-
-  // Read and discard output
-  char buffer[128];
-  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-  }
-
-  int status = pclose(pipe);
-#ifdef _WIN32
-  return status == 0; // On Windows, pclose returns the exit status directly
-#else
-  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
-#endif
+  SpawnedResult result = spawn_capture({"docker", "stop", container_name});
+  return result.exit_code == 0;
 }
 
 bool SandboxService::remove_container(const std::string &container_name) {
-  std::string command = "docker rm -f " + escape_shell_arg(container_name);
-  FILE *pipe = popen(command.c_str(), "r");
-  if (!pipe)
-    return false;
-
-  // Read and discard output
-  char buffer[128];
-  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-  }
-
-  int status = pclose(pipe);
-#ifdef _WIN32
-  return status == 0; // On Windows, pclose returns the exit status directly
-#else
-  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
-#endif
+  SpawnedResult result = spawn_capture({"docker", "rm", "-f", container_name});
+  return result.exit_code == 0;
 }
 
 void SandboxService::cleanup_old_containers() {
-  std::string command =
-      "docker container prune -f --filter label=agentware_sandbox";
-  FILE *pipe = popen(command.c_str(), "r");
-  if (pipe) {
-    // Read and discard output
-    char buffer[128];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-    }
-    pclose(pipe);
-  }
+  spawn_capture(
+      {"docker", "container", "prune", "-f", "--filter", "label=agentware_sandbox"});
 }
 
 bool SandboxService::is_command_safe(const std::string &command) {
@@ -810,58 +859,38 @@ bool SandboxService::check_docker_installation() {
 }
 
 std::string SandboxService::get_docker_version() {
-  FILE *pipe = Utils::Platform::open_process(
-      "docker --version" + Utils::Platform::get_shell_redirect(), "r");
-  if (!pipe)
+  SpawnedResult result = spawn_capture({"docker", "--version"});
+  if (result.exit_code != 0) {
     return "Not available";
-
-  char buffer[256];
+  }
   std::string version;
-  if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-    version = buffer;
+  std::istringstream first_line(result.output);
+  if (std::getline(first_line, version)) {
     version.erase(version.find_last_not_of(" \n\r\t") + 1);
   }
-  Utils::Platform::close_process(pipe);
-
   return version.empty() ? "Not available" : version;
 }
 
 bool SandboxService::pull_docker_image(const std::string &image) {
-  std::string command = "docker pull " + escape_shell_arg(image);
-  FILE *pipe = popen(command.c_str(), "r");
-  if (!pipe)
-    return false;
-
-  // Read and discard output
-  char buffer[128];
-  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-  }
-
-  int status = pclose(pipe);
-#ifdef _WIN32
-  return status == 0; // On Windows, pclose returns the exit status directly
-#else
-  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
-#endif
+  SpawnedResult result = spawn_capture({"docker", "pull", image});
+  return result.exit_code == 0;
 }
 
 std::vector<std::string> SandboxService::list_available_images() {
   std::vector<std::string> images;
-
-  FILE *pipe = Utils::Platform::open_process(
-      "docker images --format '{{.Repository}}:{{.Tag}}'", "r");
-  if (pipe) {
-    char buffer[256];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-      std::string image(buffer);
-      image.erase(image.find_last_not_of(" \n\r\t") + 1);
-      if (!image.empty()) {
-        images.push_back(image);
-      }
-    }
-    Utils::Platform::close_process(pipe);
+  SpawnedResult result = spawn_capture(
+      {"docker", "images", "--format", "{{.Repository}}:{{.Tag}}"});
+  if (result.exit_code != 0) {
+    return images;
   }
-
+  std::istringstream lines(result.output);
+  std::string image;
+  while (std::getline(lines, image)) {
+    image.erase(image.find_last_not_of(" \n\r\t") + 1);
+    if (!image.empty()) {
+      images.push_back(image);
+    }
+  }
   return images;
 }
 } // namespace Services

@@ -30,6 +30,22 @@ struct SandboxResult {
   std::string error_message;
 };
 
+// Result of spawning one process with output captured. No shell is
+// involved on any platform, so argv elements reach the child verbatim.
+struct SpawnedResult {
+  std::string output{};
+  int exit_code{-1};
+};
+
+// Result of a deadline-bounded spawn. timed_out implies the stop command
+// was attempted; error_message explains the outcome in every case.
+struct BoundedResult {
+  std::string output{};
+  int exit_code{-1};
+  bool timed_out{false};
+  std::string error_message{};
+};
+
 class SandboxService {
 private:
   static std::map<std::string, SandboxConfig> sandbox_configs_;
@@ -37,7 +53,6 @@ private:
   static void ensure_sandbox_directory();
   static void initialize_default_configs();
   static std::string generate_container_name();
-  static std::string escape_shell_arg(const std::string &arg);
 
 public:
   // Sandbox management
@@ -75,14 +90,21 @@ public:
   static bool remove_container(const std::string &container_name);
   static void cleanup_old_containers();
 
+  static bool is_docker_available();
+  // Process spawning without a host shell: POSIX fork/execvp, Windows
+  // CreateProcess with deterministic CRT quoting. Declared public as
+  // documented test seams; see the timeout and argv tests.
+  static SpawnedResult
+  spawn_capture(const std::vector<std::string> &argv);
+  static BoundedResult
+  run_bounded(const std::vector<std::string> &argv,
+              const std::vector<std::string> &stop_argv, int timeout_seconds,
+              int stop_timeout_seconds);
+  static std::vector<std::string>
+  build_docker_argv(const SandboxConfig &config, const std::string &command,
+                    const std::string &container_name);
   // Security validation
   static bool is_command_safe(const std::string &command);
-  static bool is_docker_available();
-  // Test seam: renders the exact docker invocation for a config. Every
-  // config-derived field is shell-quoted so hostile values are inert.
-  static std::string
-  build_docker_command(const SandboxConfig &config, const std::string &command,
-                       const std::string &container_name);
   // Renders a SandboxResult the way callers display it. Pure.
   static std::string format_result(const SandboxResult &result);
   static bool validate_sandbox_config(const SandboxConfig &config,
