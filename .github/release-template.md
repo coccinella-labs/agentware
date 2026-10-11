@@ -1,19 +1,6 @@
 ##  What's New
 
-###  Features
--
-
-###  Bug Fixes
--
-
-###  Improvements
--
-
-###  Documentation
--
-
-###  Security
--
+{generated_notes}
 
 ##  Installation
 

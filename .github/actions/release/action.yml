@@ -39,6 +39,8 @@ runs:
     - name: notes
       id: release_notes
       shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
       run: |
         # get previous tag
         PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
@@ -46,10 +48,25 @@ runs:
           PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
         fi
 
+        TAG="v${{ steps.version.outputs.version }}"
+
         # read template
         RELEASE_NOTES=$(cat .github/release-template.md | \
           sed "s/{previous_tag}/$PREVIOUS_TAG/g" | \
-          sed "s/{current_tag}/v${{ steps.version.outputs.version }}/g")
+          sed "s/{current_tag}/$TAG/g")
+
+        # The template alone ships blank sections, so fill the changelog from
+        # merged pull requests. Without this the published body is an empty form.
+        # sed's r command inserts the file verbatim, which avoids quoting traps
+        # with authors, URLs, and markdown in the generated text.
+        NOTES_FILE=$(mktemp)
+        gh api "repos/${{ github.repository }}/releases/generate-notes" \
+          -f tag_name="$TAG" -f previous_tag_name="$PREVIOUS_TAG" --jq '.body' > "$NOTES_FILE" 2>/dev/null || true
+        if [ ! -s "$NOTES_FILE" ]; then
+          printf '%s\n' '(no merged pull requests since the previous tag)' > "$NOTES_FILE"
+        fi
+        RELEASE_NOTES=$(printf '%s\n' "$RELEASE_NOTES" | \
+          sed -e "/{generated_notes}/ {" -e "r $NOTES_FILE" -e "d" -e "}")
         echo "notes<<EOF" >> $GITHUB_OUTPUT
         echo "$RELEASE_NOTES" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
