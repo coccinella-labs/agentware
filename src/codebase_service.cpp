@@ -54,9 +54,10 @@ std::string CodebaseService::find_main_components(const std::string &path) {
   std::ostringstream result;
   result << "Main Components Analysis:\n\n";
 
-  // Look for main directories
-  std::vector<std::string> main_dirs;
-  for (const auto &entry : std::filesystem::directory_iterator(path)) {
+  try {
+    // Look for main directories
+    std::vector<std::string> main_dirs;
+    for (const auto &entry : std::filesystem::directory_iterator(path)) {
     if (entry.is_directory()) {
       std::string dir_name = entry.path().filename().string();
       if (dir_name[0] != '.' && dir_name != "node_modules" &&
@@ -91,7 +92,12 @@ std::string CodebaseService::find_main_components(const std::string &path) {
     }
   }
 
-  return result.str();
+    return result.str();
+  } catch (const std::exception &e) {
+    // Unreadable paths (missing, permissions, races) must report an
+    // error, never terminate the session with an uncaught throw.
+    return "Error: cannot list components in '" + path + "': " + e.what();
+  }
 }
 
 std::vector<std::string> CodebaseService::find_todos(const std::string &path) {
