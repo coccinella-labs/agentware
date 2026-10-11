@@ -70,8 +70,11 @@ public:
   static std::string get_repo_info(const std::string &owner,
                                    const std::string &repo);
   static std::vector<GitHubIssue> get_issues(const std::string &owner,
-                                             const std::string &repo,
-                                             const std::string &state = "open");
+                                              const std::string &repo,
+                                              const std::string &state = "open");
+  // Pure payload parser, directly unit-testable without network.
+  static std::vector<GitHubIssue>
+  parse_issues(const std::string &payload);
   static GitHubIssue create_issue(const std::string &owner,
                                   const std::string &repo,
                                   const std::string &title,

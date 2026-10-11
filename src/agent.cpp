@@ -605,15 +605,19 @@ void Agent::handle_direct_command(const std::string &input) {
       std::string repo_spec = trim_copy(params.substr(7));
       std::string owner, repo;
       if (parse_repo_spec(repo_spec, owner, repo)) {
-        auto issues = Services::GitHubService::get_issues(owner, repo);
-        if (issues.empty()) {
-          result = "No issues found";
-        } else {
-          result = "Found " + std::to_string(issues.size()) + " issues:\n";
-          for (const auto &issue : issues) {
-            result +=
-                "#" + std::to_string(issue.number) + ": " + issue.title + "\n";
+        try {
+          auto issues = Services::GitHubService::get_issues(owner, repo);
+          if (issues.empty()) {
+            result = "No issues found";
+          } else {
+            result = "Found " + std::to_string(issues.size()) + " issues:\n";
+            for (const auto &issue : issues) {
+              result += "#" + std::to_string(issue.number) + ": " +
+                        issue.title + "\n";
+            }
           }
+        } catch (const std::exception &e) {
+          result = "Error: " + std::string(e.what());
         }
       } else {
         result = "Usage: github:issues:owner/repo";
@@ -622,7 +626,11 @@ void Agent::handle_direct_command(const std::string &input) {
       std::string repo_spec = trim_copy(params.substr(7));
       std::string owner, repo;
       if (parse_repo_spec(repo_spec, owner, repo)) {
-        result = Services::GitHubService::run_health_check(owner, repo);
+        try {
+          result = Services::GitHubService::run_health_check(owner, repo);
+        } catch (const std::exception &e) {
+          result = "Error: " + std::string(e.what());
+        }
       } else {
         result = "Usage: github:health:owner/repo";
       }

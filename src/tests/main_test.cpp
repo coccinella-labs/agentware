@@ -759,6 +759,37 @@ TEST(ReplaceEmptyPatternTest, ReturnsPromptlyWithError) {
   fs::remove_all(dir, ec);
 }
 
+// A3: nullable issue fields degrade to defaults instead of discarding a
+// valid listing.
+TEST(ParseIssuesTest, NullFieldsDegradeGracefully) {
+  const char *payload = R"([
+    {"number": 7, "title": null, "body": null, "state": "open",
+     "labels": null, "assignee": null,
+     "milestone": {"number": 3}},
+    {"number": 8, "title": "T", "body": "B", "state": "closed",
+     "labels": [{"name": "bug"}], "assignee": {"login": "u"}}
+  ])";
+  auto issues = Services::GitHubService::parse_issues(payload);
+  ASSERT_EQ(issues.size(), 2u);
+  EXPECT_EQ(issues[0].number, 7);
+  EXPECT_EQ(issues[0].title, "");
+  EXPECT_EQ(issues[0].body, "");
+  EXPECT_EQ(issues[0].state, "open");
+  EXPECT_TRUE(issues[0].labels.empty());
+  EXPECT_TRUE(issues[0].assignees.empty());
+  EXPECT_EQ(issues[0].milestone, 3);
+  EXPECT_EQ(issues[1].title, "T");
+  EXPECT_EQ(issues[1].labels.size(), 1u);
+  EXPECT_EQ(issues[1].assignees.size(), 1u);
+}
+
+TEST(ParseIssuesTest, MalformedPayloadThrows) {
+  EXPECT_THROW(Services::GitHubService::parse_issues("not json"),
+               std::runtime_error);
+  EXPECT_THROW(Services::GitHubService::parse_issues("{\"a\":1}"),
+               std::runtime_error);
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

@@ -120,6 +120,15 @@ probe "A1 replace empty pattern errors" 0 "Error: old text cannot be empty" \
 probe "A2 components bad path errors" 0 "Error: cannot list components" \
   "2" "1" "components:/nonexistent_xyz_123" "exit"
 
+# A3: github: API failures must error, not kill the session. A nonexistent
+# repo fails deterministically in every environment (offline DNS failure
+# or API 404 both throw inside the service); the exact message varies by
+# environment, so assert the controlled-Error shape, not the text.
+probe "A3 issues API failure errors" 0 "Error:" \
+  "2" "1" "github:issues:no-such-owner-xyz/no-such-repo-xyz" "exit"
+probe "A3 health API failure errors" 0 "Error:" \
+  "2" "1" "github:health:no-such-owner-xyz/no-such-repo-xyz" "exit"
+
 # R-02: malformed replace: count must error, not crash.
 probe "R-02 replace non-numeric count errors" 0 "Error: invalid expected count" \
   "2" "1" "replace:sample.txt:old:new:abc" "exit"

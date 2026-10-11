@@ -73,7 +73,6 @@ std::string GitHubService::get_repo_info(const std::string &owner,
 std::vector<GitHubIssue> GitHubService::get_issues(const std::string &owner,
                                                    const std::string &repo,
                                                    const std::string &state) {
-  std::vector<GitHubIssue> issues;
   std::string endpoint =
       "/repos/" + owner + "/" + repo + "/issues?state=" + state;
 
@@ -85,24 +84,53 @@ std::vector<GitHubIssue> GitHubService::get_issues(const std::string &owner,
   }
 
   try {
-    nlohmann::json json = nlohmann::json::parse(response.content);
+    return parse_issues(response.content);
+  } catch (const std::exception &e) {
+    throw std::runtime_error("Error parsing issues: " + std::string(e.what()));
+  }
+}
+
+std::vector<GitHubIssue>
+GitHubService::parse_issues(const std::string &payload) {
+  std::vector<GitHubIssue> issues;
+  nlohmann::json json;
+  try {
+    json = nlohmann::json::parse(payload);
+  } catch (const std::exception &e) {
+    throw std::runtime_error("Error parsing issues: " + std::string(e.what()));
+  }
+  if (!json.is_array()) {
+    throw std::runtime_error("expected a JSON array of issues");
+  }
+  try {
     for (const auto &item : json) {
       GitHubIssue issue;
       issue.number = item["number"];
-      issue.title = item["title"];
-      issue.body = item.value("body", "");
-      issue.state = item["state"];
+      auto text_or_empty = [](const nlohmann::json &o, const char *key) {
+        auto it = o.find(key);
+        if (it == o.end() || it->is_null()) {
+          return std::string{};
+        }
+        return it->get<std::string>();
+      };
+      issue.title = text_or_empty(item, "title");
+      issue.body = text_or_empty(item, "body");
+      issue.state = text_or_empty(item, "state");
 
-      for (const auto &label : item["labels"]) {
-        issue.labels.push_back(label["name"]);
+      if (item.contains("labels") && item["labels"].is_array()) {
+        for (const auto &label : item["labels"]) {
+          issue.labels.push_back(label.value("name", ""));
+        }
       }
 
-      if (!item["assignee"].is_null()) {
-        issue.assignees.push_back(item["assignee"]["login"]);
+      if (item.contains("assignee") && !item["assignee"].is_null() &&
+          item["assignee"].is_object()) {
+        issue.assignees.push_back(item["assignee"].value("login", ""));
       }
 
-      if (!item["milestone"].is_null()) {
-        issue.milestone = item["milestone"]["number"];
+      if (item.contains("milestone") && !item["milestone"].is_null() &&
+          item["milestone"].is_object()) {
+        issue.milestone = item["milestone"].value("number", 0);
       }
 
       issues.push_back(issue);
