@@ -267,21 +267,26 @@ if(TARGET cpr::cpr)
     set(CPR_FOUND TRUE)
 else()
     # If not found, try to find the library directly
-    find_library(CPR_LIBRARY NAMES cpr)
-    find_path(CPR_INCLUDE_DIR NAMES cpr/cpr.h)
+    # But skip this on macOS in CI to avoid broken Homebrew cpr package
+    if(NOT (APPLE AND (DEFINED ENV{CI} OR DEFINED ENV{GITHUB_ACTIONS})))
+        find_library(CPR_LIBRARY NAMES cpr)
+        find_path(CPR_INCLUDE_DIR NAMES cpr/cpr.h)
 
-    if(CPR_LIBRARY AND CPR_INCLUDE_DIR)
-        message(STATUS "Found CPR (library): ${CPR_LIBRARY}")
-        add_library(cpr::cpr INTERFACE IMPORTED)
-        target_include_directories(cpr::cpr INTERFACE ${CPR_INCLUDE_DIR})
-        target_link_libraries(cpr::cpr INTERFACE
-            ${CPR_LIBRARY}
-            CURL::libcurl
-            OpenSSL::SSL
-            OpenSSL::Crypto
-            ${ZLIB_TARGET}
-        )
-        set(CPR_FOUND TRUE)
+        if(CPR_LIBRARY AND CPR_INCLUDE_DIR)
+            message(STATUS "Found CPR (library): ${CPR_LIBRARY}")
+            add_library(cpr::cpr INTERFACE IMPORTED)
+            target_include_directories(cpr::cpr INTERFACE ${CPR_INCLUDE_DIR})
+            target_link_libraries(cpr::cpr INTERFACE
+                ${CPR_LIBRARY}
+                CURL::libcurl
+                OpenSSL::SSL
+                OpenSSL::Crypto
+                ${ZLIB_TARGET}
+            )
+            set(CPR_FOUND TRUE)
+        endif()
+    else()
+        message(STATUS "Skipping system CPR library search on macOS CI")
     endif()
 endif()
 
