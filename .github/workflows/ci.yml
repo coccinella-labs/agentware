@@ -237,3 +237,4 @@ jobs:
           token: ${
             { secrets.RELEASE_TOKEN != '' && secrets.RELEASE_TOKEN
             || secrets.GITHUB_TOKEN }}
+# CI workflow
