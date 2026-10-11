@@ -134,9 +134,11 @@ jobs:
             echo "**Overall:** $OVERALL (${AVG}%)"
           } | tee report.md
 
-          echo "report<<EOF" >> "$GITHUB_OUTPUT"
-          cat report.md >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          {
+            echo "report<<EOF"
+            cat report.md
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: post health report
         uses: actions/github-script@v8
