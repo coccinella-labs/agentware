@@ -1,7 +1,18 @@
 #include "version.h"
-#include "agent.h"
 #include "memory_manager.h"
+#include "search_service.h"
 #include "validation.h"
+// NOTE: do not include agent.h here. It defines Agent with defaulted move
+// operations over unique_ptr<Services::AIService>, which is only forward
+// declared there; MSVC instantiates the deleter eagerly and fails, while
+// GCC/Clang defer it. The tests below need only the two persistence helpers,
+// so forward-declare exactly those. A signature mismatch fails loudly at
+// link time.
+namespace Core {
+void record_interaction(Data::MemoryManager &memory, const std::string &tag,
+                        const std::string &result);
+void record_global_fact(Data::MemoryManager &memory, const std::string &fact);
+} // namespace Core
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
