@@ -607,7 +607,10 @@ if(LCOV_EXE)
         COMMAND ${LCOV_EXE} --capture --directory ${CMAKE_BINARY_DIR} --output-file ${CMAKE_BINARY_DIR}/coverage/coverage.info --exclude '/usr/*' --exclude '*/tests/*' --exclude '*/_deps/*'
         COMMAND ${LCOV_EXE} --list ${CMAKE_BINARY_DIR}/coverage/coverage.info
         COMMAND ${GENHTML_EXE} ${CMAKE_BINARY_DIR}/coverage/coverage.info --output-directory ${CMAKE_BINARY_DIR}/coverage/html
-        DEPENDS agentware-tests
+        # ctest also runs remediation_probes, which launches the REPL binary.
+        # Build both test executables before running the coverage target so a
+        # fresh CI workspace does not fail with agentware-agent missing.
+        DEPENDS agentware-tests agentware-agent
         COMMENT "Running tests and generating code coverage report"
     )
 endif()
