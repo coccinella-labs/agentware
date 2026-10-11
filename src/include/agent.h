@@ -1,6 +1,7 @@
 #pragma once
 #include "agent_mode.h"
 #include "config.h" // For AGENTWARE_API
+#include "search_service.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -26,6 +27,8 @@ private:
   // Using raw pointers with PIMPL idiom would be better for ABI stability
   std::unique_ptr<Data::MemoryManager> memory_;
   std::unique_ptr<Services::AIService> ai_service_;
+  // Tool capabilities detected once at startup; see detect_search_capabilities.
+  Services::SearchCapabilities search_caps_;
   int command_count_{0};
   long long token_usage_{0};
 
@@ -83,4 +86,18 @@ public:
 
   void run();
 };
+
+// Records one interaction in persistent memory without letting a persistence
+// failure terminate the session. Catches only std::runtime_error from the
+// persistence layer, warns explicitly, and continues. A failed write is never
+// reported as saved. Declared here (rather than hidden in agent.cpp) so tests
+// can exercise the boundary directly; see MemoryPersistenceBoundary tests.
+void record_interaction(Data::MemoryManager &memory, const std::string &tag,
+                        const std::string &result);
+
+// Same boundary for global facts. Note: MemoryManager::save_global_fact
+// silently skips unwritable paths instead of throwing, so this helper guards
+// the throwing cases; the silent-drop behavior is unchanged and documented in
+// the tests.
+void record_global_fact(Data::MemoryManager &memory, const std::string &fact);
 } // namespace Core

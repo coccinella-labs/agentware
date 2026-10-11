@@ -41,6 +41,33 @@ namespace Core {
 Agent::Agent()
     : memory_(std::make_unique<Data::MemoryManager>()), ai_service_(nullptr) {}
 
+// The session must survive a persistence failure: a memory-write error must
+// warn and continue, never terminate the REPL and never claim the write
+// succeeded. Only std::runtime_error from the persistence call is caught;
+// anything else propagates as before.
+void record_interaction(Data::MemoryManager &memory, const std::string &tag,
+                        const std::string &result) {
+  try {
+    memory.save_interaction(tag, result);
+  } catch (const std::runtime_error &e) {
+    Utils::UI::print_warning(
+        std::string("Memory persistence failed, interaction kept in session "
+                    "only (not saved): ") +
+        e.what());
+  }
+}
+
+void record_global_fact(Data::MemoryManager &memory, const std::string &fact) {
+  try {
+    memory.save_global_fact(fact);
+  } catch (const std::runtime_error &e) {
+    Utils::UI::print_warning(
+        std::string("Memory persistence failed, fact kept in session "
+                    "only (not saved): ") +
+        e.what());
+  }
+}
+
 Agent::~Agent() {
   // Destructor defined here because unique_ptr types are forward declared
 }
@@ -57,6 +84,11 @@ static inline std::string trim_copy(const std::string &s) {
 }
 
 void Agent::run() {
+  // One-time tool discovery: which external search binaries exist on PATH.
+  // The flags live on the Agent for the whole session; every search and every
+  // system prompt reads them instead of re-detecting or assuming.
+  search_caps_ = Services::detect_search_capabilities();
+
   initialize_mode();
 
   // Data-driven model name mapping
@@ -279,7 +311,7 @@ void Agent::handle_direct_command(const std::string &input) {
         }
       }
       result = Services::WebService::search(query);
-      memory_->save_interaction("search:" + query, result);
+      record_interaction(*memory_, "search:" + query, result);
     }
   } else if (input.rfind("cmd:", 0) == 0) {
     std::string command = trim_copy(input.substr(4));
@@ -293,13 +325,13 @@ void Agent::handle_direct_command(const std::string &input) {
       std::getline(std::cin, confirm);
       if (confirm != "y" && confirm != "Y") {
         result = "Command cancelled by user";
-        memory_->save_interaction("cmd:" + command, result);
+        record_interaction(*memory_, "cmd:" + command, result);
         std::cout << result << std::endl;
         return;
       }
     }
     result = Services::CommandService::execute(command);
-    memory_->save_interaction("cmd:" + command, result);
+    record_interaction(*memory_, "cmd:" + command, result);
   } else if (input.rfind("read:", 0) == 0) {
     std::string params = trim_copy(input.substr(5));
     // Check if it has range parameters: read:filename:start:count
@@ -331,7 +363,7 @@ void Agent::handle_direct_command(const std::string &input) {
         result = Services::FileService::read_file(params);
       }
     }
-    memory_->save_interaction("read:" + params, result);
+    record_interaction(*memory_, "read:" + params, result);
   } else if (input.rfind("write:", 0) == 0) {
     // Format: write:filename content...
     size_t space_pos = input.find(' ', 6); // index 6 is safe for "write:"
@@ -345,7 +377,7 @@ void Agent::handle_direct_command(const std::string &input) {
         result = "Error: " + validation.error_message;
       } else {
         result = Services::FileService::write_file(filename, content);
-        memory_->save_interaction("write:" + filename, result);
+        record_interaction(*memory_, "write:" + filename, result);
       }
     } else {
       result = "Usage: write:filename content";
@@ -374,7 +406,7 @@ void Agent::handle_direct_command(const std::string &input) {
       auto edit_result = Services::FileService::replace_text_in_file(
           filename, old_text, new_text, expected);
       result = edit_result.message;
-      memory_->save_interaction("replace:" + filename, result);
+      record_interaction(*memory_, "replace:" + filename, result);
     } else {
       result = "Usage: replace:filename:old_text:new_text[:expected_count]";
     }
@@ -396,22 +428,31 @@ void Agent::handle_direct_command(const std::string &input) {
     std::string directory = (parts.size() > 1) ? parts[1] : ".";
     std::string filter = (parts.size() > 2) ? parts[2] : "*";
 
-    auto search_results =
-        Services::FileService::search_in_directory(directory, pattern, filter);
+    Services::SearchOptions search_options;
+    search_options.directory = directory;
+    search_options.pattern = pattern;
+    search_options.file_filter = filter;
+    auto search_result =
+        Services::search_code(search_caps_, search_options);
 
-    if (search_results.empty()) {
+    if (search_result.matches.empty()) {
       result = "No matches found for pattern: " + pattern;
     } else {
-      result = "Found " + std::to_string(search_results.size()) + " matches:\n";
-      for (const auto &match : search_results) {
+      result = "Found " + std::to_string(search_result.matches.size()) +
+               " matches (via " + search_result.backend_used + "):\n";
+      for (const auto &match : search_result.matches) {
         result += match.file_path + ":" + std::to_string(match.line_number) +
                   ": " + match.line_content + "\n";
       }
+      if (search_result.truncated) {
+        result += "(output truncated at the search limit; narrow the pattern "
+                  "or directory for the rest)\n";
+      }
     }
-    memory_->save_interaction("grep:" + pattern, result);
+    record_interaction(*memory_, "grep:" + pattern, result);
   } else if (input.rfind("remember:", 0) == 0) {
     std::string fact = trim_copy(input.substr(9));
-    memory_->save_global_fact(fact);
+    record_global_fact(*memory_, fact);
     result = "Remembered: " + fact;
   } else if (input.rfind("forget", 0) == 0) {
     memory_->clear_global_memory();
@@ -429,14 +470,14 @@ void Agent::handle_direct_command(const std::string &input) {
       path = "."; // Current directory
     }
     result = Services::CodebaseService::analyze_structure(path);
-    memory_->save_interaction("analyze:" + path, result);
+    record_interaction(*memory_, "analyze:" + path, result);
   } else if (input.rfind("components:", 0) == 0) {
     std::string path = trim_copy(input.substr(11));
     if (path.empty()) {
       path = "."; // Current directory
     }
     result = Services::CodebaseService::find_main_components(path);
-    memory_->save_interaction("components:" + path, result);
+    record_interaction(*memory_, "components:" + path, result);
   } else if (input.rfind("todos:", 0) == 0) {
     std::string path = trim_copy(input.substr(6));
     if (path.empty()) {
@@ -451,7 +492,7 @@ void Agent::handle_direct_command(const std::string &input) {
         result += todo + "\n";
       }
     }
-    memory_->save_interaction("todos:" + path, result);
+    record_interaction(*memory_, "todos:" + path, result);
   } else if (input.rfind("git:", 0) == 0) {
     std::string params = trim_copy(input.substr(4));
     std::string path = "."; // Default to current directory
@@ -465,14 +506,14 @@ void Agent::handle_direct_command(const std::string &input) {
     } else {
       result = "Usage: git:log, git:status, git:analyze";
     }
-    memory_->save_interaction("git:" + params, result);
+    record_interaction(*memory_, "git:" + params, result);
   } else if (input.rfind("tree:", 0) == 0) {
     std::string path = trim_copy(input.substr(5));
     if (path.empty()) {
       path = "."; // Current directory
     }
     result = Services::CodebaseService::get_directory_tree(path, 3);
-    memory_->save_interaction("tree:" + path, result);
+    record_interaction(*memory_, "tree:" + path, result);
   } else if (input.rfind("github:", 0) == 0) {
     std::string params = trim_copy(input.substr(7));
     auto parse_repo_spec = [](const std::string &repo_spec, std::string &owner,
@@ -522,7 +563,7 @@ void Agent::handle_direct_command(const std::string &input) {
       result = "Usage: github:repo:owner/repo, github:issues:owner/repo, "
                "github:health:owner/repo";
     }
-    memory_->save_interaction("github:" + params, result);
+    record_interaction(*memory_, "github:" + params, result);
   } else {
     result = "Unknown command";
   }
@@ -554,6 +595,9 @@ void Agent::handle_ai_chat(const std::string &input) {
   if (!hierarchical_context.empty()) {
     full_context = hierarchical_context + "\n\n" + memory_context;
   }
+  // Tell the model which search tools actually exist, so it asks for real
+  // commands instead of inventing them.
+  full_context += "\n\n" + Services::search_tool_prompt(search_caps_);
 
   std::string response = ai_service_->chat(input, full_context);
 
@@ -563,7 +607,7 @@ void Agent::handle_ai_chat(const std::string &input) {
 
   if (!response.empty()) {
     std::cout << response << std::endl;
-    memory_->save_interaction(input, response);
+    record_interaction(*memory_, input, response);
   } else {
     std::cout << "No response\n";
   }
@@ -605,7 +649,7 @@ void Agent::handle_shell_command(const std::string &input) {
 
   std::string result = Services::CommandService::execute(command);
   std::cout << result << std::endl;
-  memory_->save_interaction("!" + command, result);
+  record_interaction(*memory_, "!" + command, result);
 }
 
 void Agent::handle_meta_command(const std::string &input) {
@@ -860,7 +904,17 @@ void Agent::handle_chat_management(const std::string &command) {
       std::cout << "Usage: /chat save <tag>" << std::endl;
       return;
     }
-    memory_->save_conversation_state(tag);
+    // Same boundary as record_interaction: a persistence failure warns and
+    // continues instead of terminating the session.
+    try {
+      memory_->save_conversation_state(tag);
+    } catch (const std::runtime_error &e) {
+      Utils::UI::print_warning(
+          std::string("Memory persistence failed, conversation state not "
+                      "saved: ") +
+          e.what());
+      return;
+    }
     std::cout << "Conversation saved as: " << tag << std::endl;
   } else if (command.rfind("resume ", 0) == 0) {
     std::string tag = trim_copy(command.substr(7));
@@ -941,7 +995,7 @@ void Agent::add_to_memory(const std::string &text) {
     std::cout << "Usage: /memory add <text>" << std::endl;
     return;
   }
-  memory_->save_global_fact(text);
+  record_global_fact(*memory_, text);
   std::cout << "Added to memory: " << text << std::endl;
 }
 
@@ -1097,7 +1151,7 @@ void Agent::handle_multi_file_command(const std::string &command) {
   std::cout << formatted << std::endl;
 
   // Save to memory for AI context
-  memory_->save_interaction("/files " + command, formatted);
+  record_interaction(*memory_, "/files " + command, formatted);
 }
 
 void Agent::handle_web_fetch_command(const std::string &command) {
@@ -1168,14 +1222,14 @@ void Agent::handle_web_fetch_command(const std::string &command) {
 
     if (!response.empty()) {
       std::cout << "\nAI Summary:\n" << response << std::endl;
-      memory_->save_interaction("web_fetch_summary", response);
+      record_interaction(*memory_, "web_fetch_summary", response);
     }
   }
 
   std::cout << result << std::endl;
 
   // Save to memory for AI context
-  memory_->save_interaction("/fetch " + command, result);
+  record_interaction(*memory_, "/fetch " + command, result);
 }
 
 void Agent::handle_checkpoint_command(const std::string &command) {
@@ -1354,7 +1408,7 @@ void Agent::handle_checkpoint_command(const std::string &command) {
   }
 
   // Save to memory for AI context
-  memory_->save_interaction("/checkpoint " + command,
+  record_interaction(*memory_, "/checkpoint " + command,
                             "Checkpoint command executed");
 }
 
@@ -1628,7 +1682,7 @@ void Agent::handle_mcp_command(const std::string &command) {
   }
 
   // Save to memory for AI context
-  memory_->save_interaction("/mcp " + command, "MCP command executed");
+  record_interaction(*memory_, "/mcp " + command, "MCP command executed");
 }
 
 void Agent::handle_theme_command(const std::string &command) {
@@ -1713,7 +1767,7 @@ void Agent::handle_theme_command(const std::string &command) {
     std::cout << "Error: " << e.what() << std::endl;
   }
 
-  memory_->save_interaction("/theme " + command, "Theme command executed");
+  record_interaction(*memory_, "/theme " + command, "Theme command executed");
 }
 
 void Agent::handle_auth_command(const std::string &command) {
@@ -1831,7 +1885,7 @@ void Agent::handle_auth_command(const std::string &command) {
     std::cout << "Error: " << e.what() << std::endl;
   }
 
-  memory_->save_interaction("/auth " + command, "Auth command executed");
+  record_interaction(*memory_, "/auth " + command, "Auth command executed");
 }
 
 void Agent::handle_sandbox_command(const std::string &command) {
@@ -1932,7 +1986,7 @@ void Agent::handle_sandbox_command(const std::string &command) {
     std::cout << "Error: " << e.what() << std::endl;
   }
 
-  memory_->save_interaction("/sandbox " + command, "Sandbox command executed");
+  record_interaction(*memory_, "/sandbox " + command, "Sandbox command executed");
 }
 
 void Agent::handle_error_command(const std::string &command) {
@@ -2004,6 +2058,6 @@ void Agent::handle_error_command(const std::string &command) {
     std::cout << "Error: " << e.what() << std::endl;
   }
 
-  memory_->save_interaction("/error " + command, "Error command executed");
+  record_interaction(*memory_, "/error " + command, "Error command executed");
 }
 } // namespace Core

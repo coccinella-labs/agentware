@@ -91,6 +91,15 @@ void MemoryManager::save_interaction(const std::string &user_input,
   file << "User: " << user_input << "\n";
   file << "Assistant: " << response << "\n";
   file << "---\n"; // Separator for better readability
+
+  // Without this, a mid-write failure (disk full) sets failbit silently and
+  // leaves a partial entry with no error. Flush and check so partial writes
+  // become the same explicit failure as an unopenable file.
+  file.flush();
+  if (!file.good()) {
+    throw std::runtime_error("Failed to write interaction to memory file: " +
+                             memory_file_);
+  }
 }
 
 void MemoryManager::clear_memory() {
