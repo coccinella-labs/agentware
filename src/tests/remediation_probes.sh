@@ -112,6 +112,10 @@ probe "R-01 read non-numeric count errors" 0 "Error: invalid line range" \
 probe "R-01 read valid range still works" 0 "beta" \
   "2" "1" "read:sample.txt:1:1" "exit"
 
+# A1: replace: with an empty pattern must error, not hang.
+probe "A1 replace empty pattern errors" 0 "Error: old text cannot be empty" \
+  "2" "1" "replace:sample.txt::new" "exit"
+
 # R-02: malformed replace: count must error, not crash.
 probe "R-02 replace non-numeric count errors" 0 "Error: invalid expected count" \
   "2" "1" "replace:sample.txt:old:new:abc" "exit"

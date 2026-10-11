@@ -112,6 +112,13 @@ FileEditResult FileService::replace_text_in_file(const std::string &filename,
   FileEditResult result = {false, "", 0};
 
   try {
+    // An empty pattern matches at every position without advancing and
+    // hangs the loops below; reject it before touching the file.
+    if (old_text.empty()) {
+      result.message = "Error: old text cannot be empty";
+      return result;
+    }
+
     if (!file_exists(filename)) {
       result.message = "Error: File '" + filename + "' does not exist";
       return result;

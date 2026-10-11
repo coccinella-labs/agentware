@@ -1,4 +1,5 @@
 #include "context_service.h"
+#include "file_service.h"
 #include "github_service.h"
 #include "sandbox_service.h"
 #include "validation.h"
@@ -731,6 +732,31 @@ TEST(SandboxDockerTest, HangEnforcesTimeout) {
   fs::current_path(old_cwd, ec);
   fs::remove_all(dir, ec);
 #endif
+}
+
+// A1: empty replace patterns must error promptly, never hang, and leave
+// file bytes untouched.
+TEST(ReplaceEmptyPatternTest, ReturnsPromptlyWithError) {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  auto dir = fs::temp_directory_path() / "agentware_replace_test";
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  auto file = dir / "sample.txt";
+  { std::ofstream out(file); out << "hello"; }
+  auto start = std::chrono::steady_clock::now();
+  Services::FileEditResult result =
+      Services::FileService::replace_text_in_file(file.string(), "", "new",
+                                                  1);
+  auto elapsed = std::chrono::steady_clock::now() - start;
+  EXPECT_FALSE(result.success);
+  EXPECT_NE(result.message.find("Error:"), std::string::npos);
+  EXPECT_LT(elapsed, std::chrono::seconds(10));
+  std::ifstream check(file);
+  std::string content((std::istreambuf_iterator<char>(check)),
+                      std::istreambuf_iterator<char>());
+  EXPECT_EQ(content, "hello");
+  fs::remove_all(dir, ec);
 }
 
 int main(int argc, char **argv) {
