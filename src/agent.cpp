@@ -623,9 +623,97 @@ void Agent::handle_direct_command(const std::string &input) {
       } else {
         result = "Usage: github:health:owner/repo";
       }
+    } else if (params.rfind("threads:", 0) == 0) {
+      // Format: github:threads:owner/repo:pr[:query]
+      // Read-only inline review threads with original anchors. The query
+      // filters thread bodies and paths client-side; empty query lists all.
+      std::string rest = trim_copy(params.substr(8));
+      size_t sep = rest.find(':');
+      std::string repo_spec =
+          (sep == std::string::npos) ? rest : trim_copy(rest.substr(0, sep));
+      std::string tail = (sep == std::string::npos)
+                             ? ""
+                             : trim_copy(rest.substr(sep + 1));
+      size_t query_sep = tail.find(':');
+      std::string pr_text = (query_sep == std::string::npos)
+                                ? tail
+                                : trim_copy(tail.substr(0, query_sep));
+      std::string query = (query_sep == std::string::npos)
+                              ? ""
+                              : trim_copy(tail.substr(query_sep + 1));
+      std::string owner, repo;
+      int pr_number = 0;
+      if (!parse_repo_spec(repo_spec, owner, repo) || pr_text.empty() ||
+          !Utils::Validator::try_parse_int(pr_text, pr_number) ||
+          pr_number <= 0) {
+        result = "Usage: github:threads:owner/repo:pr[:query]";
+      } else {
+        try {
+          Services::ReviewThreadList listing =
+              Services::GitHubService::get_review_threads(owner, repo,
+                                                          pr_number);
+          const auto &threads = listing.threads;
+          std::string lowered_query = query;
+          std::transform(lowered_query.begin(), lowered_query.end(),
+                         lowered_query.begin(),
+                         [](unsigned char c) { return std::tolower(c); });
+          std::ostringstream out;
+          size_t shown = 0;
+          for (const auto &thread : threads) {
+            if (!lowered_query.empty()) {
+              std::string haystack = thread.body + "\n" + thread.path;
+              std::transform(haystack.begin(), haystack.end(), haystack.begin(),
+                             [](unsigned char c) { return std::tolower(c); });
+              if (haystack.find(lowered_query) == std::string::npos) {
+                continue;
+              }
+            }
+            out << "Thread " << thread.id;
+            if (!thread.author.empty()) {
+              out << " by " << thread.author;
+            }
+            out << " - " << thread.resolution;
+            if (thread.line >= 0 && !thread.path.empty()) {
+              out << " at " << thread.path << ":" << thread.line;
+            } else if (!thread.path.empty()) {
+              out << " on " << thread.path;
+            }
+            out << "\n";
+            if (thread.original_line >= 0) {
+              out << "  Original line: " << thread.original_line << "\n";
+            }
+            if (!thread.commit_id.empty()) {
+              out << "  Commit: " << thread.commit_id << "\n";
+            }
+            if (!thread.url.empty()) {
+              out << "  URL: " << thread.url << "\n";
+            }
+            std::string body = thread.body;
+            if (body.length() > 1000) {
+              body = body.substr(0, 1000) + "\n[truncated]";
+            }
+            out << "  " << body << "\n";
+            ++shown;
+          }
+          if (shown == 0) {
+            result = "No review threads found";
+          } else {
+            result = "Found " + std::to_string(shown) + " review thread(s):\n" +
+                     "Anchors are comment-time positions, not verified "
+                     "against the current revision.\n" +
+                     out.str();
+            if (listing.truncated) {
+              result += "(partial list: more pages remain beyond the page "
+                        "cap; narrow the query for the rest)\n";
+            }
+          }
+        } catch (const std::exception &e) {
+          result = "Error: " + std::string(e.what());
+        }
+      }
     } else {
       result = "Usage: github:repo:owner/repo, github:issues:owner/repo, "
-               "github:health:owner/repo";
+               "github:health:owner/repo, github:threads:owner/repo:pr[:query]";
     }
     record_interaction(*memory_, "github:" + params, result);
   } else {
@@ -1048,6 +1136,8 @@ void Agent::show_available_tools() {
   std::cout << "    github:issues:owner/repo    - List repository issues"
             << std::endl;
   std::cout << "    github:health:owner/repo    - Run health check"
+            << std::endl;
+  std::cout << "    github:threads:o/r:pr[q]     - List inline review threads"
             << std::endl;
 }
 

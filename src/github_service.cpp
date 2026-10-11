@@ -434,4 +434,130 @@ bool GitHubService::is_available() {
   return !get_github_token().empty();
 }
 
+std::vector<ReviewThread>
+GitHubService::parse_review_threads(const std::string &payload) {
+  std::vector<ReviewThread> threads;
+  try {
+    nlohmann::json items = nlohmann::json::parse(payload);
+    if (!items.is_array()) {
+      throw std::runtime_error("expected a JSON array of review comments");
+    }
+    for (const auto &item : items) {
+      ReviewThread thread;
+      thread.id = item.value("id", 0LL);
+      thread.path = item.value("path", "");
+      // The API reports absent positions as explicit nulls; value() only
+      // defaults missing keys, so resolve nulls here before converting.
+      auto optional_line = [](const nlohmann::json &o, const char *key) {
+        auto it = o.find(key);
+        if (it == o.end() || it->is_null()) {
+          return -1;
+        }
+        return it->get<int>();
+      };
+      thread.line = optional_line(item, "line");
+      thread.original_line = optional_line(item, "original_line");
+      thread.commit_id = item.value("commit_id", "");
+      thread.original_commit_id = item.value("original_commit_id", "");
+      thread.diff_hunk = item.value("diff_hunk", "");
+      // Stored verbatim: bodies are untrusted third-party text and must
+      // never be interpreted, only displayed.
+      thread.body = item.value("body", "");
+      if (item.contains("user") && item["user"].is_object()) {
+        thread.author = item["user"].value("login", "");
+      }
+      thread.url = item.value("html_url", "");
+      thread.resolution = (thread.line >= 0) ? "anchored" : "unresolved";
+      threads.push_back(thread);
+    }
+  } catch (const std::exception &e) {
+    throw std::runtime_error("Error parsing review threads: " +
+                             std::string(e.what()));
+  }
+  return threads;
+}
+
+std::string GitHubService::parse_link_next(const HeaderMap &headers) {
+  auto it = headers.find("link");
+  if (it == headers.end()) {
+    return "";
+  }
+  // Link: <url>; rel="next", <url>; rel="last", ...
+  std::string rest = it->second;
+  size_t pos = 0;
+  while (pos < rest.size()) {
+    size_t open = rest.find('<', pos);
+    if (open == std::string::npos) {
+      break;
+    }
+    size_t close = rest.find('>', open + 1);
+    if (close == std::string::npos) {
+      break;
+    }
+    std::string url = rest.substr(open + 1, close - open - 1);
+    size_t comma = rest.find(',', close + 1);
+    std::string params =
+        rest.substr(close + 1, comma == std::string::npos
+                                     ? std::string::npos
+                                     : comma - close - 1);
+    if (params.find("rel=\"next\"") != std::string::npos) {
+      return url;
+    }
+    if (comma == std::string::npos) {
+      break;
+    }
+    pos = comma + 1;
+  }
+  return "";
+}
+
+ReviewThreadList GitHubService::collect_review_threads(
+    const std::function<WebResponse(const std::string &)> &fetch,
+    const std::string &first_url) {
+  static const int kMaxPages = 5;
+  ReviewThreadList list;
+  std::string url = first_url;
+
+  for (int page = 0; page < kMaxPages; ++page) {
+    WebResponse response = fetch(url);
+    if (!response.success) {
+      throw std::runtime_error("Failed to fetch review threads: " +
+                               response.error_message);
+    }
+    std::vector<ReviewThread> page_threads =
+        parse_review_threads(response.content);
+    list.threads.insert(list.threads.end(), page_threads.begin(),
+                        page_threads.end());
+
+    std::string next = parse_link_next(response.headers);
+    if (next.empty()) {
+      return list;
+    }
+    url = next;
+  }
+  // Page cap reached with another page remaining: report truncation so a
+  // partial list is never presented as complete.
+  list.truncated = true;
+  return list;
+}
+
+ReviewThreadList
+GitHubService::get_review_threads(const std::string &owner,
+                                  const std::string &repo, int pr_number) {
+  std::string first_url = get_api_base_url() + "/repos/" + owner + "/" +
+                          repo + "/pulls/" + std::to_string(pr_number) +
+                          "/comments?per_page=100";
+  auto fetch = [](const std::string &url) {
+    HeaderMap headers;
+    std::string token = get_github_token();
+    if (!token.empty()) {
+      headers["Authorization"] = "Bearer " + token;
+    }
+    headers["Accept"] = "application/vnd.github.v3+json";
+    headers["User-Agent"] = "agentware-agent/1.0";
+    return WebService::fetch_with_headers(url, headers);
+  };
+  return collect_review_threads(fetch, first_url);
+}
+
 } // namespace Services

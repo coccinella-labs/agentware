@@ -218,6 +218,16 @@ probe_absent "R-10 stats reports no phantom token usage" 0 "Token Usage" \
 probe "R-10 stats still reports commands" 0 "Commands Processed" \
   "2" "1" "/stats" "exit"
 
+# github:threads usage errors need no network and must not crash.
+probe "threads usage on bad spec" 0 "Usage: github:threads:owner/repo:pr" \
+  "2" "1" "github:threads:bad" "exit"
+probe "threads usage on non-numeric pr" 0 "Usage: github:threads:owner/repo:pr" \
+  "2" "1" "github:threads:o/r:abc" "exit"
+probe "threads usage on missing pr" 0 "Usage: github:threads:owner/repo:pr" \
+  "2" "1" "github:threads:o/r" "exit"
+probe "threads help lists subcommand" 0 "github:threads:o/r:pr" \
+  "2" "1" "/tools" "exit"
+
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

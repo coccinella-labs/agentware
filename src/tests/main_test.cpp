@@ -237,6 +237,185 @@ TEST(GitHubAvailabilityTest, DependsOnlyOnGithubToken) {
 #endif
 }
 
+// Inline review-thread parsing from canned API payloads: no credentials,
+// no network. Anchors describe comment-time positions only.
+namespace {
+const char *kThreadPayload = R"([
+  {"id": 101, "path": "src/search_service.cpp", "line": 84,
+   "original_line": 84, "commit_id": "abc123", "original_commit_id": "abc123",
+   "diff_hunk": "@@ -80,6 +80,6 @@ context",
+   "body": "Does this fallback preserve behavior without rg?",
+   "user": {"login": "reviewer"}, "html_url": "https://example.com/c/101"},
+  {"id": 102, "path": "src/search_service.cpp", "line": 90,
+   "original_line": 84, "commit_id": "def456", "original_commit_id": "abc123",
+   "diff_hunk": "@@ -80,6 +80,6 @@ context",
+   "body": "Outdated: file moved since.",
+   "user": {"login": "reviewer"}, "html_url": "https://example.com/c/102"},
+  {"id": 103, "path": "src/old_file.cpp", "line": null,
+   "original_line": null, "commit_id": "abc123", "original_commit_id": "abc123",
+   "diff_hunk": "", "body": "File-level note, no line anchor.",
+   "user": {"login": "reviewer"}, "html_url": "https://example.com/c/103"},
+  {"id": 104, "path": "src/x.cpp", "line": 10,
+   "original_line": 10, "commit_id": "abc123", "original_commit_id": "abc123",
+   "diff_hunk": "",
+   "body": "<script>alert('x')</script> \"quoted\" & done",
+   "user": null, "html_url": "https://example.com/c/104"}
+])";
+} // namespace
+
+TEST(ReviewThreadsTest, ParsesAnchoredComment) {
+  auto threads = Services::GitHubService::parse_review_threads(kThreadPayload);
+  ASSERT_EQ(threads.size(), 4u);
+  const auto &t = threads[0];
+  EXPECT_EQ(t.id, 101);
+  EXPECT_EQ(t.path, "src/search_service.cpp");
+  EXPECT_EQ(t.line, 84);
+  EXPECT_EQ(t.original_line, 84);
+  EXPECT_EQ(t.commit_id, "abc123");
+  EXPECT_EQ(t.diff_hunk, "@@ -80,6 +80,6 @@ context");
+  EXPECT_EQ(t.body, "Does this fallback preserve behavior without rg?");
+  EXPECT_EQ(t.author, "reviewer");
+  EXPECT_EQ(t.url, "https://example.com/c/101");
+  EXPECT_EQ(t.resolution, "anchored");
+}
+
+TEST(ReviewThreadsTest, PreservesOutdatedAnchor) {
+  auto threads = Services::GitHubService::parse_review_threads(kThreadPayload);
+  const auto &t = threads[1];
+  EXPECT_EQ(t.line, 90);
+  EXPECT_EQ(t.original_line, 84);
+  EXPECT_EQ(t.original_commit_id, "abc123");
+  EXPECT_EQ(t.resolution, "anchored");
+}
+
+TEST(ReviewThreadsTest, MissingLineIsUnresolved) {
+  auto threads = Services::GitHubService::parse_review_threads(kThreadPayload);
+  const auto &t = threads[2];
+  EXPECT_EQ(t.line, -1);
+  EXPECT_EQ(t.original_line, -1);
+  // The path is preserved verbatim; resolution against the current
+  // revision (e.g. deleted files) is out of scope for the parser.
+  EXPECT_EQ(t.path, "src/old_file.cpp");
+  EXPECT_EQ(t.resolution, "unresolved");
+}
+
+TEST(ReviewThreadsTest, HostileBodyPassesThroughVerbatim) {
+  auto threads = Services::GitHubService::parse_review_threads(kThreadPayload);
+  const auto &t = threads[3];
+  EXPECT_EQ(t.body, "<script>alert('x')</script> \"quoted\" & done");
+  EXPECT_EQ(t.author, "");
+  EXPECT_EQ(t.resolution, "anchored");
+}
+
+TEST(ReviewThreadsTest, EmptyArrayMeansNoThreads) {
+  auto threads = Services::GitHubService::parse_review_threads("[]");
+  EXPECT_TRUE(threads.empty());
+}
+
+TEST(ReviewThreadsTest, MalformedPayloadThrows) {
+  EXPECT_THROW(Services::GitHubService::parse_review_threads("not json"),
+               std::runtime_error);
+  EXPECT_THROW(Services::GitHubService::parse_review_threads("{\"a\":1}"),
+               std::runtime_error);
+}
+
+TEST(ReviewThreadsTest, ParsesLinkNext) {  HeaderMap next_headers;
+  next_headers["Link"] = "<https://api.github.com/p/2>; rel=\"next\", "
+                         "<https://api.github.com/p/9>; rel=\"last\"";
+  EXPECT_EQ(Services::GitHubService::parse_link_next(next_headers),
+            "https://api.github.com/p/2");
+
+  HeaderMap no_link;
+  EXPECT_EQ(Services::GitHubService::parse_link_next(no_link), "");
+
+  HeaderMap last_only;
+  last_only["link"] = "<https://api.github.com/p/9>; rel=\"last\"";
+  EXPECT_EQ(Services::GitHubService::parse_link_next(last_only), "");
+
+  HeaderMap malformed;
+  malformed["Link"] = "not-a-link-header";
+  EXPECT_EQ(Services::GitHubService::parse_link_next(malformed), "");
+}
+
+TEST(ReviewThreadsTest, CollectsMultiplePages) {
+  auto page = [](int id, const std::string &next) {
+    Services::WebResponse response;
+    response.success = true;
+    response.status_code = 200;
+    response.content =
+        "[{\"id\":" + std::to_string(id) + ",\"path\":\"f.cpp\",\"line\":1,"
+        "\"original_line\":1,\"commit_id\":\"c\",\"original_commit_id\":"
+        "\"c\",\"diff_hunk\":\"\",\"body\":\"b\",\"user\":{\"login\":\"u\"},"
+        "\"html_url\":\"https://example.com\"}]";
+    if (!next.empty()) {
+      response.headers["Link"] = "<" + next + ">; rel=\"next\"";
+    }
+    return response;
+  };
+  auto fetch = [&](const std::string &url) -> Services::WebResponse {
+    if (url == "https://api.test/p1") {
+      return page(1, "https://api.test/p2");
+    }
+    return page(2, "");
+  };
+  auto list = Services::GitHubService::collect_review_threads(
+      fetch, "https://api.test/p1");
+  ASSERT_EQ(list.threads.size(), 2u);
+  EXPECT_EQ(list.threads[0].id, 1);
+  EXPECT_EQ(list.threads[1].id, 2);
+  EXPECT_FALSE(list.truncated);
+}
+
+TEST(ReviewThreadsTest, PageCapReportsTruncation) {
+  auto fetch = [](const std::string &url) -> Services::WebResponse {
+    Services::WebResponse response;
+    response.success = true;
+    response.status_code = 200;
+    response.content = "[]";
+    // Every page claims another follows: the cap must stop the walk and
+    // say the list is partial.
+    response.headers["Link"] = "<https://api.test/next>; rel=\"next\"";
+    (void)url;
+    return response;
+  };
+  auto list = Services::GitHubService::collect_review_threads(
+      fetch, "https://api.test/p1");
+  EXPECT_TRUE(list.truncated);
+}
+
+TEST(ReviewThreadsTest, MidSequenceFailureThrows) {
+  auto fetch = [](const std::string &url) -> Services::WebResponse {
+    Services::WebResponse response;
+    if (url == "https://api.test/p1") {
+      response.success = true;
+      response.status_code = 200;
+      response.content = "[]";
+      response.headers["Link"] = "<https://api.test/p2>; rel=\"next\"";
+      return response;
+    }
+    response.success = false;
+    response.status_code = 500;
+    response.error_message = "HTTP 500 | Error: boom";
+    return response;
+  };
+  EXPECT_THROW(Services::GitHubService::collect_review_threads(
+                   fetch, "https://api.test/p1"),
+               std::runtime_error);
+}
+
+TEST(ReviewThreadsTest, MalformedPageThrows) {
+  auto fetch = [](const std::string &) -> Services::WebResponse {
+    Services::WebResponse response;
+    response.success = true;
+    response.status_code = 200;
+    response.content = "not json";
+    return response;
+  };
+  EXPECT_THROW(Services::GitHubService::collect_review_threads(
+                   fetch, "https://api.test/p1"),
+               std::runtime_error);
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
