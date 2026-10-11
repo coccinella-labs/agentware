@@ -68,6 +68,20 @@ replace-pattern rejection, issue parsing, git log handling, memory persistence,
 input validation, and both search backends. `remediation_probes` is a shell harness
 that drives the built binary against known-bad input and asserts it refuses.
 
+### Sandbox Tests
+
+Seven sandbox test areas exercise Docker-isolated command execution:
+
+| Test Suite | Description |
+| --- | --- |
+| `SandboxCommandTest` | Shell argument parsing and hostile value handling |
+| `SandboxSpawnTest` | Process spawn, exit codes, missing binary handling |
+| `SandboxBoundedTest` | Timeout enforcement, hang detection, bounded execution |
+| `SandboxSafetyTest` | Denylist filtering (`.` substring), dangerous command blocking |
+| `SandboxConfigTest` | Config validation: sane configs accepted, hostile rejected |
+| `SandboxResultTest` | Result formatting: success, empty, failure, timeout |
+| `SandboxDockerTest` | End-to-end fake-docker routing: success, daemon failure, hang timeout |
+
 CI additionally runs a build matrix, coverage, lint, Docker end-to-end, and
 release jobs. Nothing in either target exercises the agent against a live
 model. The `e2e` job needs Docker; the `coverage` job needs its toolchain
