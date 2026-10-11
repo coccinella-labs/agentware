@@ -1,0 +1,19 @@
+[38;2;243;75;125m██         █
+██  █  ██  ██
+██ ██  ██  ███
+██ ██  ██   ██
+██ ██  ██   ███
+██ ██  ██    ██
+██ ██  ██    ███
+██ ██  ██     ██
+[0m[2mAgentware
+[0m[2mWelcome to Coccinella Labs
+[0m[2m----------------------------------------
+[0mMode [1=Online / 2=Offline] (default 2): Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] (default 1): [32m[OK] [0mllama3.2:3b
+[2mSystem: [0m[32mMode=Offline[0m | [32mModel=llama3.2:3b[0m | [32mMemory=Active[0m | [32mCommands=Available[0m
+[2mQuick Commands: [0m[36mhelp[0m | [36msearch:query[0m | [36mcmd:command[0m | [36mread:file[0m | [36mquit[0m
+[36mversion[0m | [36msearch:query[0m | [36mcmd:command[0m | [36mread:file[0m | [36mwrite:file text[0m | [36mexit[0m
+[2m----------------------------------------
+[0mReady - Type a command or chat naturally:
+> Goodbye
+Agent run completed

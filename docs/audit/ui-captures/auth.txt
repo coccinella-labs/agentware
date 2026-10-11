@@ -1,0 +1,41 @@
+██         █
+██  █  ██  ██
+██ ██  ██  ███
+██ ██  ██   ██
+██ ██  ██   ███
+██ ██  ██    ██
+██ ██  ██    ███
+██ ██  ██     ██
+Agentware
+Welcome to Coccinella Labs
+----------------------------------------
+Mode [1=Online / 2=Offline] (default 2): Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] (default 1): [OK] llama3.2:3b
+System: Mode=Offline | Model=llama3.2:3b | Memory=Active | Commands=Available
+Quick Commands: help | search:query | cmd:command | read:file | quit
+version | search:query | cmd:command | read:file | write:file text | exit
+----------------------------------------
+Ready - Type a command or chat naturally:
+> Available authentication providers:
+  Anthropic Claude - Invalid Credentials
+    Model: claude-3-sonnet-20240229
+  Cerebras - Invalid Credentials
+    Model: llama3.1-8b
+  Ollama (Local) - Invalid Credentials
+    Model: llama3.2:3b
+  OpenAI - Invalid Credentials
+    Model: gpt-4
+  Together AI (active) - Invalid Credentials
+    Model: meta-llama/Llama-3.2-3B-Instruct-Turbo
+> Provider: Together AI
+Status: Invalid Credentials
+Model: meta-llama/Llama-3.2-3B-Instruct-Turbo
+Base URL: https://api.together.xyz/v1
+>  No key configured for: together
+>  API key set for provider: together
+> Provider: Together AI
+Status: Key present (not verified)
+Model: meta-llama/Llama-3.2-3B-Instruct-Turbo
+Base URL: https://api.together.xyz/v1
+>  Key present for: together (not verified - no live check performed)
+> Goodbye
+Agent run completed

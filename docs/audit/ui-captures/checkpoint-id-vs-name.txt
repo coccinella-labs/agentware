@@ -1,0 +1,26 @@
+Ready - Type a command or chat naturally:
+> No checkpoints found.
+> Creating checkpoint 'demo'...
+ Checkpoint created with ID: e8bd7ea1
+> Available checkpoints:
+  e8bd7ea1 - demo
+    Created: 2026-10-11 21:50:05
+    Files: 2 (1 KB)
+
+> Error: Failed to get checkpoint info: Checkpoint not found: demo
+> Conversation saved as: t1
+> Saved conversations:
+  t1
+> Conversation resumed: t1
+> Restoring from checkpoint demo...
+Note: A backup will be created automatically before restore.
+Error restoring checkpoint: Checkpoint not found: demo
+Error: Failed to restore from checkpoint demo
+> Error: Failed to delete checkpoint demo
+> No recent errors.
+> Error Summary (Total: 0 errors)
+By Level:
+By Category:
+
+> Goodbye
+Agent run completed

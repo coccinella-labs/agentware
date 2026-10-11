@@ -1,0 +1,18 @@
+Ready - Type a command or chat naturally:
+> Error: Search query cannot be empty
+> Usage: /fetch <url> [options]
+Options:
+  text    - Extract text content from HTML
+  json    - Parse and format JSON response
+  raw     - Return raw response content
+Examples:
+  /fetch https://api.github.com/users/octocat json
+  /fetch https://example.com text
+> Error: Invalid URL format. Use http:// or https://
+> Fetching: http://127.0.0.1:9
+Error fetching URL: cURL error: Couldn't connect to server
+> Error: File does not exist: README.md
+> Error: old text cannot be empty
+> Error: cannot list components in '/nonexistent_xyz': filesystem error: in directory_iterator::directory_iterator(...): No such file or directory ["/nonexistent_xyz"]
+> Goodbye
+Agent run completed

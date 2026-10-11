@@ -1,0 +1,44 @@
+██         █
+██  █  ██  ██
+██ ██  ██  ███
+██ ██  ██   ██
+██ ██  ██   ███
+██ ██  ██    ██
+██ ██  ██    ███
+██ ██  ██     ██
+Agentware
+Welcome to Coccinella Labs
+----------------------------------------
+Mode [1=Online / 2=Offline] (default 2): Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] (default 1): [OK] llama3.2:3b
+System: Mode=Offline | Model=llama3.2:3b | Memory=Active | Commands=Available
+Quick Commands: help | search:query | cmd:command | read:file | quit
+version | search:query | cmd:command | read:file | write:file text | exit
+----------------------------------------
+Ready - Type a command or chat naturally:
+> Available tools:
+  File Operations:
+    read:file[:start:count]     - Read file content
+    write:file content          - Write to file
+    replace:file:old:new        - Replace text in file
+    grep:pattern[:dir[:ext]]    - Search in files
+  Project Analysis:
+    analyze:[path]              - Analyze project structure
+    components:[path]           - Find main components
+    todos:[path]                - Find task comments
+    tree:[path]                 - Show directory tree
+  Git Operations:
+    git:status                  - Show git status
+    git:log                     - Show git log
+    git:analyze                 - Analyze repository
+  System:
+    cmd:command                 - Execute shell command
+    search:query                - Web search
+    remember:fact               - Save to memory
+    memory                      - Show memories
+  GitHub Operations:
+    github:repo:owner/repo      - Get repository info
+    github:issues:owner/repo    - List repository issues
+    github:health:owner/repo    - Run health check
+    github:threads:o/r:pr[q]     - List inline review threads
+> Goodbye
+Agent run completed

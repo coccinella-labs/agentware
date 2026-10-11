@@ -1,0 +1,470 @@
+AGENTWARE UI CAPTURES - single-file bundle for design review.
+Built: cmake --build build --target agentware-agent; run: ./build/bin/agentware-agent (macOS 27.0.1, piped except where noted).
+All ANSI escapes stripped except startup-raw.txt. Fake credentials only. Honest bugs preserved (see checkpoint-id-vs-name.txt).
+
+
+================ FILE: docs/audit/ui-captures/auth.txt ================
+██         █
+██  █  ██  ██
+██ ██  ██  ███
+██ ██  ██   ██
+██ ██  ██   ███
+██ ██  ██    ██
+██ ██  ██    ███
+██ ██  ██     ██
+Agentware
+Welcome to Coccinella Labs
+----------------------------------------
+Mode [1=Online / 2=Offline] (default 2): Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] (default 1): [OK] llama3.2:3b
+System: Mode=Offline | Model=llama3.2:3b | Memory=Active | Commands=Available
+Quick Commands: help | search:query | cmd:command | read:file | quit
+version | search:query | cmd:command | read:file | write:file text | exit
+----------------------------------------
+Ready - Type a command or chat naturally:
+> Available authentication providers:
+  Anthropic Claude - Invalid Credentials
+    Model: claude-3-sonnet-20240229
+  Cerebras - Invalid Credentials
+    Model: llama3.1-8b
+  Ollama (Local) - Invalid Credentials
+    Model: llama3.2:3b
+  OpenAI - Invalid Credentials
+    Model: gpt-4
+  Together AI (active) - Invalid Credentials
+    Model: meta-llama/Llama-3.2-3B-Instruct-Turbo
+> Provider: Together AI
+Status: Invalid Credentials
+Model: meta-llama/Llama-3.2-3B-Instruct-Turbo
+Base URL: https://api.together.xyz/v1
+>  No key configured for: together
+>  API key set for provider: together
+> Provider: Together AI
+Status: Key present (not verified)
+Model: meta-llama/Llama-3.2-3B-Instruct-Turbo
+Base URL: https://api.together.xyz/v1
+>  Key present for: together (not verified - no live check performed)
+> Goodbye
+Agent run completed
+
+================ FILE: docs/audit/ui-captures/checkpoint-id-vs-name.txt ================
+Ready - Type a command or chat naturally:
+> No checkpoints found.
+> Creating checkpoint 'demo'...
+ Checkpoint created with ID: e8bd7ea1
+> Available checkpoints:
+  e8bd7ea1 - demo
+    Created: 2026-10-11 21:50:05
+    Files: 2 (1 KB)
+
+> Error: Failed to get checkpoint info: Checkpoint not found: demo
+> Conversation saved as: t1
+> Saved conversations:
+  t1
+> Conversation resumed: t1
+> Restoring from checkpoint demo...
+Note: A backup will be created automatically before restore.
+Error restoring checkpoint: Checkpoint not found: demo
+Error: Failed to restore from checkpoint demo
+> Error: Failed to delete checkpoint demo
+> No recent errors.
+> Error Summary (Total: 0 errors)
+By Level:
+By Category:
+
+> Goodbye
+Agent run completed
+
+================ FILE: docs/audit/ui-captures/failures.txt ================
+Ready - Type a command or chat naturally:
+> Error: Search query cannot be empty
+> Usage: /fetch <url> [options]
+Options:
+  text    - Extract text content from HTML
+  json    - Parse and format JSON response
+  raw     - Return raw response content
+Examples:
+  /fetch https://api.github.com/users/octocat json
+  /fetch https://example.com text
+> Error: Invalid URL format. Use http:// or https://
+> Fetching: http://127.0.0.1:9
+Error fetching URL: cURL error: Couldn't connect to server
+> Error: File does not exist: README.md
+> Error: old text cannot be empty
+> Error: cannot list components in '/nonexistent_xyz': filesystem error: in directory_iterator::directory_iterator(...): No such file or directory ["/nonexistent_xyz"]
+> Goodbye
+Agent run completed
+
+================ FILE: docs/audit/ui-captures/help.txt ================
+██         █
+██  █  ██  ██
+██ ██  ██  ███
+██ ██  ██   ██
+██ ██  ██   ███
+██ ██  ██    ██
+██ ██  ██    ███
+██ ██  ██     ██
+Agentware
+Welcome to Coccinella Labs
+----------------------------------------
+Mode [1=Online / 2=Offline] (default 2): Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] (default 1): [OK] llama3.2:3b
+System: Mode=Offline | Model=llama3.2:3b | Memory=Active | Commands=Available
+Quick Commands: help | search:query | cmd:command | read:file | quit
+version | search:query | cmd:command | read:file | write:file text | exit
+----------------------------------------
+Ready - Type a command or chat naturally:
+> Commands
+----------------------------------------
+Files
+  @<path> <prompt>        - Inject a file or directory into chat
+  read:<file>[:start[:count]] - Read a file or range
+  write:<file> <content>   - Write a file
+  replace:<file>:<old>:<new>[:count] - Replace text
+  grep:<pattern>[:dir[:filter]] - Search text
+  /files <path...> [options] - Read multiple files
+
+Sessions
+  /chat save|resume <tag>    - Save or resume a conversation
+  /chat list                 - List saved conversations
+  /compress               - Compress context
+  remember:<fact>          - Remember fact
+  memory | forget | clear      - Show or clear memory
+  /memory show|add <text>  - Inspect or add memory
+  /context show|refresh|create - Manage project context
+
+Project
+  analyze: | components: | todos: | tree: - Inspect the project
+  git:status | git:log | git:analyze - Inspect Git
+
+Web and GitHub
+  /fetch <url> [text|json|raw] - Fetch content
+  search:<query>            - Search the web
+  github:repo:<owner>/<repo>  - Show repository details
+  github:issues:<owner>/<repo> - List issues
+  github:health:<owner>/<repo> - Run repository health checks
+  github:threads:<owner>/<repo>:<pr>[:query] - List review threads
+  /mcp <command>             - Inspect MCP configuration
+
+Checkpoints
+  /checkpoint <command>      - Create, list, inspect, or delete checkpoints
+  /restore [id]               - List or restore a checkpoint
+
+Settings and diagnostics
+  /theme <command>           - Manage themes
+  /auth <command>            - Manage provider credentials
+  /sandbox <command>         - Manage or run sandboxes
+  /error <command>           - Inspect diagnostics
+  /stats                     - Show session statistics
+
+System
+  cmd:<command>             - Run a command
+  !<command>              - Run a shell command
+  /tools                   - Show direct tools
+  help | /help | /?        - Show command help
+  version | exit | quit        - Show version or leave
+----------------------------------------
+> Goodbye
+Agent run completed
+
+================ FILE: docs/audit/ui-captures/memory.txt ================
+██         █
+██  █  ██  ██
+██ ██  ██  ███
+██ ██  ██   ██
+██ ██  ██   ███
+██ ██  ██    ██
+██ ██  ██    ███
+██ ██  ██     ██
+Agentware
+Welcome to Coccinella Labs
+----------------------------------------
+Mode [1=Online / 2=Offline] (default 2): Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] (default 1): [OK] llama3.2:3b
+System: Mode=Offline | Model=llama3.2:3b | Memory=Active | Commands=Available
+Quick Commands: help | search:query | cmd:command | read:file | quit
+version | search:query | cmd:command | read:file | write:file text | exit
+----------------------------------------
+Ready - Type a command or chat naturally:
+> Remembered: probefact
+> Global memories:
+
+- probefact
+
+> Global memory cleared
+> No global memories stored
+> Session memory cleared
+> Goodbye
+Agent run completed
+
+================ FILE: docs/audit/ui-captures/narrow-width.txt ================
+██         █
+██  █  ██  ██
+██ ██  ██  ███
+██ ██  ██   ██
+██ ██  ██   ███
+██ ██  ██    ██
+██ ██  ██    ███
+██ ██  ██     ██
+Agentware
+Welcome to Coccinella Labs
+----------------------------------------
+Mode [1=Online / 2=Offline] (default 2): Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] (default 1): [OK] llama3.2:3b
+System: Mode=Offline | Model=llama3.2:3b | Memory=Active | Commands=Available
+Quick Commands: help | search:query | cmd:command | read:file | quit
+version | search:query | cmd:command | read:file | write:file text | exit
+----------------------------------------
+Ready - Type a command or chat naturally:
+> Commands
+----------------------------------------
+Files
+  @<path> <prompt>        - Inject a file or directory into chat
+  read:<file>[:start[:count]] - Read a file or range
+  write:<file> <content>   - Write a file
+  replace:<file>:<old>:<new>[:count] - Replace text
+  grep:<pattern>[:dir[:filter]] - Search text
+  /files <path...> [options] - Read multiple files
+
+Sessions
+  /chat save|resume <tag>    - Save or resume a conversation
+  /chat list                 - List saved conversations
+  /compress               - Compress context
+  remember:<fact>          - Remember fact
+  memory | forget | clear      - Show or clear memory
+  /memory show|add <text>  - Inspect or add memory
+  /context show|refresh|create - Manage project context
+
+Project
+  analyze: | components: | todos: | tree: - Inspect the project
+  git:status | git:log | git:analyze - Inspect Git
+
+Web and GitHub
+  /fetch <url> [text|json|raw] - Fetch content
+  search:<query>            - Search the web
+  github:repo:<owner>/<repo>  - Show repository details
+  github:issues:<owner>/<repo> - List issues
+  github:health:<owner>/<repo> - Run repository health checks
+  github:threads:<owner>/<repo>:<pr>[:query] - List review threads
+  /mcp <command>             - Inspect MCP configuration
+
+Checkpoints
+  /checkpoint <command>      - Create, list, inspect, or delete checkpoints
+  /restore [id]               - List or restore a checkpoint
+
+Settings and diagnostics
+  /theme <command>           - Manage themes
+  /auth <command>            - Manage provider credentials
+  /sandbox <command>         - Manage or run sandboxes
+  /error <command>           - Inspect diagnostics
+  /stats                     - Show session statistics
+
+System
+  cmd:<command>             - Run a command
+  !<command>              - Run a shell command
+  /tools                   - Show direct tools
+  help | /help | /?        - Show command help
+  version | exit | quit        - Show version or leave
+----------------------------------------
+> Goodbye
+Agent run completed
+
+================ FILE: docs/audit/ui-captures/pty.txt ================
+^D2
+1
+/stats
+exit
+██         █
+██  █  ██  ██
+██ ██  ██  ███
+██ ██  ██   ██
+██ ██  ██   ███
+██ ██  ██    ██
+██ ██  ██    ███
+██ ██  ██     ██
+Agentware
+Welcome to Coccinella Labs
+----------------------------------------
+Mode [1=Online / 2=Offline] (default 2): Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] (default 1): [OK] llama3.2:3b
+System: Mode=Offline | Model=llama3.2:3b | Memory=Active | Commands=Available
+Quick Commands: help | search:query | cmd:command | read:file | quit
+version | search:query | cmd:command | read:file | write:file text | exit
+----------------------------------------
+Ready - Type a command or chat naturally:
+> Goodbye
+Agent run completed
+
+================ FILE: docs/audit/ui-captures/shell-daemon-down.txt ================
+Exit code: 1
+Execution time: 0.016s
+Output:
+failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory
+
+> Sandboxed (docker, default config, no network)
+failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory
+
+Exit code: 1
+> | Error: AI service returned status code 0 -  | Error: HTTP 0 | Error: Failed to connect to localhost port 11434 after 1 ms: Couldn't connect to server
+> Goodbye
+Agent run completed
+
+================ FILE: docs/audit/ui-captures/startup-raw.txt ================
+[38;2;243;75;125m██         █
+██  █  ██  ██
+██ ██  ██  ███
+██ ██  ██   ██
+██ ██  ██   ███
+██ ██  ██    ██
+██ ██  ██    ███
+██ ██  ██     ██
+[0m[2mAgentware
+[0m[2mWelcome to Coccinella Labs
+[0m[2m----------------------------------------
+[0mMode [1=Online / 2=Offline] (default 2): Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] (default 1): [32m[OK] [0mllama3.2:3b
+[2mSystem: [0m[32mMode=Offline[0m | [32mModel=llama3.2:3b[0m | [32mMemory=Active[0m | [32mCommands=Available[0m
+[2mQuick Commands: [0m[36mhelp[0m | [36msearch:query[0m | [36mcmd:command[0m | [36mread:file[0m | [36mquit[0m
+[36mversion[0m | [36msearch:query[0m | [36mcmd:command[0m | [36mread:file[0m | [36mwrite:file text[0m | [36mexit[0m
+[2m----------------------------------------
+[0mReady - Type a command or chat naturally:
+> Goodbye
+Agent run completed
+
+================ FILE: docs/audit/ui-captures/startup.txt ================
+██         █
+██  █  ██  ██
+██ ██  ██  ███
+██ ██  ██   ██
+██ ██  ██   ███
+██ ██  ██    ██
+██ ██  ██    ███
+██ ██  ██     ██
+Agentware
+Welcome to Coccinella Labs
+----------------------------------------
+Mode [1=Online / 2=Offline] (default 2): Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] (default 1): [OK] llama3.2:3b
+System: Mode=Offline | Model=llama3.2:3b | Memory=Active | Commands=Available
+Quick Commands: help | search:query | cmd:command | read:file | quit
+version | search:query | cmd:command | read:file | write:file text | exit
+----------------------------------------
+Ready - Type a command or chat naturally:
+> Goodbye
+Agent run completed
+
+================ FILE: docs/audit/ui-captures/stats-all-providers.txt ================
+  Mode: Together AI
+  Mode: Cerebras
+  Mode: Fireworks
+  Mode: Groq
+  Mode: DeepSeek
+  Mode: OpenAI
+
+================ FILE: docs/audit/ui-captures/stats.txt ================
+██         █
+██  █  ██  ██
+██ ██  ██  ███
+██ ██  ██   ██
+██ ██  ██   ███
+██ ██  ██    ██
+██ ██  ██    ███
+██ ██  ██     ██
+Agentware
+Welcome to Coccinella Labs
+----------------------------------------
+Mode [1=Online / 2=Offline] (default 2): Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] (default 1): [OK] llama3.2:3b
+System: Mode=Offline | Model=llama3.2:3b | Memory=Active | Commands=Available
+Quick Commands: help | search:query | cmd:command | read:file | quit
+version | search:query | cmd:command | read:file | write:file text | exit
+----------------------------------------
+Ready - Type a command or chat naturally:
+> Session Statistics:
+  Mode: llama3.2:3b
+  Commands Processed: 1
+> Goodbye
+Agent run completed
+
+================ FILE: docs/audit/ui-captures/theme.txt ================
+██         █
+██  █  ██  ██
+██ ██  ██  ███
+██ ██  ██   ██
+██ ██  ██   ███
+██ ██  ██    ██
+██ ██  ██    ███
+██ ██  ██     ██
+Agentware
+Welcome to Coccinella Labs
+----------------------------------------
+Mode [1=Online / 2=Offline] (default 2): Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] (default 1): [OK] llama3.2:3b
+System: Mode=Offline | Model=llama3.2:3b | Memory=Active | Commands=Available
+Quick Commands: help | search:query | cmd:command | read:file | quit
+version | search:query | cmd:command | read:file | write:file text | exit
+----------------------------------------
+Ready - Type a command or chat naturally:
+> Available themes:
+  cyberpunk
+    Neon cyberpunk theme
+  dark
+    Dark theme for low-light environments
+  default (current)
+    Default light theme
+  ocean
+    Calm ocean-inspired theme
+>  Theme set to: dark
+> Current theme: dark
+Description: Dark theme for low-light environments
+> Theme: dark
+Description: Dark theme for low-light environments
+Type: Dark
+
+Color Preview:
+  Primary - Commands and headers
+  Success - Success messages
+  Warning - Warning messages
+  Error - Error messages
+  Info - Information messages
+  Accent - Highlights and accents
+> Error: Theme not found: nosuchtheme
+> Goodbye
+Agent run completed
+
+================ FILE: docs/audit/ui-captures/tools.txt ================
+██         █
+██  █  ██  ██
+██ ██  ██  ███
+██ ██  ██   ██
+██ ██  ██   ███
+██ ██  ██    ██
+██ ██  ██    ███
+██ ██  ██     ██
+Agentware
+Welcome to Coccinella Labs
+----------------------------------------
+Mode [1=Online / 2=Offline] (default 2): Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] (default 1): [OK] llama3.2:3b
+System: Mode=Offline | Model=llama3.2:3b | Memory=Active | Commands=Available
+Quick Commands: help | search:query | cmd:command | read:file | quit
+version | search:query | cmd:command | read:file | write:file text | exit
+----------------------------------------
+Ready - Type a command or chat naturally:
+> Available tools:
+  File Operations:
+    read:file[:start:count]     - Read file content
+    write:file content          - Write to file
+    replace:file:old:new        - Replace text in file
+    grep:pattern[:dir[:ext]]    - Search in files
+  Project Analysis:
+    analyze:[path]              - Analyze project structure
+    components:[path]           - Find main components
+    todos:[path]                - Find task comments
+    tree:[path]                 - Show directory tree
+  Git Operations:
+    git:status                  - Show git status
+    git:log                     - Show git log
+    git:analyze                 - Analyze repository
+  System:
+    cmd:command                 - Execute shell command
+    search:query                - Web search
+    remember:fact               - Save to memory
+    memory                      - Show memories
+  GitHub Operations:
+    github:repo:owner/repo      - Get repository info
+    github:issues:owner/repo    - List repository issues
+    github:health:owner/repo    - Run health check
+    github:threads:o/r:pr[q]     - List inline review threads
+> Goodbye
+Agent run completed

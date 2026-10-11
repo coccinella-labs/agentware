@@ -1,0 +1,12 @@
+Exit code: 1
+Execution time: 0.016s
+Output:
+failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory
+
+> Sandboxed (docker, default config, no network)
+failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory
+
+Exit code: 1
+> | Error: AI service returned status code 0 -  | Error: HTTP 0 | Error: Failed to connect to localhost port 11434 after 1 ms: Couldn't connect to server
+> Goodbye
+Agent run completed

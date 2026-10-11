@@ -1,0 +1,43 @@
+██         █
+██  █  ██  ██
+██ ██  ██  ███
+██ ██  ██   ██
+██ ██  ██   ███
+██ ██  ██    ██
+██ ██  ██    ███
+██ ██  ██     ██
+Agentware
+Welcome to Coccinella Labs
+----------------------------------------
+Mode [1=Online / 2=Offline] (default 2): Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] (default 1): [OK] llama3.2:3b
+System: Mode=Offline | Model=llama3.2:3b | Memory=Active | Commands=Available
+Quick Commands: help | search:query | cmd:command | read:file | quit
+version | search:query | cmd:command | read:file | write:file text | exit
+----------------------------------------
+Ready - Type a command or chat naturally:
+> Available themes:
+  cyberpunk
+    Neon cyberpunk theme
+  dark
+    Dark theme for low-light environments
+  default (current)
+    Default light theme
+  ocean
+    Calm ocean-inspired theme
+>  Theme set to: dark
+> Current theme: dark
+Description: Dark theme for low-light environments
+> Theme: dark
+Description: Dark theme for low-light environments
+Type: Dark
+
+Color Preview:
+  Primary - Commands and headers
+  Success - Success messages
+  Warning - Warning messages
+  Error - Error messages
+  Info - Information messages
+  Accent - Highlights and accents
+> Error: Theme not found: nosuchtheme
+> Goodbye
+Agent run completed

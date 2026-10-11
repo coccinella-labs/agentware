@@ -1,0 +1,6 @@
+  Mode: Together AI
+  Mode: Cerebras
+  Mode: Fireworks
+  Mode: Groq
+  Mode: DeepSeek
+  Mode: OpenAI

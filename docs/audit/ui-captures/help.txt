@@ -1,0 +1,69 @@
+██         █
+██  █  ██  ██
+██ ██  ██  ███
+██ ██  ██   ██
+██ ██  ██   ███
+██ ██  ██    ██
+██ ██  ██    ███
+██ ██  ██     ██
+Agentware
+Welcome to Coccinella Labs
+----------------------------------------
+Mode [1=Online / 2=Offline] (default 2): Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] (default 1): [OK] llama3.2:3b
+System: Mode=Offline | Model=llama3.2:3b | Memory=Active | Commands=Available
+Quick Commands: help | search:query | cmd:command | read:file | quit
+version | search:query | cmd:command | read:file | write:file text | exit
+----------------------------------------
+Ready - Type a command or chat naturally:
+> Commands
+----------------------------------------
+Files
+  @<path> <prompt>        - Inject a file or directory into chat
+  read:<file>[:start[:count]] - Read a file or range
+  write:<file> <content>   - Write a file
+  replace:<file>:<old>:<new>[:count] - Replace text
+  grep:<pattern>[:dir[:filter]] - Search text
+  /files <path...> [options] - Read multiple files
+
+Sessions
+  /chat save|resume <tag>    - Save or resume a conversation
+  /chat list                 - List saved conversations
+  /compress               - Compress context
+  remember:<fact>          - Remember fact
+  memory | forget | clear      - Show or clear memory
+  /memory show|add <text>  - Inspect or add memory
+  /context show|refresh|create - Manage project context
+
+Project
+  analyze: | components: | todos: | tree: - Inspect the project
+  git:status | git:log | git:analyze - Inspect Git
+
+Web and GitHub
+  /fetch <url> [text|json|raw] - Fetch content
+  search:<query>            - Search the web
+  github:repo:<owner>/<repo>  - Show repository details
+  github:issues:<owner>/<repo> - List issues
+  github:health:<owner>/<repo> - Run repository health checks
+  github:threads:<owner>/<repo>:<pr>[:query] - List review threads
+  /mcp <command>             - Inspect MCP configuration
+
+Checkpoints
+  /checkpoint <command>      - Create, list, inspect, or delete checkpoints
+  /restore [id]               - List or restore a checkpoint
+
+Settings and diagnostics
+  /theme <command>           - Manage themes
+  /auth <command>            - Manage provider credentials
+  /sandbox <command>         - Manage or run sandboxes
+  /error <command>           - Inspect diagnostics
+  /stats                     - Show session statistics
+
+System
+  cmd:<command>             - Run a command
+  !<command>              - Run a shell command
+  /tools                   - Show direct tools
+  help | /help | /?        - Show command help
+  version | exit | quit        - Show version or leave
+----------------------------------------
+> Goodbye
+Agent run completed
