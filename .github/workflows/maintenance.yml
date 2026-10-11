@@ -224,8 +224,7 @@ jobs:
           git commit -m "Daily maintenance report $(date -u +%F) $(date -u +%H%M%S) UTC"
           git fetch origin main
           git rebase origin/main || { echo "::error::rebase failed; human intervention needed"; exit 1; }
-          # Fully qualified refspec. The repo carries a tag literally named
-          # "main", so the short form "HEAD:main" is ambiguous and git refuses
-          # with "dst refspec main matches more than one".
+          # Fully qualified refspec. A short "HEAD:main" is ambiguous if a tag named
+          # "main" ever exists, since git cannot tell branch from tag.
           git push origin HEAD:refs/heads/main || \
             { echo "::error::push rejected after rebase; human intervention needed"; exit 1; }
