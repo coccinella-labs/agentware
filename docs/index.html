@@ -98,7 +98,7 @@
       <a class="identity" href="https://github.com/coccinella-labs" aria-label="Coccinella Labs on GitHub"><img src="https://github.com/coccinella-labs.png?size=128" alt=""> <span>Coccinella Labs</span></a>
       <p class="eyebrow">A deliberate tool for everyday technical work</p>
       <h1>agentware</h1>
-      <p class="lead">An interactive C++ agent for turning a request into inspected files, bounded commands, working notes, and a clear next action. It is built for the work that sits between an office request and a code change.</p>
+      <p class="lead">An interactive C++ agent for turning a request into inspected files, bounded commands, working notes, and a clear next action. It searches code, runs commands in a sandbox, integrates with Git and GitHub, and talks to a configured model provider.</p>
       <div class="actions">
         <a class="button" href="https://github.com/coccinella-labs/agentware">View source</a>
         <a class="button" href="https://github.com/coccinella-labs/agentware/issues">Report an issue</a>
@@ -115,7 +115,7 @@
 
     <div class="facts" aria-label="System facts">
       <div class="fact"><strong>Runtime</strong><span>Native C++20 command-line application built with CMake.</span></div>
-      <div class="fact"><strong>Work surface</strong><span>Files, directories, shell commands, repositories, context, and checkpoints.</span></div>
+      <div class="fact"><strong>Work surface</strong><span>Files, directories, sandboxed shell commands, repositories, code search, context, and checkpoints.</span></div>
       <div class="fact"><strong>Model access</strong><span>Provider credentials are supplied through environment configuration.</span></div>
     </div>
 
@@ -128,6 +128,8 @@
           <li>Trace how a feature, configuration, or incident note maps onto an existing repository.</li>
           <li>Prepare small code or documentation changes with file context available in the session.</li>
           <li>Inspect a set of files, preserve useful notes in memory, and return to the work through checkpoints.</li>
+          <li>Search code with ripgrep or fd, falling back to a built-in scanner when neither is installed.</li>
+          <li>Run commands in a sandbox with explicit fallback to direct execution.</li>
           <li>Work through Git, GitHub, web retrieval, or MCP-connected tooling from one interactive surface.</li>
         </ul>
       </div>
@@ -139,8 +141,8 @@
         <h2 id="method">A reviewable operating sequence.</h2>
         <div class="workflow">
           <div class="step"><h3>Receive</h3><p>Start with a concrete request and select an operating mode or provider.</p></div>
-          <div class="step"><h3>Inspect</h3><p>Read the relevant files, repository state, and available context before changing anything.</p></div>
-          <div class="step"><h3>Act</h3><p>Use direct commands, file operations, or model-assisted work in the active session.</p></div>
+          <div class="step"><h3>Inspect</h3><p>Search code, read files, and review repository state before changing anything.</p></div>
+          <div class="step"><h3>Act</h3><p>Use sandboxed commands, file operations, or model-assisted work in the active session.</p></div>
           <div class="step"><h3>Record</h3><p>Keep context, checkpoints, session statistics, and errors available for follow-up.</p></div>
         </div>
       </div>
