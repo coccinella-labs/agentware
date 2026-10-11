@@ -339,6 +339,12 @@ probe "PX stats shows selected offline model" 0 "Mode: llama3.2:latest" \
   "2" "2" "/stats" "exit"
 probe "MX tools list" 0 "Available tools" \
   "2" "1" "/tools" "exit"
+probe "MX tools uses filter naming" 0 "[:dir[:filter]]" \
+  "2" "1" "/tools" "exit"
+probe_absent "MX tools drops ext naming" 0 "[:dir[:ext]]" \
+  "2" "1" "/tools" "exit"
+probe "MX tools lists forget and clear" 0 "Clear session memory" \
+  "2" "1" "/tools" "exit"
 probe "MX search empty query errors" 0 "Error:" \
   "2" "1" "search:" "exit"
 probe "MX write bare usage" 0 "Usage: write:filename content" \

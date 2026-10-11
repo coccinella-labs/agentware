@@ -1165,7 +1165,7 @@ void Agent::show_available_tools() {
   std::cout << "    write:file content          - Write to file" << std::endl;
   std::cout << "    replace:file:old:new        - Replace text in file"
             << std::endl;
-  std::cout << "    grep:pattern[:dir[:ext]]    - Search in files" << std::endl;
+  std::cout << "    grep:pattern[:dir[:filter]]  - Search in files" << std::endl;
   std::cout << "  Project Analysis:" << std::endl;
   std::cout << "    analyze:[path]              - Analyze project structure"
             << std::endl;
@@ -1186,6 +1186,8 @@ void Agent::show_available_tools() {
   std::cout << "    search:query                - Web search" << std::endl;
   std::cout << "    remember:fact               - Save to memory" << std::endl;
   std::cout << "    memory                      - Show memories" << std::endl;
+  std::cout << "    forget                      - Clear global memory" << std::endl;
+  std::cout << "    clear                       - Clear session memory" << std::endl;
   std::cout << "  GitHub Operations:" << std::endl;
   std::cout << "    github:repo:owner/repo      - Get repository info"
             << std::endl;
