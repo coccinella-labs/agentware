@@ -500,6 +500,9 @@ target_link_libraries(agentware-tests PRIVATE
     gtest
 )
 add_test(NAME basic_tests COMMAND agentware-tests)
+add_test(NAME remediation_probes
+  COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/remediation_probes.sh"
+    "$<TARGET_FILE:agentware-agent>")
 
 # Set target properties for test executable
 set_target_properties(agentware-tests PROPERTIES
