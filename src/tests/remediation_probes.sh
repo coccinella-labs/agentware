@@ -72,7 +72,7 @@ probe() {
     echo "PASS: $name"
   else
     FAIL=$((FAIL + 1))
-    echo "FAIL: $name (exit=$exit_code, want exit=$expected_exit, want '$expected_grep')"
+    echo "FAIL: $name (exit=$exit_code, want exit=0, want '$expected_grep')"
     printf '%s\n' "$out" | tail -n 5
   fi
 }
@@ -101,6 +101,25 @@ probe_absent() {
   else
     FAIL=$((FAIL + 1))
     echo "FAIL: $name (exit=$exit_code, want exit=$expected_exit, must not contain '$absent')"
+    printf '%s\n' "$out" | tail -n 5
+  fi
+}
+
+# provider_probe verifies mode-selection presentation without contacting a
+# provider: the API key only gets the REPL past online-mode initialization.
+provider_probe() {
+  local name="$1" key_assignment="$2" expected_grep="$3"
+  shift 3
+  local out exit_code
+  out=$(printf '%s\n' "$@" | env "PATH=$PROBE_PATH" "$key_assignment" "$BIN" 2>&1)
+  exit_code=$?
+  out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+  if [ "$exit_code" -eq 0 ] && printf '%s' "$out" | grep -qF "$expected_grep"; then
+    PASS=$((PASS + 1))
+    echo "PASS: $name"
+  else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: $name (exit=$exit_code, want exit=$expected_exit, want '$expected_grep')"
     printf '%s\n' "$out" | tail -n 5
   fi
 }
@@ -302,6 +321,22 @@ probe "PX meta help uses direct GitHub syntax" 0 "github:repo:owner/repo" \
   "2" "1" "/help" "exit"
 probe_absent "PX meta help omits slash GitHub syntax" 0 "/github repo:" \
   "2" "1" "/help" "exit"
+probe_absent "PX startup has one ready prompt" 0 "Ready - Type a command:" \
+  "2" "1" "exit"
+provider_probe "PX stats shows Together" "TOGETHER_API_KEY=test-key" "Mode: Together AI" \
+  "1" "1" "/stats" "exit"
+provider_probe "PX stats shows Cerebras" "CEREBRAS_API_KEY=test-key" "Mode: Cerebras" \
+  "1" "2" "/stats" "exit"
+provider_probe "PX stats shows Fireworks" "FIREWORKS_API_KEY=test-key" "Mode: Fireworks" \
+  "1" "3" "/stats" "exit"
+provider_probe "PX stats shows Groq" "GROQ_API_KEY=test-key" "Mode: Groq" \
+  "1" "4" "/stats" "exit"
+provider_probe "PX stats shows DeepSeek" "DEEPSEEK_API_KEY=test-key" "Mode: DeepSeek" \
+  "1" "5" "/stats" "exit"
+provider_probe "PX stats shows OpenAI" "OPENAI_API_KEY=test-key" "Mode: OpenAI" \
+  "1" "6" "/stats" "exit"
+probe "PX stats shows selected offline model" 0 "Mode: llama3.2:latest" \
+  "2" "2" "/stats" "exit"
 probe "MX tools list" 0 "Available tools" \
   "2" "1" "/tools" "exit"
 probe "MX search empty query errors" 0 "Error:" \

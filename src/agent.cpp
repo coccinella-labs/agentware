@@ -1272,10 +1272,39 @@ void Agent::compress_context() {
 }
 
 void Agent::show_session_stats() {
-  std::string mode_str =
-      (mode_ == Agent::Mode::MODE_TOGETHER   ? "Together AI"
-       : mode_ == Agent::Mode::MODE_CEREBRAS ? "Cerebras"
-                                             : "Local Ollama");
+  std::string mode_str;
+  switch (mode_) {
+  case Agent::Mode::MODE_TOGETHER:
+    mode_str = "Together AI";
+    break;
+  case Agent::Mode::MODE_CEREBRAS:
+    mode_str = "Cerebras";
+    break;
+  case Agent::Mode::MODE_FIREWORKS:
+    mode_str = "Fireworks";
+    break;
+  case Agent::Mode::MODE_GROQ:
+    mode_str = "Groq";
+    break;
+  case Agent::Mode::MODE_DEEPSEEK:
+    mode_str = "DeepSeek";
+    break;
+  case Agent::Mode::MODE_OPENAI:
+    mode_str = "OpenAI";
+    break;
+  case Agent::Mode::MODE_LLAMA_3B:
+    mode_str = "llama3.2:3b";
+    break;
+  case Agent::Mode::MODE_LLAMA_LATEST:
+    mode_str = "llama3.2:latest";
+    break;
+  case Agent::Mode::MODE_LLAMA_31:
+    mode_str = "llama3.1:latest";
+    break;
+  case Agent::Mode::MODE_UNSET:
+    mode_str = "Not selected";
+    break;
+  }
   std::cout << "Session Statistics:" << std::endl;
   std::cout << "  Mode: " << mode_str << std::endl;
   std::cout << "  Commands Processed: " << command_count_ << std::endl;

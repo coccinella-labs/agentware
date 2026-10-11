@@ -265,9 +265,6 @@ void UI::print_ready_interface(const std::string &mode,
                                const std::string &model) {
   print_system_info(mode, model);
   print_quick_help();
-
-  std::cout << "Ready - Type a command:\n";
-
   std::cout << "Ready - Type a command or chat naturally:\n";
 }
 
