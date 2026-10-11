@@ -9,11 +9,24 @@ jobs:
   cla:
     runs-on: ubuntu-24.04
     if: github.repository_owner == 'coccinella-labs'
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v6
 
+      - name: Checkout clabot action
+        uses: actions/checkout@v6
+        with:
+          repository: coccinella-labs/clabot
+          path: clabot
+
+      - name: Install clabot dependencies
+        run: npm ci --prefix clabot
+
       - name: Run CLA bot
-        uses: coccinella-labs/clabot@v1
+        uses: ./clabot/
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cla-url: https://harpertoken.github.io/cla.html
