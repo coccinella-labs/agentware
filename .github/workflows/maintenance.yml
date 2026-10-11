@@ -1,0 +1,192 @@
+name: Daily Maintenance
+
+# One scheduled run per day that checks repo health and appends a dated record
+# under docs/maintenance/. Read-only checks plus a log commit. No auto-fixing,
+# no dependency upgrades, no releases. Anything the report finds wrong is
+# fixed by a human through the normal PR process.
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+# A slow run is never killed by the next day's; it queues behind it.
+concurrency:
+  group: daily-maintenance
+  cancel-in-progress: false
+
+permissions:
+  contents: write # only to commit the dated log file, nothing else
+
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record checked commit
+        run: echo "CHECKED_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake build-essential nlohmann-json3-dev > /dev/null
+
+      - name: Check build
+        run: |
+          STATUS="PASS"
+          DETAIL=""
+          if ! cmake -S . -B build -DCMAKE_BUILD_TYPE=Release > /tmp/cmake.log 2>&1; then
+            STATUS="FAIL: cmake configure failed (see CI log)"
+          elif ! cmake --build build -j"$(nproc)" > /tmp/build.log 2>&1; then
+            STATUS="FAIL: build failed (see CI log)"
+          fi
+          {
+            echo "## Build"
+            echo "- result: $STATUS"
+          } > report_build.md
+          [ "$STATUS" = "PASS" ]
+
+      - name: Check tests
+        run: |
+          STATUS="PASS"
+          DETAIL=""
+          if ! ctest --test-dir build --output-on-failure > /tmp/ctest.log 2>&1; then
+            STATUS="FAIL: ctest reported failures (see CI log)"
+          else
+            DETAIL=$(grep -E "tests passed" /tmp/ctest.log | tail -1)
+          fi
+          {
+            echo "## Tests"
+            echo "- result: $STATUS"
+            if [ -n "$DETAIL" ]; then
+              echo "- $DETAIL"
+            fi
+          } > report_tests.md
+          [ "$STATUS" = "PASS" ]
+
+      - name: Check binary version
+        # Honest version check: run the built binary through its documented
+        # interface and compare against the VERSION file. Answers with two
+        # empty lines accept both startup defaults, then version, then exit.
+        run: |
+          STATUS="PASS"
+          EXPECTED=$(tr -d '\n' < VERSION)
+          REPORTED=$(printf '\n\nversion\nexit\n' | \
+            ./build/bin/agentware-agent 2>/dev/null | \
+            grep -oE "Agentware v[0-9.]+" | head -1 || true)
+          if [ -z "$REPORTED" ]; then
+            STATUS="FAIL: binary did not report a version"
+          elif [ "$REPORTED" != "Agentware v$EXPECTED" ]; then
+            STATUS="FAIL: binary reports '$REPORTED' but VERSION file says '$EXPECTED'"
+          fi
+          {
+            echo "## Version"
+            echo "- result: $STATUS"
+            echo "- VERSION file: $EXPECTED"
+            echo "- binary reports: ${REPORTED:-(nothing)}"
+          } > report_version.md
+          [ "$STATUS" = "PASS" ]
+
+      - name: Check dependencies
+        # Informational only: records what the build actually used. Never fails;
+        # a changed toolchain is a fact for a human to interpret, not a failure.
+        run: |
+          {
+            echo "## Dependencies"
+            echo "- result: recorded (informational, never fails)"
+            echo "- cmake: $(cmake --version | head -1)"
+            echo "- compiler: $(g++ --version | head -1)"
+            echo "- nlohmann-json: $(dpkg -l nlohmann-json3-dev 2>/dev/null | awk '/^ii/{print $3}')"
+          } > report_deps.md
+
+      - name: Check documentation links
+        # One attempt per URL, 15s timeout, no retries. HTTP 404/410 means dead
+        # and fails the run. Timeouts, DNS failures, 5xx, and other 4xx (often
+        # bot-blocking, not dead pages) are recorded as unreachable without
+        # failing, so external network noise cannot produce a false red.
+        run: |
+          : > report_links_body.md
+          DEAD=0
+          UNREACHABLE=0
+          while IFS= read -r url; do
+            [ -z "$url" ] && continue
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 -I "$url" 2>/dev/null || echo "000")
+            case "$code" in
+              404|410)
+                echo "- DEAD ($code): $url" >> report_links_body.md
+                DEAD=$((DEAD + 1))
+                ;;
+              200|201|202|203|204|301|302|303|307|308)
+                ;;
+              *)
+                echo "- unreachable ($code, transient - not counted as dead): $url" >> report_links_body.md
+                UNREACHABLE=$((UNREACHABLE + 1))
+                ;;
+            esac
+          done < <(grep -rhoE 'https?://[^)"<> ]+' \
+            --include='*.md' --exclude-dir=maintenance --exclude-dir=build --exclude-dir=.git . | \
+            sed 's/[.,;:!?]*$//' | grep -v '^\s*$' | grep -v '[{}]' | sort -u)
+          {
+            echo "## Links"
+            if [ "$DEAD" -gt 0 ]; then
+              echo "- result: FAIL ($DEAD dead)"
+            else
+              echo "- result: PASS ($UNREACHABLE unreachable, transient)"
+            fi
+            cat report_links_body.md
+          } > report_links.md
+          [ "$DEAD" -eq 0 ]
+
+      - name: Render report
+        # Always runs, even after failures, so a red run still records what
+        # happened. Missing sections mean that check never ran. This step must
+        # not mask earlier failures: GitHub keeps the job red if any prior step
+        # failed, and nothing here exits 0 to cover that up.
+        if: always()
+        run: |
+          REPORT="docs/maintenance/$(date -u +%F).md"
+          mkdir -p docs/maintenance
+          {
+            echo "# Maintenance $(date -u +%F)"
+            echo ""
+            echo "- checked commit: $CHECKED_SHA"
+            echo ""
+          for section in report_build.md report_tests.md report_version.md report_deps.md report_links.md; do
+            if [ -f "$section" ]; then
+              cat "$section"
+            else
+              case "$section" in
+                report_build.md) echo "## Build" ;;
+                report_tests.md) echo "## Tests" ;;
+                report_version.md) echo "## Version" ;;
+                report_deps.md) echo "## Dependencies" ;;
+                report_links.md) echo "## Links" ;;
+              esac
+              echo "- result: NOT RUN (an earlier check failed first)"
+            fi
+            echo ""
+          done
+          } > "$REPORT"
+          echo "REPORT_PATH=$REPORT" >> "$GITHUB_ENV"
+
+      - name: Commit report
+        # Always runs so failures are recorded, not lost. Scoped to the log
+        # directory only: nothing else in the tree can be committed from here.
+        # Never force-pushes. On a rejected push (a concurrent run or a human
+        # push landed first), rebase the log commit and retry once; if that
+        # still fails, exit non-zero so a human intervenes.
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/maintenance/
+          if git diff --cached --quiet; then
+            echo "No report changes to commit."
+            exit 0
+          fi
+          git commit -m "Daily maintenance report $(date -u +%F)"
+          git fetch origin main
+          git rebase origin/main || { echo "::error::rebase failed; human intervention needed"; exit 1; }
+          git push origin HEAD:main || \
+            { echo "::error::push rejected after rebase; human intervention needed"; exit 1; }
