@@ -16,11 +16,20 @@ On first run it prints a welcome screen and asks for a mode: online against a ho
 
 ## Providers
 
-Ten agent modes, one per provider or model family: Together, Llama 3B, Cerebras, Llama Latest, Llama 3.1, Fireworks, Groq, DeepSeek, and OpenAI. Each needs its API key in the environment; see `.env.example` for the full list. No key is needed for offline mode.
+Nine agent modes, one per provider or model family: Together, Llama 3B,
+Cerebras, Llama Latest, Llama 3.1, Fireworks, Groq, DeepSeek, and OpenAI.
+Each hosted mode needs its API key in the environment; see `.env.example` for
+the list. The three Llama modes and Offline run against a local Ollama server
+and need no key.
 
 ## What it does
 
 Around twenty services behind one binary: agent orchestration, AI provider calls, auth, checkpoints, codebase search, command execution, configuration, context tracking, a database layer, file and multi-file operations, git and GitHub integration, MCP client support, memory management, sandboxing, theming, input validation, and a web service.
+
+Codebase search shells out to `rg` and `fd` when they are on `PATH` and falls
+back to a built-in scanner when they are not, so search works either way.
+`github:threads:owner/repo:pr` reads inline review threads without the GraphQL
+API.
 
 Model Context Protocol servers are configured in `data/mcp_servers.json`. Two ship by default, both run through `npx`: a filesystem server rooted at the working directory and a git server.
 
@@ -51,7 +60,16 @@ the Actions tab.
 cmake --build build --target test
 ```
 
-The suite is two tests: a framework sanity check and a version-string check. That is the honest extent of it. CI additionally runs build-matrix, coverage, lint, Docker end-to-end, and release jobs, but nothing here exercises the agent's behavior. The `e2e` job needs Docker; the `coverage` job needs its toolchain installed.
+`ctest` runs two targets. `basic_tests` is the unit suite, currently 50 cases
+across 16 suites, covering parsing, file-access policy, project-root discovery,
+MCP and GitHub availability, review threads, memory persistence, input
+validation, and both search backends. `remediation_probes` is a shell harness
+that drives the built binary against known-bad input and asserts it refuses.
+
+CI additionally runs a build matrix, coverage, lint, Docker end-to-end, and
+release jobs. Nothing in either target exercises the agent against a live
+model. The `e2e` job needs Docker; the `coverage` job needs its toolchain
+installed.
 
 ## Contributing
 
