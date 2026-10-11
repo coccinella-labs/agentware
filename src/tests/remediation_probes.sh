@@ -18,6 +18,13 @@ cd "$WORK" || exit 1
 # Hermetic key state: search must not depend on ambient SERPAPI_KEY.
 unset SERPAPI_KEY
 
+# Deterministic tool PATH: the stock probes must never see a real docker
+# (routing depends on its absence), while python3/curl stay available.
+# Fake-docker scenarios below prepend their stub dir explicitly.
+BASE_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+PROBE_PATH="$BASE_PATH"
+export PATH="$BASE_PATH"
+
 PASS=0
 FAIL=0
 
@@ -34,20 +41,23 @@ SERVE_PORT=18321
 python3 -m http.server "$SERVE_PORT" --bind 127.0.0.1 > server.log 2>&1 &
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null; rm -rf "$WORK"' EXIT
-for _ in $(seq 1 50); do
+i=0
+while [ "$i" -lt 50 ]; do
   if curl -sf -o /dev/null "http://127.0.0.1:$SERVE_PORT/sample.txt"; then
     break
   fi
   sleep 0.2
+  i=$((i + 1))
 done
 
 # probe <name> <expected_exit> <expected_output_grep> [input lines...]
-# Each input line is fed to the binary's stdin in order.
+# Each input line is fed to the binary's stdin in order. The binary runs
+# with PROBE_PATH so docker visibility is controlled per section.
 probe() {
   local name="$1" expected_exit="$2" expected_grep="$3"
   shift 3
   local out exit_code
-  out=$(printf '%s\n' "$@" | "$BIN" 2>&1)
+  out=$(printf '%s\n' "$@" | env "PATH=$PROBE_PATH" "$BIN" 2>&1)
   exit_code=$?
   # Strip ANSI color codes for stable matching.
   out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
@@ -76,7 +86,7 @@ probe_absent() {
   local name="$1" expected_exit="$2" absent="$3"
   shift 3
   local out exit_code
-  out=$(printf '%s\n' "$@" | "$BIN" 2>&1)
+  out=$(printf '%s\n' "$@" | env "PATH=$PROBE_PATH" "$BIN" 2>&1)
   exit_code=$?
   out=$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g')
   if [ "$exit_code" -eq "$expected_exit" ] &&
@@ -218,8 +228,7 @@ probe_absent "R-10 stats reports no phantom token usage" 0 "Token Usage" \
 probe "R-10 stats still reports commands" 0 "Commands Processed" \
   "2" "1" "/stats" "exit"
 
-# github:threads usage errors need no network and must not crash.
-probe "threads usage on bad spec" 0 "Usage: github:threads:owner/repo:pr" \
+# github:threads usage errors need no network and must not crash.probe "threads usage on bad spec" 0 "Usage: github:threads:owner/repo:pr" \
   "2" "1" "github:threads:bad" "exit"
 probe "threads usage on non-numeric pr" 0 "Usage: github:threads:owner/repo:pr" \
   "2" "1" "github:threads:o/r:abc" "exit"
@@ -227,6 +236,52 @@ probe "threads usage on missing pr" 0 "Usage: github:threads:owner/repo:pr" \
   "2" "1" "github:threads:o/r" "exit"
 probe "threads help lists subcommand" 0 "github:threads:o/r:pr" \
   "2" "1" "/tools" "exit"
+
+# Shell routing with no docker on PATH: deny by default, explicit opt-in.
+probe "routing denies without docker" 0 "Sandbox unavailable" \
+  "2" "1" "!echo hi" "exit"
+probe "routing opt-out cancels" 0 "Command cancelled by user" \
+  "2" "1" "!echo hi" "N" "exit"
+probe "routing opt-in runs on host" 0 "hi" \
+  "2" "1" "!echo hi" "y" "exit"
+probe "routing cmd denies without docker" 0 "Sandbox unavailable" \
+  "2" "1" "cmd:echo hi" "exit"
+probe "routing bare bang is usage" 0 "Usage: !<command>" \
+  "2" "1" "!" "exit"
+
+# Fake docker for routing success/failure paths (no daemon required).
+mkdir -p fakebin
+cat > fakebin/docker <<'EOF'
+#!/bin/bash
+if [ "$1" = "--version" ]; then
+  echo "Docker version 99.0-fake, build test"
+  exit 0
+fi
+if [ "$1" = "stop" ]; then
+  exit 0
+fi
+case "${FAKE_DOCKER_MODE:-ok}" in
+  fail)
+    echo "fake: cannot connect to the Docker daemon" >&2
+    exit 1
+    ;;
+  *)
+    echo "fake-output"
+    exit 0
+    ;;
+esac
+EOF
+chmod +x fakebin/docker
+PROBE_PATH="$WORK/fakebin:$BASE_PATH"
+
+probe "routing sandboxes with docker" 0 "Sandboxed (docker" \
+  "2" "1" "!echo hi" "exit"
+probe "routing sandbox output shown" 0 "fake-output" \
+  "2" "1" "!echo hi" "exit"
+export FAKE_DOCKER_MODE=fail
+probe "routing docker failure reported" 0 "Exit code: 1" \
+  "2" "1" "!echo hi" "exit"
+export FAKE_DOCKER_MODE=ok
 
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"

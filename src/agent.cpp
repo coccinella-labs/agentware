@@ -83,6 +83,9 @@ static inline std::string trim_copy(const std::string &s) {
   return s.substr(a, b - a);
 }
 
+// Routes an agent-requested shell command (defined below use sites).
+static std::string execute_routed_command(const std::string &command);
+
 void Agent::run() {
   // One-time tool discovery: which external search binaries exist on PATH.
   // The flags live on the Agent for the whole session; every search and every
@@ -330,7 +333,7 @@ void Agent::handle_direct_command(const std::string &input) {
         return;
       }
     }
-    result = Services::CommandService::execute(command);
+    result = execute_routed_command(command);
     record_interaction(*memory_, "cmd:" + command, result);
   } else if (input.rfind("read:", 0) == 0) {
     std::string params = trim_copy(input.substr(5));
@@ -771,17 +774,42 @@ void Agent::handle_file_injection_command(const std::string &input) {
   handle_ai_chat(processed_input);
 }
 
+// Routes an agent-requested shell command: Docker sandbox when available,
+// explicit host opt-in otherwise. Never falls back silently: without Docker
+// the command is denied unless the operator confirms unsandboxed host
+// execution at the prompt (cancellation stays the default).
+static std::string execute_routed_command(const std::string &command) {
+  Services::SandboxService::initialize();  if (Services::SandboxService::is_docker_available()) {
+    auto config = Services::SandboxService::get_sandbox_config("default");
+    std::cout << "Sandboxed (docker, default config, "
+              << (config.network_access ? "network" : "no network") << ")"
+              << std::endl;
+    Services::SandboxResult sandbox_result =
+        Services::SandboxService::execute_command(command);
+    return Services::SandboxService::format_result(sandbox_result);
+  }
+  std::cout << "Sandbox unavailable (Docker not found): this command would "
+               "run on the host without isolation."
+            << std::endl;
+  std::cout << "Run on host without isolation? (y/N): ";
+  std::string confirm;
+  std::getline(std::cin, confirm);
+  if (confirm != "y" && confirm != "Y") {
+    return "Command cancelled by user";
+  }
+  return Services::CommandService::execute(command);
+}
+
 void Agent::handle_shell_command(const std::string &input) {
   if (input == "!") {
-    // Toggle shell mode
-    toggle_shell_mode();
+    std::cout << "Usage: !<command>" << std::endl;
     return;
   }
 
   // Execute shell command
   std::string command = trim_copy(input.substr(1));
   if (command.empty()) {
-    std::cout << "Usage: !<command> or ! to toggle shell mode" << std::endl;
+    std::cout << "Usage: !<command>" << std::endl;
     return;
   }
 
@@ -799,7 +827,7 @@ void Agent::handle_shell_command(const std::string &input) {
     }
   }
 
-  std::string result = Services::CommandService::execute(command);
+  std::string result = execute_routed_command(command);
   std::cout << result << std::endl;
   record_interaction(*memory_, "!" + command, result);
 }
@@ -961,16 +989,6 @@ std::string Agent::read_file_or_directory(const std::string &path) {
   }
 }
 
-void Agent::toggle_shell_mode() {
-  shell_mode_ = !shell_mode_;
-  if (shell_mode_) {
-    std::cout << "Entering shell mode. Type commands directly or '!' to exit."
-              << std::endl;
-  } else {
-    std::cout << "Exiting shell mode." << std::endl;
-  }
-}
-
 bool Agent::should_skip_file(const std::string &file_path,
                              const std::string &ext) {
   std::vector<std::string> skip_extensions = {
@@ -1047,8 +1065,8 @@ void Agent::show_meta_help() {
   std::cout << "  Example: @src/main.cpp What does this code do?" << std::endl;
   std::cout << std::endl;
   std::cout << "Shell commands:" << std::endl;
-  std::cout << "  !<command>            - Execute shell command" << std::endl;
-  std::cout << "  !                     - Toggle shell mode" << std::endl;
+  std::cout << "  !<command>            - Execute shell command"
+            << std::endl;
 }
 
 void Agent::clear_screen() {
@@ -1226,8 +1244,6 @@ void Agent::show_session_stats() {
                                              : "Local Ollama");
   std::cout << "Session Statistics:" << std::endl;
   std::cout << "  Mode: " << mode_str << std::endl;
-  std::cout << "  Shell Mode: " << (shell_mode_ ? "Active" : "Inactive")
-            << std::endl;
   std::cout << "  Commands Processed: " << command_count_ << std::endl;
 }
 

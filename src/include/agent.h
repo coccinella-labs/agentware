@@ -23,7 +23,6 @@ public:
 private:
   Mode mode_{Mode::MODE_UNSET};
   std::string api_key_;
-  bool shell_mode_{false};
   // Using raw pointers with PIMPL idiom would be better for ABI stability
   std::unique_ptr<Data::MemoryManager> memory_;
   std::unique_ptr<Services::AIService> ai_service_;
@@ -54,9 +53,6 @@ public:
   // File injection helpers
   std::string process_file_injections(const std::string &input);
   std::string read_file_or_directory(const std::string &path);
-
-  // Shell mode management
-  void toggle_shell_mode();
 
   // Helper methods
   bool should_skip_file(const std::string &file_path, const std::string &ext);
