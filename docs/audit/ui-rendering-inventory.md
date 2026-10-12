@@ -4,6 +4,25 @@ Code inspection of the current tree (no behavior changes). "Verified
 live" means observed in the captures alongside
 `docs/audit/ui-current-state.md`; otherwise code-inspected only.
 
+## Status note (2026-10-12)
+
+This is a source map of the tree as inspected at `851182a5` and is **stale**
+against the current tree, which is `bdf33b2b`. Superseded entries, with the
+commit that supersedes each:
+
+- "`print_quick_help` | two duplicated command lines | live" — **superseded
+  (P1-2, `bdf33b2b`).** Now generated from one de-duplicated list.
+- "No `isatty` check, no `NO_COLOR`/`TERM` handling, no `COLUMNS`/`ioctl` width
+  logic, no `setw`/wrapping anywhere in `src/ui.cpp`" — **superseded (P1-1,
+  P1-3).** `src/ui.cpp` now has an `isatty` check, shared `NO_COLOR` gating,
+  `ioctl(TIOCGWINSZ)` width detection, and wrapping.
+- **`COLUMNS` remains deliberately unused**, which the line above conflated with
+  a missing width mechanism. Width comes from `TIOCGWINSZ`, not the environment.
+- "Nothing else reads the theme" — **still true.** P1-1 unified gating only.
+
+Line numbers in the tables below have shifted. Re-derive them from source before
+relying on any citation here.
+
 ## Entry and REPL flow
 
 - `src/main.cpp`: `load_environment()` → `print_logo()` →

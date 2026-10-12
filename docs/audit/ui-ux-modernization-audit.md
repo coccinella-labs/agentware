@@ -5,6 +5,25 @@ progressive, backward-compatible modernization of the terminal REPL; it does
 not propose a TUI framework, command syntax changes, animations, or code
 changes.
 
+## Status note (2026-10-12)
+
+The baseline below is preserved as observed. Two of its P1/P2 rows are superseded
+by committed work in the current tree (`f908f2bf` for P1-1,
+`bdf33b2b` for P1-2 and P1-3):
+
+- **"ANSI is unconditional"** — **implemented (P1-1).** The theme path no longer
+  bypasses TTY detection and `NO_COLOR`.
+- **"No responsive layout system ... no terminal-width measurement, wrapping
+  strategy, column truncation or continuation indentation"** — **implemented
+  (P1-3).** Width comes from `ioctl(TIOCGWINSZ)` with an 80-column fallback, and
+  wrapping uses continuation indentation.
+- **"Startup repeats commands"** — **implemented (P1-2).** Zero duplicate
+  quick-help tokens.
+
+Still open: the truthful-runtime-status row (`Memory=Active` /
+`Commands=Available` remain unprobed), the noisy-information-hierarchy row, and
+every Windows question. See `agent-ui-audit.md`.
+
 ## Baseline inspected
 
 Presentation surfaces: logo/startup, mode and provider prompts, prompt,

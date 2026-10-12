@@ -3,6 +3,21 @@
 No implementation is authorised by this audit. Each unit below should be a
 small reviewable change with its stated regression evidence.
 
+## Status note (2026-10-12)
+
+Units are preserved as planned. No implementation was authorized by this plan,
+and none of its items were closed by the UI work; the relationship is partial.
+The UI work is committed: P1-1 in `f908f2bf`, P1-2 and P1-3 in `bdf33b2b`.
+
+- **Unit 5, terminal profile / plain-output support** — **substantially
+  delivered (P1-1 in `f908f2bf`, P1-3 in `bdf33b2b`)**: `NO_COLOR` and non-TTY gating now apply to both color
+  paths, width-aware layout exists, and 40/60/80/120-column snapshots were
+  measured. Windows width detection remains unimplemented, falling back to 80.
+- **Unit 6, verified availability/status** — **still open.** The startup line
+  still hardcodes `Memory=Active` and `Commands=Available`.
+- **Units 1-4** (MCP, registry, and the behavioral items) — **still open**, and
+  out of scope for the presentation work.
+
 ## P0 — truth and safety contracts
 
 1. **Choose MCP: implement transport or remove the operational surface.** Do
