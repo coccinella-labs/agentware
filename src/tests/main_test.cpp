@@ -4,6 +4,8 @@
 #include "git_service.h"
 #include "github_service.h"
 #include "sandbox_service.h"
+#include "theme_service.h"
+#include "ui.h"
 #include "validation.h"
 #include "version.h"
 #include "memory_manager.h"
@@ -1757,4 +1759,78 @@ TEST(SandboxBoundedTest, TimeoutLeavesNoProcessTreeBehind) {
   }
   fs::remove_all(dir, ec);
 #endif
+}
+
+namespace {
+// Restores environment variables exactly as found, on every exit path
+// including an early return from an assertion. It records whether each
+// variable was merely absent, because "unset" and "set to empty" are
+// different states and setenv(name, "") does not reproduce absence.
+class ScopedEnv {
+public:
+  explicit ScopedEnv(const std::vector<std::string> &names) {
+    for (const auto &name : names) {
+      const char *value = std::getenv(name.c_str());
+      Entry entry;
+      entry.name = name;
+      entry.was_set = value != nullptr;
+      entry.value = entry.was_set ? std::string(value) : std::string();
+      saved_.push_back(entry);
+    }
+  }
+
+  ~ScopedEnv() {
+    for (const auto &entry : saved_) {
+      if (entry.was_set) {
+        setenv(entry.name.c_str(), entry.value.c_str(), 1);
+      } else {
+        unsetenv(entry.name.c_str());
+      }
+    }
+  }
+
+  ScopedEnv(const ScopedEnv &) = delete;
+  ScopedEnv &operator=(const ScopedEnv &) = delete;
+
+private:
+  struct Entry {
+    std::string name;
+    bool was_set;
+    std::string value;
+  };
+  std::vector<Entry> saved_;
+};
+} // namespace
+
+// U-1 / P1-1: one color policy for the whole process.
+//
+// The theme path previously consulted only $TERM, so it emitted escapes into
+// pipes and kept emitting them under NO_COLOR=1 while the rest of the UI
+// honored both. Both surfaces must now follow UI::colors_enabled exactly:
+// colored only when stdout is a TTY and NO_COLOR is unset. TERM is not part
+// of the decision, so a real TTY colors even with TERM=dumb or TERM unset.
+
+TEST(ColorPolicyTest, ThemePolicyEqualsSharedUiPolicy) {
+  ScopedEnv guard({"TERM", "NO_COLOR"});
+  // Vary TERM, including values the old TERM-only check would have accepted
+  // or rejected. The test runner's stdout is not a TTY, so both surfaces
+  // should report false throughout; what is asserted is that they never
+  // diverge. A regression that reintroduced a TERM check in the theme path
+  // would make the two disagree for TERM=xterm-256color.
+  for (const char *term : {"xterm-256color", "dumb", ""}) {
+    setenv("TERM", term, 1);
+    unsetenv("NO_COLOR");
+    EXPECT_EQ(Services::ThemeService::is_color_supported(),
+              Utils::UI::colors_enabled())
+        << "TERM=" << term
+        << ": theme color policy diverged from the shared UI policy";
+  }
+}
+
+TEST(ColorPolicyTest, NoColorSuppressesBothSurfaces) {
+  ScopedEnv guard({"TERM", "NO_COLOR"});
+  setenv("TERM", "xterm-256color", 1);
+  setenv("NO_COLOR", "1", 1);
+  EXPECT_FALSE(Utils::UI::colors_enabled());
+  EXPECT_FALSE(Services::ThemeService::is_color_supported());
 }

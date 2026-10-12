@@ -15,8 +15,8 @@
 namespace Utils {
 
 namespace {
-// Output capability, evaluated once per process at startup: environment
-// and descriptors are fixed before main runs.
+// Terminal detection helper. Kept file-local; callers use the public
+// interactive_output() and colors_enabled() predicates below.
 bool stdout_is_tty() {
 #ifdef _WIN32
   return _isatty(_fileno(stdout)) != 0;
@@ -24,17 +24,20 @@ bool stdout_is_tty() {
   return isatty(STDOUT_FILENO) != 0;
 #endif
 }
-// NO_COLOR disables color without disabling any other output.
-bool colors_enabled() {
+std::string code(const char *seq) { return UI::colors_enabled() ? seq : ""; }
+} // namespace
+
+bool UI::interactive_output() { return stdout_is_tty(); }
+
+// NO_COLOR disables color without disabling any other output. This is the
+// single source of truth for the whole process; ThemeService defers to it so
+// the two color policies cannot drift apart.
+bool UI::colors_enabled() {
   if (std::getenv("NO_COLOR") != nullptr) {
     return false;
   }
   return stdout_is_tty();
 }
-std::string code(const char *seq) { return colors_enabled() ? seq : ""; }
-} // namespace
-
-bool UI::interactive_output() { return stdout_is_tty(); }
 
 // ===== Color Codes =====
 namespace Color {

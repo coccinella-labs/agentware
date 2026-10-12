@@ -37,6 +37,12 @@ AGENTWARE_API void print_quick_help();
 // True when stdout renders to an interactive terminal. Centralizes the
 // TTY check so output code can avoid control sequences in pipes.
 AGENTWARE_API bool interactive_output();
+// Single source of truth for whether ANSI escapes may be emitted: stdout must
+// be a terminal and NO_COLOR must be unset. TERM is deliberately not consulted;
+// a real TTY colors even when TERM is "dumb". Any subsystem that emits color,
+// including ThemeService, must defer to this rather than re-deciding, so the
+// two policies cannot drift apart again.
+AGENTWARE_API bool colors_enabled();
 AGENTWARE_API void print_system_info(const std::string &mode,
                                      const std::string &model);
 AGENTWARE_API void print_ready_interface(const std::string &mode,
