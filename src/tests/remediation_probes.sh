@@ -25,8 +25,15 @@ export USERPROFILE="$WORK"
 
 # Deterministic tool PATH: the stock probes must never see a real docker
 # (routing depends on its absence), while python3/curl stay available.
-# Fake-docker scenarios below prepend their stub dir explicitly.
-BASE_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+# Runner images may ship a real docker in /usr/bin, so shadow the name with
+# a failing stub; the binary resolves docker through PATH and treats this
+# as absent. Fake-docker scenarios below prepend their stub dir explicitly,
+# which keeps precedence over this shadow.
+NODOCKER_BIN="$WORK/nodocker-bin"
+mkdir -p "$NODOCKER_BIN"
+printf '#!/bin/sh\nexit 1\n' > "$NODOCKER_BIN/docker"
+chmod +x "$NODOCKER_BIN/docker"
+BASE_PATH="$NODOCKER_BIN:/usr/bin:/bin:/usr/sbin:/sbin"
 PROBE_PATH="$BASE_PATH"
 export PATH="$BASE_PATH"
 
