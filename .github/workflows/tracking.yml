@@ -23,7 +23,42 @@ jobs:
               console.log('No tracking issue configured');
               return;
             }
-            const { action, number } = context.payload;
+            const trackingNumber = parseInt(trackingIssueNumber, 10);
+            if (Number.isNaN(trackingNumber)) {
+              console.log(
+                'Skipping: TRACKING_ISSUE_NUMBER is not a number: ' + trackingIssueNumber
+              );
+              return;
+            }
+            // Read the configured target's CURRENT state. This must not be
+            // confused with the state of the item that triggered the run: a
+            // "closed" event for an unrelated PR says nothing about whether
+            // the tracking issue is still open.
+            let trackingIssue;
+            try {
+              const res = await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: trackingNumber,
+              });
+              trackingIssue = res.data;
+            } catch (err) {
+              // Fail safe. If the target's state cannot be determined, do not
+              // post: a comment on an unknown target is worse than none.
+              console.log(
+                'Skipping: could not read tracking issue #' + trackingNumber +
+                ': ' + err.message
+              );
+              return;
+            }
+            if (trackingIssue.state !== 'open') {
+              console.log(
+                'Skipping: tracking issue #' + trackingNumber + ' is ' +
+                trackingIssue.state
+              );
+              return;
+            }
+            const { action } = context.payload;
             const isIssue = context.eventName === 'issues';
             const item = context.payload[isIssue ? 'issue' : 'pull_request'];
             if (!item || item.locked) {
@@ -36,7 +71,7 @@ jobs:
             const createdAt = new Date(item.created_at).toISOString().split('T')[0];
             const updateMsg =
               '## Automated Update\n\n' +
-              '**' + type + ' #' + number + '** - ' + action + '\n' +
+              '**' + type + ' #' + item.number + '** - ' + action + '\n' +
               '- **Title**: ' + title + '\n' +
               '- **Status**: ' + state.toUpperCase() + '\n' +
               '- **Date**: ' + createdAt + '\n' +
@@ -45,6 +80,6 @@ jobs:
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: trackingIssueNumber,
+              issue_number: trackingNumber,
               body: updateMsg
             });
