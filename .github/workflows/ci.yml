@@ -127,11 +127,33 @@ jobs:
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
+            # Failures here must fail the job. This step previously ended in
+            # '|| true', which masked both build and test failures outright.
             cmake --build build --target preflight \
-              --config ${{ matrix.build_type }} || true
+              --config ${{ matrix.build_type }}
+            # Run the unit suite. This is the only CTest execution on Windows
+            # and it was previously absent entirely, so POSIX-guarded tests
+            # have never actually run there.
+            ctest --test-dir build -C ${{ matrix.build_type }} \
+              --output-on-failure -R basic_tests
           else
             make preflight
           fi
+
+      - name: note windows probe coverage
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "remediation_probes is deliberately excluded on Windows."
+          echo "It is not compatible today, and the gap is documented rather"
+          echo "than hidden:"
+          echo "  * the harness writes '#!/bin/bash' stub executables that the"
+          echo "    agent then execs; Windows CreateProcess has no shebang"
+          echo "    support, so the stubs can never run."
+          echo "  * it depends on python3 (Windows exposes python), curl, and"
+          echo "    script(1) for its pty probe."
+          echo "Porting it needs .bat/.cmd stubs and a tool shim, which is a"
+          echo "test-harness change beyond this CI repair."
 
       - uses: actions/upload-artifact@v6
         with:
