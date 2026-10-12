@@ -148,12 +148,12 @@ jobs:
           echo "It is not compatible today, and the gap is documented rather"
           echo "than hidden:"
           echo "  * the harness writes '#!/bin/bash' stub executables that the"
-          echo "    agent then execs; Windows CreateProcess has no shebang"
-          echo "    support, so the stubs can never run."
-          echo "  * it depends on python3 (Windows exposes python), curl, and"
-          echo "    script(1) for its pty probe."
-          echo "Porting it needs .bat/.cmd stubs and a tool shim, which is a"
-          echo "test-harness change beyond this CI repair."
+          echo "    agent then execs, to stand in for docker. Windows"
+          echo "    CreateProcess has no shebang support, so those stubs can"
+          echo "    never run. That is the decisive blocker."
+          echo "python3 is present on this runner and is not the problem."
+          echo "Porting it needs .bat/.cmd stubs, which is a test-harness"
+          echo "change beyond this CI repair."
 
       - uses: actions/upload-artifact@v6
         with:
