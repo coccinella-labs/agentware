@@ -1,5 +1,8 @@
-#include "platform.h"
 #include "ui.h"
+// After ui.h: that header includes config.h, which defines NOMINMAX on
+// Windows. platform.h includes <windows.h>, and without NOMINMAX already
+// defined, windef.h defines min/max as macros and std::max stops parsing.
+#include "platform.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
