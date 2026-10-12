@@ -1,5 +1,4 @@
 #include "command_router.h"
-#include "platform.h"
 #include "context_service.h"
 #include "file_service.h"
 #include "git_service.h"
@@ -11,6 +10,10 @@
 #include "version.h"
 #include "memory_manager.h"
 #include "search_service.h"
+
+// After the project headers: on Windows this pulls in <windows.h>, which
+// defines ERROR as 0 and would break the ERROR enum in theme_service.h.
+#include "platform.h"
 // NOTE: do not include agent.h here. It defines Agent with defaulted move
 // operations over unique_ptr<Services::AIService>, which is only forward
 // declared there; MSVC instantiates the deleter eagerly and fails, while
