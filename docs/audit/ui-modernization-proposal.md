@@ -10,13 +10,13 @@ blocks safe use.
 Items are preserved as originally proposed. Status against the current tree
 (`bdf33b2b`):
 
-- **"ANSI always emitted, even piped or under `NO_COLOR=1` / `TERM=dumb`"** —
+- **"ANSI always emitted, even piped or under `NO_COLOR=1` / `TERM=dumb`"** 
   **implemented (P1-1, `f908f2bf`).** Both surfaces now honor TTY state and `NO_COLOR`.
-- **"duplicate quick-help lines (collapse to one line)"** — **implemented
+- **"duplicate quick-help lines (collapse to one line)"**: **implemented
   (P1-2).** Quick help is generated from one de-duplicated list.
-- **"No responsive layout system" / narrow-width items** — **implemented (P1-3, `bdf33b2b`)**
+- **"No responsive layout system" / narrow-width items**: **implemented (P1-3, `bdf33b2b`)**
   for width-aware help, status, quick help, and prompts.
-- **P2-2, theme selection changes nothing globally — still open.** P1-1 unified
+- **P2-2, theme selection changes nothing globally: still open.** P1-1 unified
   gating, not palettes. No UI output reads the active theme.
 
 ## P2-1. Checkpoint ID-vs-name confusion

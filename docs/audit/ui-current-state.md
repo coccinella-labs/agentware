@@ -32,20 +32,20 @@ document is correct.
 | `f908f2bf` | P1-1, color-policy unification. |
 | `bdf33b2b` | P1-2 and P1-3, terminal width and width-aware UI. **Current `HEAD` and UI baseline.** |
 
-## 1. Committed baseline — `HEAD` at `bdf33b2b`
+## 1. Committed baseline: `HEAD` at `bdf33b2b`
 
 What a fresh clone of `main` contains once these commits are published. Until
 the two commits are pushed, a fresh clone of `origin/main` has only `851182a5`
 and therefore none of this.
 
-### P1-1 — color-policy unification (`f908f2bf`)
+### P1-1: color-policy unification (`f908f2bf`)
 
 `ThemeService::is_color_supported()` defers to `Utils::UI::colors_enabled()`,
 which tests TTY state and `NO_COLOR` and never inspects `TERM`, so a real
 terminal colors even when `TERM=dumb`. Only the *gating* was unified: no palette
 or theme behavior changed.
 
-### P1-2 and P1-3 — width-aware layout (`bdf33b2b`)
+### P1-2 and P1-3: width-aware layout (`bdf33b2b`)
 
 Terminal width comes from `ioctl(STDOUT_FILENO, TIOCGWINSZ)` with a validated
 result, falling back to 80 columns when detection fails. `COLUMNS` is
@@ -72,7 +72,7 @@ file: `Agent::get_user_choice` calls the P1-3 prompt wrapper. Reconstructing
 `f908f2bf` without it fails to compile. Any future split of these commits must
 carry that dependency.
 
-## 2. Startup layout budget — read before changing startup
+## 2. Startup layout budget: read before changing startup
 
 The startup block measures **25 modeled display lines at width 40, against a
 budget of 25. There is no slack.** Any change to the startup sequence must be
@@ -127,16 +127,16 @@ process-tree leak, `setsid` escape, `docker stop` timeout, and the read-error
 Superseded observations are retained for traceability rather than reproduced
 here. Each is marked, with the state that supersedes it, in the documents below.
 
-- `ui-captures/README.md` — all captures are **pre-fix baseline evidence**
+- `ui-captures/README.md`: all captures are **pre-fix baseline evidence**
   recorded against `851182a5`, before the P1 work; per-file supersession table.
-- `agent-ui-audit.md` — U-1, U-2, U-5 resolved by `f908f2bf` and `bdf33b2b`;
+- `agent-ui-audit.md`: U-1, U-2, U-5 resolved by `f908f2bf` and `bdf33b2b`;
   U-3, U-4 open. Preserves original evidence and the corrections made during
   that audit.
-- `ui-current-state.md` Appendix A — the original 2026-10-11 live-execution
+- `ui-current-state.md` Appendix A: the original 2026-10-11 live-execution
   record, covering 13 UI states, captured at `851182a5`. Still the only record of
   what was executed and what was not tested.
 - `ui-rendering-inventory.md`, `ui-modernization-proposal.md`,
-  `ui-ux-modernization-audit.md`, `remediation-plan-product-ui.md` — earlier
+  `ui-ux-modernization-audit.md`, `remediation-plan-product-ui.md`: earlier
   proposal and source-map records, each carrying a dated status banner.
 
 ### When the baseline changes again

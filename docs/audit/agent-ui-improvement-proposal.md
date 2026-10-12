@@ -23,8 +23,8 @@ compensate for a behavioral defect with a cosmetic change.
 | P1-1 | Implemented in `f908f2bf` | 8/8 color-policy conditions; `ColorPolicyTest` |
 | P1-2 | Implemented in `bdf33b2b` | 0 duplicate quick-help tokens at 40/60/80/120 |
 | P1-3 | Implemented in `bdf33b2b` | 11/11 acceptance assertions; 12 `LayoutTest` cases |
-| P2-4 | **Not started** | — |
-| P2-5 | **Not started** | — |
+| P2-4 | **Not started** | n/a |
+| P2-5 | **Not started** | n/a |
 
 P1-2 and P1-3 were implemented together, as the sequencing note below predicted:
 both depend on how terminal width is obtained. That width now comes from
@@ -33,7 +33,7 @@ fallback when detection fails. `COLUMNS` is deliberately not used.
 
 ## Priorities
 
-### P1-1. Unify the color policy — **implemented and measured**
+### P1-1. Unify the color policy: **implemented and measured**
 
 **Addresses:** U-1.
 **Evidence:** the theme path ignores both TTY state and `NO_COLOR`; under
@@ -64,7 +64,7 @@ conditions, including the two rows a faulty capture harness had previously
 corrupted. Deliberately **not** done, as scoped: no palette changes, and
 `NO_COLOR=""` semantics are untouched (see Open follow-ups).
 
-### P1-2. Fix startup layout — **implemented and measured**
+### P1-2. Fix startup layout: **implemented and measured**
 
 **Addresses:** U-2 and the 136-column startup line in U-5.
 **Evidence:** mode and model prompts render on one 136-column line because the
@@ -83,7 +83,7 @@ Proposed change, two parts:
 Not proposed: reducing the amount of help shown. The goal is a clear set, not
 necessarily a shorter one.
 
-### P1-3. Make narrow-width output readable — **implemented and measured**
+### P1-3. Make narrow-width output readable: **implemented and measured**
 
 **Addresses:** U-5.
 **Evidence:** 39 of 69 `help` lines exceed 40 columns; the status line is 81;
@@ -110,7 +110,7 @@ fell from 39 of 69 to 1 of 90. The single exception is
 proposal predicted would have to exceed the width rather than be truncated. The
 truncation guard held: no command syntax is cut at any width.
 
-### P2-4. Reconcile the help screens — **not started**
+### P2-4. Reconcile the help screens: **not started**
 
 **Addresses:** U-3.
 **Evidence:** three screens, 47 / 37 / 29 lines, with `github:*` and
@@ -128,7 +128,7 @@ Not proposed: deciding which commands should exist. The audit records that
 `/clear` is absent from `help`. Those are behavioral questions, already
 tracked in `agent-ux-audit.md`.
 
-### P2-5. Standardize output and error guidance — **not started**
+### P2-5. Standardize output and error guidance: **not started**
 
 **Addresses:** U-4.
 **Evidence:** indentation varies by command, and `/theme current` indents its

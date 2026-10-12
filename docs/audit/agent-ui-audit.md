@@ -84,7 +84,7 @@ Note that the shared UI path is correct. This is not a case of color being
 unconditionally broken; it is one subsystem bypassing a policy the rest of the
 UI already respects.
 
-### Resolution — P1-1. Implemented in `f908f2bf`, measured
+### Resolution: P1-1. Implemented in `f908f2bf`, measured
 
 `ThemeService::is_color_supported()` now delegates to
 `Utils::UI::colors_enabled()` instead of consulting `$TERM`, leaving a single
@@ -120,7 +120,7 @@ line opens with `version`, which reads as a continuation of the first rather
 than the start of a new group. A first-time user cannot tell which entries are
 alternatives and which are the recommended starting set.
 
-### Resolution — P1-2. Implemented in `bdf33b2b`, measured
+### Resolution: P1-2. Implemented in `bdf33b2b`, measured
 
 Quick help is now emitted from a single de-duplicated token list, so a command
 cannot repeat across lines by construction. The wrapping is width-aware rather
@@ -251,7 +251,7 @@ describes. Affected entries include:
    75 |   /checkpoint <command>      - Create, list, inspect, or delete checkpoints
 ```
 
-### Resolution — P1-3. Implemented in `bdf33b2b`, measured
+### Resolution: P1-3. Implemented in `bdf33b2b`, measured
 
 Literal space padding is replaced by width-aware layout. Terminal width comes
 from `ioctl(STDOUT_FILENO, TIOCGWINSZ)` with a validated result and an
