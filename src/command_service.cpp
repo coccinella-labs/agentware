@@ -65,7 +65,7 @@ std::string CommandService::execute(const std::string &command) {
     auto future = std::async(std::launch::async, [&]() -> std::string {
       // Use platform-agnostic process handling
       FILE *pipe = Utils::Platform::open_process(
-          command + Utils::Platform::get_shell_redirect_both(), "r");
+          command + Utils::Platform::get_shell_redirect(), "r");
       return execute_command(command, pipe);
     });
 

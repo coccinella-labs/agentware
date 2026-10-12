@@ -128,9 +128,12 @@ std::string SandboxService::generate_container_name() {
 }
 
 bool SandboxService::is_docker_available() {
-  SpawnedResult result = spawn_capture({"docker", "--version"});
-  return result.exit_code == 0 &&
-         result.output.find("Docker version") != std::string::npos;
+  // A present CLI binary is not evidence that the sandbox can proceed: with
+  // the daemon stopped the CLI still answers --version, which would let the UI
+  // claim isolation it cannot provide. Query the daemon instead, and let the
+  // caller present the host fallback when this fails.
+  SpawnedResult result = spawn_capture({"docker", "info"});
+  return result.exit_code == 0;
 }
 
 SpawnedResult SandboxService::spawn_capture(

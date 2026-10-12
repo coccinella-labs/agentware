@@ -4,6 +4,7 @@
 #include "auth_service.h"
 #include "checkpoint_service.h"
 #include "codebase_service.h"
+#include "command_router.h"
 #include "command_service.h"
 #include "context_service.h"
 #include "error_service.h"
@@ -273,40 +274,23 @@ void Agent::process_user_input(const std::string &input) {
   command_count_++;
   std::string trimmed_input = trim_copy(input);
 
-  // Handle @ file injection commands
-  if (trimmed_input.find('@') != std::string::npos) {
-    handle_file_injection_command(trimmed_input);
-    return;
-  }
-
-  // Handle ! shell commands
-  if (trimmed_input.rfind("!", 0) == 0) {
+  switch (Core::classify_input(trimmed_input)) {
+  case Core::InputRoute::Shell:
     handle_shell_command(trimmed_input);
     return;
-  }
-
-  // Handle / meta commands
-  if (trimmed_input.rfind("/", 0) == 0) {
+  case Core::InputRoute::Meta:
     handle_meta_command(trimmed_input);
     return;
-  }
-
-  // Bare session words are advertised without a colon, so route exactly
-  // these three to direct dispatch. Anything else (including near-matches
-  // like "memoryfoo") keeps the existing behavior below. The prefix
-  // matching inside handle_direct_command is a known residual quirk.
-  if (trimmed_input == "forget" || trimmed_input == "memory" ||
-      trimmed_input == "clear") {
+  case Core::InputRoute::FileInjection:
+    handle_file_injection_command(trimmed_input);
+    return;
+  case Core::InputRoute::DirectCommand:
     handle_direct_command(trimmed_input);
     return;
+  case Core::InputRoute::Chat:
+    break;
   }
-
-  // Check for direct commands (detect colon)
-  if (trimmed_input.find(':') != std::string::npos) {
-    handle_direct_command(trimmed_input);
-  } else {
-    handle_ai_chat(trimmed_input);
-  }
+  handle_ai_chat(trimmed_input);
 }
 
 void Agent::handle_direct_command(const std::string &input) {
@@ -413,6 +397,21 @@ void Agent::handle_direct_command(const std::string &input) {
       auto access = Utils::Validator::validate_file_access(filename);
       if (!access.is_valid) {
         result = "Error: " + access.error_message;
+      } else if (std::filesystem::exists(filename)) {
+        // Replacing existing content is destructive, so require explicit
+        // consent. Creating a new file needs no prompt.
+        std::cout << "File already exists: " << filename
+                  << ". Overwrite? (y/N): " << std::flush;
+        std::string confirm;
+        const bool accepted =
+            static_cast<bool>(std::getline(std::cin, confirm)) &&
+            (confirm == "y" || confirm == "Y");
+        if (!accepted) {
+          result = "Write cancelled; existing file left unchanged: " + filename;
+        } else {
+          result = Services::FileService::write_file(filename, content);
+        }
+        record_interaction(*memory_, "write:" + filename, result);
       } else {
         result = Services::FileService::write_file(filename, content);
         record_interaction(*memory_, "write:" + filename, result);
@@ -510,14 +509,14 @@ void Agent::handle_direct_command(const std::string &input) {
     std::string fact = trim_copy(input.substr(9));
     record_global_fact(*memory_, fact);
     result = "Remembered: " + fact;
-  } else if (input.rfind("forget", 0) == 0) {
+  } else if (Core::matches_bare_verb(input, "forget")) {
     memory_->clear_global_memory();
     result = "Global memory cleared";
-  } else if (input.rfind("memory", 0) == 0) {
+  } else if (Core::matches_bare_verb(input, "memory")) {
     std::string global_context = memory_->get_global_context();
     result =
         global_context.empty() ? "No global memories stored" : global_context;
-  } else if (input.rfind("clear", 0) == 0) {
+  } else if (Core::matches_bare_verb(input, "clear")) {
     memory_->clear_memory();
     result = "Session memory cleared";
   } else if (input.rfind("analyze:", 0) == 0) {
@@ -806,8 +805,11 @@ static std::string execute_routed_command(const std::string &command) {
         Services::SandboxService::execute_command(command);
     return Services::SandboxService::format_result(sandbox_result);
   }
-  std::cout << "Sandbox unavailable (Docker not found): this command would "
-               "run on the host without isolation."
+  // The sandbox was unavailable because the Docker daemon could not be
+  // reached. This covers both a missing CLI and a stopped daemon, so the
+  // reason is stated rather than assumed to be a missing install.
+  std::cout << "Sandbox unavailable (Docker daemon not reachable): this "
+               "command would run on the host without isolation."
             << std::endl;
   std::cout << "Run on host without isolation? (y/N): ";
   std::string confirm;
@@ -2172,7 +2174,11 @@ void Agent::handle_auth_command(const std::string &command) {
     std::cout << "Error: " << e.what() << std::endl;
   }
 
-  record_interaction(*memory_, "/auth " + command, "Auth command executed");
+  // Never let a key supplied at runtime reach memory, logs, or the
+  // checkpoint copies of memory.
+  record_interaction(*memory_,
+                     Core::redact_secrets("/auth " + command),
+                     "Auth command executed");
 }
 
 void Agent::handle_sandbox_command(const std::string &command) {
@@ -2245,8 +2251,20 @@ void Agent::handle_sandbox_command(const std::string &command) {
                   << std::endl;
       } else {
         std::cout << "Docker Status: Not Available" << std::endl;
-        std::cout << "Please install Docker to use sandbox features."
-                  << std::endl;
+        // Distinguish a missing CLI from a daemon that cannot be reached, so
+        // the user is not told to install something they already have.
+        const std::string version =
+            Services::SandboxService::get_docker_version();
+        if (version == "Not available" || version.empty()) {
+          std::cout << "Docker CLI not found on PATH. Install Docker to use "
+                       "sandbox features."
+                    << std::endl;
+        } else {
+          std::cout << "Docker CLI found (" << version
+                    << ") but the daemon is not responding. Start Docker to "
+                       "use sandbox features."
+                    << std::endl;
+        }
       }
 
     } else if (action == "containers") {

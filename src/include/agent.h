@@ -50,6 +50,9 @@ public:
   void handle_shell_command(const std::string &input);
   void handle_meta_command(const std::string &input);
 
+  // Routing rules live in command_router.h so they can be unit tested
+  // without agent.h, which the test suite deliberately avoids including.
+
   // File injection helpers
   std::string process_file_injections(const std::string &input);
   std::string read_file_or_directory(const std::string &path);

@@ -1,3 +1,4 @@
+#include "command_router.h"
 #include "context_service.h"
 #include "file_service.h"
 #include "git_service.h"
@@ -654,8 +655,10 @@ TEST(SandboxDockerTest, DaemonFailureReported) {
   fs::create_directories(dir / "bin", ec);
   {
     std::ofstream stub(dir / "bin" / "docker");
+    // The daemon is reachable (\"info\" answers) so the sandbox path is
+    // taken; the run itself fails.
     stub << "#!/bin/sh\n"
-            "if [ \"$1\" = \"--version\" ]; then\n"
+            "if [ \"$1\" = \"--version\" ] || [ \"$1\" = \"info\" ]; then\n"
             "  echo \"Docker version 99.0-fake\"; exit 0\n"
             "fi\n"
             "echo \"fake: cannot connect\" >&2\n"
@@ -699,8 +702,10 @@ TEST(SandboxDockerTest, HangEnforcesTimeout) {
   fs::create_directories(dir / "bin", ec);
   {
     std::ofstream stub(dir / "bin" / "docker");
+    // The daemon is reachable; only the run hangs, so the bounded runner
+    // must still return control.
     stub << "#!/bin/sh\n"
-            "if [ \"$1\" = \"--version\" ]; then\n"
+            "if [ \"$1\" = \"--version\" ] || [ \"$1\" = \"info\" ]; then\n"
             "  echo \"Docker version 99.0-fake\"; exit 0\n"
             "fi\n"
             "if [ \"$1\" = \"stop\" ]; then exit 0; fi\n"
@@ -1359,4 +1364,105 @@ TEST(SearchPrompt, MentionsOnlyDetectedTools) {
   with_fd.fd_binary = "/usr/bin/fd";
   EXPECT_NE(Services::search_tool_prompt(with_fd).find("fd is installed"),
             std::string::npos);
+}
+
+// ===== Command dispatch boundary =====
+//
+// These exercise Core::classify_input and Core::matches_bare_verb directly.
+// The end-to-end probes in src/tests/remediation_probes.sh cover the same
+// rules through the real binary; these pin the routing logic so a regression
+// is caught without a REPL.
+
+TEST(BareVerbMatching, RequiresTheCompleteVerb) {
+  // The three no-argument memory verbs must match only in their entirety.
+  EXPECT_TRUE(Core::matches_bare_verb("clear", "clear"));
+  EXPECT_TRUE(Core::matches_bare_verb("forget", "forget"));
+  EXPECT_TRUE(Core::matches_bare_verb("memory", "memory"));
+
+  // Regression: prefix matching used to make these destructive.
+  EXPECT_FALSE(Core::matches_bare_verb("clear: the screen please", "clear"));
+  EXPECT_FALSE(Core::matches_bare_verb("forget: nothing important", "forget"));
+  EXPECT_FALSE(Core::matches_bare_verb("memory: is full", "memory"));
+  EXPECT_FALSE(Core::matches_bare_verb("clearance-notes: x", "clear"));
+  EXPECT_FALSE(Core::matches_bare_verb("forget-it: x", "forget"));
+  EXPECT_FALSE(Core::matches_bare_verb("memoryfoo", "memory"));
+  EXPECT_FALSE(Core::matches_bare_verb("clear ", "clear"));
+  EXPECT_FALSE(Core::matches_bare_verb("", "clear"));
+}
+
+TEST(DispatchRouting, ExplicitPrefixesOutrankAtSign) {
+  using Route = Core::InputRoute;
+  // Regression: '@' matched anywhere and diverted these to chat.
+  EXPECT_EQ(Core::classify_input("!echo hello@world"), Route::Shell);
+  EXPECT_EQ(Core::classify_input("cmd:echo bob@x"), Route::DirectCommand);
+  EXPECT_EQ(Core::classify_input("/context show @notes"), Route::Meta);
+  EXPECT_EQ(Core::classify_input("/auth key together a@b"), Route::Meta);
+}
+
+TEST(DispatchRouting, AtSignNeedsATokenBoundary) {
+  using Route = Core::InputRoute;
+  // Regression: an email address was read as a file name.
+  EXPECT_EQ(Core::classify_input("mail me at bob@example.com"), Route::Chat);
+  EXPECT_EQ(Core::classify_input("version 1.2@3 is fine"), Route::Chat);
+
+  // Genuine references at a boundary still inject.
+  EXPECT_EQ(Core::classify_input("@notes.txt"), Route::FileInjection);
+  EXPECT_EQ(Core::classify_input("please read @notes.txt now"),
+            Route::FileInjection);
+  EXPECT_EQ(Core::classify_input("see \"@notes.txt\""), Route::FileInjection);
+}
+
+TEST(DispatchRouting, PlainCommandsRouteAsExpected) {
+  using Route = Core::InputRoute;
+  EXPECT_EQ(Core::classify_input("!ls"), Route::Shell);
+  EXPECT_EQ(Core::classify_input("/stats"), Route::Meta);
+  EXPECT_EQ(Core::classify_input("read:notes.txt"), Route::DirectCommand);
+  EXPECT_EQ(Core::classify_input("clear"), Route::DirectCommand);
+  EXPECT_EQ(Core::classify_input("forget"), Route::DirectCommand);
+  EXPECT_EQ(Core::classify_input("memory"), Route::DirectCommand);
+  EXPECT_EQ(Core::classify_input("hello there"), Route::Chat);
+}
+
+TEST(DispatchRouting, ProseWithAColonIsNotADestructiveVerb) {
+  using Route = Core::InputRoute;
+  // Still colon-routed, but the verb matcher must refuse it, so no wipe.
+  EXPECT_EQ(Core::classify_input("clear: the screen please"),
+            Route::DirectCommand);
+  EXPECT_FALSE(Core::matches_bare_verb("clear: the screen please", "clear"));
+}
+
+TEST(FileReferenceBoundary, DetectsTokenStartsOnly) {
+  EXPECT_TRUE(Core::is_file_reference_at("@a", 0));
+  EXPECT_TRUE(Core::is_file_reference_at("x @a", 2));
+  EXPECT_TRUE(Core::is_file_reference_at("\"@a\"", 1));
+
+  EXPECT_FALSE(Core::is_file_reference_at("bob@example.com", 3));
+  EXPECT_FALSE(Core::is_file_reference_at("a@b", 1));
+  EXPECT_FALSE(Core::is_file_reference_at("no at sign", 5));
+  EXPECT_FALSE(Core::is_file_reference_at("@a", 9)); // out of range
+  EXPECT_FALSE(Core::is_file_reference_at("ab", 1)); // not an '@'
+}
+
+TEST(SecretRedaction, RemovesAuthKeyValue) {
+  // Regression: the raw command line was written to session memory and then
+  // copied into every checkpoint.
+  const std::string redacted =
+      Core::redact_secrets("/auth key together s3cr3t-probe-key");
+  EXPECT_EQ(redacted.find("s3cr3t-probe-key"), std::string::npos);
+  EXPECT_NE(redacted.find("together"), std::string::npos);
+
+  // Trailing content cannot smuggle the value back out.
+  EXPECT_EQ(Core::redact_secrets("/auth key together a b c").find("a b c"),
+            std::string::npos);
+}
+
+TEST(SecretRedaction, LeavesOtherCommandsIntact) {
+  EXPECT_EQ(Core::redact_secrets("/auth status"),
+            "/auth status");
+  EXPECT_EQ(Core::redact_secrets("/auth providers"),
+            "/auth providers");
+  EXPECT_EQ(Core::redact_secrets("read:notes.txt"), "read:notes.txt");
+  EXPECT_EQ(Core::redact_secrets("!echo hello"), "!echo hello");
+  // A provider with no key value is left as written.
+  EXPECT_EQ(Core::redact_secrets("/auth key "), "/auth key ");
 }

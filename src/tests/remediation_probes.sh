@@ -417,17 +417,85 @@ probe "routing denies without docker" 0 "Sandbox unavailable" \
   "2" "1" "!echo hi" "exit"
 probe "routing opt-out cancels" 0 "Command cancelled by user" \
   "2" "1" "!echo hi" "N" "exit"
-probe "routing opt-in runs on host" 0 "hi" \
-  "2" "1" "!echo hi" "y" "exit"
+probe "routing opt-in runs on host" 0 "HELLO_FROM_SHELL" \
+  "2" "1" "!echo HELLO_FROM_SHELL" "y" "exit"
 probe "routing cmd denies without docker" 0 "Sandbox unavailable" \
   "2" "1" "cmd:echo hi" "exit"
 probe "routing bare bang is usage" 0 "Usage: !<command>" \
   "2" "1" "!" "exit"
 
+# D1: command dispatch must match a complete verb with valid argument
+# boundaries. Prose that merely starts with a verb, or that contains a colon,
+# must never reach a destructive memory command.
+probe "D1 colon prose does not wipe session memory" 0 "read:sample.txt" \
+  "2" "1" "read:sample.txt" "clear: the screen please" "read:data/memory.txt" "exit"
+probe "D1 colon prose does not delete global memory" 0 "keepmeplease" \
+  "2" "1" "remember:keepmeplease" "forget: nothing important" "memory" "exit"
+probe_absent "D1 colon prose reports no session clear" 0 "Session memory cleared" \
+  "2" "1" "clear: the screen please" "exit"
+probe_absent "D1 colon prose reports no global clear" 0 "Global memory cleared" \
+  "2" "1" "forget: nothing important" "exit"
+probe_absent "D1 prefix near-match does not wipe session memory" 0 "Session memory cleared" \
+  "2" "1" "clearance-notes: keep" "exit"
+probe_absent "D1 prefix near-match does not delete global memory" 0 "Global memory cleared" \
+  "2" "1" "forget-it: keep" "exit"
+# The legitimate no-argument forms must keep working.
+probe "D1 bare clear still wipes session memory" 0 "Session memory cleared" \
+  "2" "1" "clear" "exit"
+probe "D1 bare forget still deletes global memory" 0 "Global memory cleared" \
+  "2" "1" "remember:keepmeplease" "forget" "memory" "exit"
+probe "D1 bare memory still shows global memory" 0 "keepmeplease" \
+  "2" "1" "remember:keepmeplease" "memory" "exit"
+
+# D2: explicit command prefixes outrank '@', and '@' only starts a file
+# reference at a token boundary.
+probe "D2 at-sign does not hijack shell command" 0 "Sandbox unavailable" \
+  "2" "1" "!echo hello@world" "N" "exit"
+probe "D2 at-sign does not hijack meta command" 0 "Unknown meta command" \
+  "2" "1" "/nosuchcmd@x" "exit"
+probe_absent "D2 email address is not a file reference" 0 "File not found" \
+  "2" "1" "mail me at bob@example.com" "read:data/memory.txt" "exit"
+probe "D2 at-reference after space still injects" 0 "alpha" \
+  "2" "1" "please summarize @sample.txt now" "read:data/memory.txt" "exit"
+
+# D3: a key supplied at runtime must never reach persisted state. The
+# persisted files are the memory file and any checkpoint copy of it.
+probe_absent "D3 auth key is not written to session memory" 0 "s3cr3t-probe-key" \
+  "2" "1" "/auth key together s3cr3t-probe-key" "read:data/memory.txt" "exit"
+probe_absent "D3 auth key is not copied into checkpoints" 0 "s3cr3t-probe-key" \
+  "2" "1" "/auth key together s3cr3t-probe-key" "/checkpoint create d3secret" \
+  "grep:s3cr3t-probe-k.y:data/checkpoints" "exit"
+
+# D4: write: must ask before replacing a file that already exists. Each
+# probe re-seeds the target so the assertions do not depend on ordering.
+seed_existing() { printf 'ORIGINAL_PROBE_CONTENT\n' > existing.txt; }
+
+seed_existing
+probe "D4 write prompts before overwrite" 0 "already exists" \
+  "2" "1" "write:existing.txt REPLACED_PROBE_CONTENT" "N" "exit"
+seed_existing
+probe "D4 declined overwrite leaves the file intact" 0 "ORIGINAL_PROBE_CONTENT" \
+  "2" "1" "write:existing.txt REPLACED_PROBE_CONTENT" "N" "read:existing.txt" "exit"
+seed_existing
+probe_absent "D4 declined overwrite writes nothing" 0 "REPLACED_PROBE_CONTENT" \
+  "2" "1" "write:existing.txt REPLACED_PROBE_CONTENT" "N" "read:existing.txt" "exit"
+seed_existing
+probe "D4 write overwrites when confirmed" 0 "REPLACED_PROBE_CONTENT" \
+  "2" "1" "write:existing.txt REPLACED_PROBE_CONTENT" "y" "read:existing.txt" "exit"
+rm -f brand_new_probe.txt
+probe_absent "D4 write creates a new file without prompting" 0 "already exists" \
+  "2" "1" "write:brand_new_probe.txt hello" "read:brand_new_probe.txt" "exit"
+rm -f brand_new_probe.txt
+probe "D4 write still creates a new file" 0 "hello" \
+  "2" "1" "write:brand_new_probe.txt hello" "read:brand_new_probe.txt" "exit"
+
 # Fake docker for routing success/failure paths (no daemon required).
 mkdir -p fakebin
 cat > fakebin/docker <<'EOF'
 #!/bin/bash
+# Models three distinct Docker states. A present CLI binary is not evidence
+# that the daemon can serve a request, so `--version` answers in every mode
+# while `info` reflects daemon reachability.
 if [ "$1" = "--version" ]; then
   echo "Docker version 99.0-fake, build test"
   exit 0
@@ -436,11 +504,29 @@ if [ "$1" = "stop" ]; then
   exit 0
 fi
 case "${FAKE_DOCKER_MODE:-ok}" in
-  fail)
+  daemon-down)
+    # CLI present, daemon unreachable.
+    if [ "$1" = "info" ]; then
+      echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock." >&2
+      exit 1
+    fi
     echo "fake: cannot connect to the Docker daemon" >&2
     exit 1
     ;;
+  fail)
+    # Daemon reachable, but the run itself fails.
+    if [ "$1" = "info" ]; then
+      echo "Server Version: 99.0-fake"
+      exit 0
+    fi
+    echo "fake: run failed" >&2
+    exit 1
+    ;;
   *)
+    if [ "$1" = "info" ]; then
+      echo "Server Version: 99.0-fake"
+      exit 0
+    fi
     echo "fake-output"
     exit 0
     ;;
@@ -456,6 +542,17 @@ probe "routing sandbox output shown" 0 "fake-output" \
 export FAKE_DOCKER_MODE=fail
 probe "routing docker failure reported" 0 "Exit code: 1" \
   "2" "1" "!echo hi" "exit"
+export FAKE_DOCKER_MODE=ok
+
+# A present docker CLI must not be reported as an established sandbox.
+export FAKE_DOCKER_MODE=daemon-down
+probe_absent "routing does not claim sandbox when daemon is down" 0 "Sandboxed" \
+  "2" "1" "!echo hi" "N" "exit"
+probe "routing asks consent when daemon is down" 0 "Sandbox unavailable" \
+  "2" "1" "!echo hi" "N" "exit"
+probe_absent "sandbox status does not claim available when daemon is down" \
+  0 "Docker Status: Available" \
+  "2" "1" "/sandbox status" "exit"
 export FAKE_DOCKER_MODE=ok
 
 # Pass A terminal capability: NO_COLOR disables escapes without removing
