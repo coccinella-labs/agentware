@@ -281,6 +281,17 @@ SpawnedResult SandboxService::spawn_capture(
       // Own process group, so a timeout can kill the whole tree rather than
       // just this process. Unbounded callers keep the inherited group so
       // their existing signal behavior is unchanged.
+      //
+      // Known behavior change, accepted rather than fixed here: because the
+      // child no longer shares the terminal's foreground process group, a
+      // terminal Ctrl-C no longer reaches it. The agent installs no signal
+      // handler, so Ctrl-C still terminates the agent; what can now linger is
+      // the local docker client, until its container exits. Nothing
+      // user-visible is affected either way: the daemon owns the container,
+      // and --rm removes it when the command exits, so killing the client
+      // never provided container cleanup. This applies to the POSIX path
+      // only. The Windows branch below is unchanged and does not create a
+      // process group at all.
       setpgid(0, 0);
     }
     dup2(pipefd[1], STDOUT_FILENO);
@@ -317,6 +328,13 @@ SpawnedResult SandboxService::spawn_capture(
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::seconds(timeout_seconds);
     for (;;) {
+      // Checked before the read as well as after it. A descendant that
+      // inherits the pipe and keeps writing would otherwise keep the read
+      // loop returning data and postpone the bound indefinitely.
+      if (std::chrono::steady_clock::now() >= deadline) {
+        timed_out = true;
+        break;
+      }
       const ssize_t count = read(pipefd[0], buffer, sizeof(buffer));
       if (count > 0) {
         output.append(buffer, static_cast<size_t>(count));
@@ -326,10 +344,6 @@ SpawnedResult SandboxService::spawn_capture(
         break; // EOF: the child closed its end.
       }
       if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
-        break;
-      }
-      if (std::chrono::steady_clock::now() >= deadline) {
-        timed_out = true;
         break;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -346,10 +360,18 @@ SpawnedResult SandboxService::spawn_capture(
 
   close(pipefd[0]);
   if (timed_out) {
-    // Kill the whole process group. Signalling only the direct child would
-    // orphan anything it spawned, which for a wedged daemon means a stray
-    // process outliving the probe.
+    // Kill the whole process group so a wedged command's descendants do not
+    // survive. Signalling only the direct child would orphan them.
     kill(-pid, SIGKILL);
+    // Then signal the direct child unconditionally. The group kill above is
+    // ignored if setpgid never took effect, and the waitpid below is blocking
+    // with no WNOHANG, so an unkilled child would park the worker forever and
+    // reintroduce the thread leak this bound exists to prevent. When the group
+    // did form this second call is a harmless no-op; it is deliberately not
+    // gated on the group's success, because reaping must not depend on it.
+    // Issued before waitpid, while the pid is still unreaped and so cannot
+    // have been recycled.
+    kill(pid, SIGKILL);
   }
   int status = 0;
   while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
@@ -369,11 +391,15 @@ BoundedResult SandboxService::run_bounded(
   BoundedResult result;
   std::promise<SpawnedResult> done;
   std::future<SpawnedResult> finished = done.get_future();
-  // Detached worker owns its captures, so abandoning the future on a
-  // wedged daemon leaks only a reaped-at-exit thread, never the REPL.
+  // The worker is given the same deadline as the caller waits for. Without
+  // it, a wedged command leaves this thread blocked forever inside
+  // spawn_capture's drain loop: the loop only ends at EOF, which needs every
+  // write end of the pipe closed, which needs the whole process tree gone.
+  // Bounding the spawn is what lets the worker finish and release its
+  // captures; the detached thread then exits on its own instead of leaking.
   std::thread(
-      [promise = std::move(done), argv]() mutable {
-        promise.set_value(spawn_capture(argv));
+      [promise = std::move(done), argv, timeout_seconds]() mutable {
+        promise.set_value(spawn_capture(argv, timeout_seconds));
       })
       .detach();
   if (finished.wait_for(std::chrono::seconds(timeout_seconds)) ==
@@ -381,6 +407,14 @@ BoundedResult SandboxService::run_bounded(
     SpawnedResult spawned = finished.get();
     result.output = spawned.output;
     result.exit_code = spawned.exit_code;
+    if (spawned.timed_out) {
+      // The worker's own deadline fired at effectively the same moment as the
+      // wait above, so this is a timeout, not a plain failure. Reporting it as
+      // an ordinary result would hide it.
+      result.timed_out = true;
+      result.error_message =
+          "Command execution timed out; container stop requested";
+    }
     return result;
   }
   // Deadline exceeded: bounded stop attempt, then a grace reap. If the

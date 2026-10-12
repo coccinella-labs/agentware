@@ -1666,3 +1666,95 @@ TEST(DockerProbeTest, ZeroTimeoutMeansUnbounded) {
   EXPECT_EQ(out.exit_code, 0);
 #endif
 }
+
+TEST(SandboxBoundedTest, TimeoutLeavesNoProcessTreeBehind) {
+#ifdef _WIN32
+  GTEST_SKIP() << "fake-docker stub needs a POSIX shell";
+#else
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  auto dir = fs::temp_directory_path() / "agentware_bounded_tree";
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir / "bin", ec);
+  const fs::path pid_file = dir / "descendant.pid";
+  const fs::path child_pid_file = dir / "child.pid";
+  {
+    // The command stub spawns a long-lived descendant that inherits the
+    // pipe and never exits. That is the actual leak: the worker's drain loop
+    // cannot reach EOF, so the thread and the whole tree outlive the call.
+    std::ofstream stub(dir / "bin" / "docker");
+    stub << "#!/bin/sh\n"
+            "if [ \"$1\" = \"--version\" ] || [ \"$1\" = \"info\" ]; then\n"
+            "  echo \"Server Version: 99.0-fake\"; exit 0\n"
+            "fi\n"
+            "if [ \"$1\" = \"stop\" ]; then exit 0; fi\n"
+            // Export this shell's own pid, which is the direct child the
+            // agent forked, so the assertions below cover the whole tree and
+            // not just one member of it.
+            "echo $$ > \"" << child_pid_file.string() << "\"\n"
+            "(sleep 89) &\n"
+            "echo $! > \"" << pid_file.string() << "\"\n"
+            "sleep 89\n";
+  }
+  fs::permissions(dir / "bin" / "docker",
+                  fs::perms::owner_exec | fs::perms::owner_read, ec);
+  auto old_cwd = fs::current_path(ec);
+  fs::current_path(dir, ec);
+  ASSERT_FALSE(ec);
+  const char *old_path = std::getenv("PATH");
+  const std::string saved_path = old_path != nullptr ? old_path : "";
+  setenv("PATH", ((dir / "bin").string() + ":/usr/bin:/bin").c_str(), 1);
+
+  Services::SandboxConfig config;
+  config.name = "test-tree-leak";
+  config.image = "ubuntu:22.04";
+  config.timeout_seconds = 2;
+  ASSERT_TRUE(
+      Services::SandboxService::create_sandbox_config("test-tree-leak", config));
+
+  auto start = std::chrono::steady_clock::now();
+  Services::SandboxResult result =
+      Services::SandboxService::execute_command("echo hi", "test-tree-leak");
+  auto elapsed = std::chrono::steady_clock::now() - start;
+
+  EXPECT_TRUE(result.timed_out)
+      << "error_message: [" << result.error_message << "] exit: "
+      << result.exit_code;
+  EXPECT_TRUE(Services::SandboxService::remove_sandbox_config("test-tree-leak"));
+  // The bound must still hold; the grace path is what used to extend this.
+  EXPECT_LT(elapsed, std::chrono::seconds(45));
+
+  setenv("PATH", saved_path.c_str(), 1);
+  fs::current_path(old_cwd, ec);
+  // The fixture removes the temp dir, so the pid file must be read first.
+  {
+    const auto read_pid = [](const fs::path &path) -> long {
+      std::ifstream in(path);
+      long value = 0;
+      in >> value;
+      return value;
+    };
+    // Delivery is asynchronous, and an orphan can linger as a zombie until
+    // init reaps it, so poll rather than sampling once.
+    const auto still_running = [](long pid) {
+      for (int i = 0; i < 60; ++i) {
+        if (kill(static_cast<pid_t>(pid), 0) != 0) {
+          return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      }
+      return true;
+    };
+
+    const long descendant = read_pid(pid_file);
+    const long direct_child = read_pid(child_pid_file);
+    ASSERT_GT(descendant, 0) << "stub exported no descendant pid";
+    ASSERT_GT(direct_child, 0) << "stub exported no direct child pid";
+    EXPECT_FALSE(still_running(direct_child))
+        << "direct child " << direct_child << " outlived the bounded run";
+    EXPECT_FALSE(still_running(descendant))
+        << "descendant " << descendant << " outlived the bounded run";
+  }
+  fs::remove_all(dir, ec);
+#endif
+}
