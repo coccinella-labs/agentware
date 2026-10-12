@@ -19,7 +19,10 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <fcntl.h>
+#include <signal.h>
 #include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 #endif
 #include <nlohmann/json.hpp>
@@ -127,17 +130,26 @@ std::string SandboxService::generate_container_name() {
   return ss.str();
 }
 
-bool SandboxService::is_docker_available() {
+SandboxService::DockerStatus
+SandboxService::probe_docker(int timeout_seconds) {
   // A present CLI binary is not evidence that the sandbox can proceed: with
   // the daemon stopped the CLI still answers --version, which would let the UI
-  // claim isolation it cannot provide. Query the daemon instead, and let the
-  // caller present the host fallback when this fails.
-  SpawnedResult result = spawn_capture({"docker", "info"});
-  return result.exit_code == 0;
+  // claim isolation it cannot provide. Query the daemon instead, within a
+  // finite bound so a wedged daemon cannot block the agent.
+  SpawnedResult result = spawn_capture({"docker", "info"}, timeout_seconds);
+  if (result.timed_out) {
+    return DockerStatus::TimedOut;
+  }
+  return result.exit_code == 0 ? DockerStatus::Available
+                               : DockerStatus::Unavailable;
+}
+
+bool SandboxService::is_docker_available() {
+  return probe_docker(kDockerProbeTimeoutSeconds) == DockerStatus::Available;
 }
 
 SpawnedResult SandboxService::spawn_capture(
-    const std::vector<std::string> &argv) {
+    const std::vector<std::string> &argv, int timeout_seconds) {
   SpawnedResult result;
   if (argv.empty()) {
     result.exit_code = -1;
@@ -201,13 +213,46 @@ SpawnedResult SandboxService::spawn_capture(
   }
   std::string output;
   char buffer[4096];
-  DWORD got = 0;
-  while (ReadFile(read_handle, buffer, sizeof(buffer), &got, nullptr) &&
-         got > 0) {
-    output.append(buffer, got);
+  bool timed_out = false;
+  if (timeout_seconds > 0) {
+    // Poll rather than block so a stalled child cannot pin the agent.
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(timeout_seconds);
+    for (;;) {
+      DWORD available = 0;
+      if (PeekNamedPipe(read_handle, nullptr, 0, nullptr, &available, nullptr) &&
+          available > 0) {
+        DWORD got = 0;
+        if (ReadFile(read_handle, buffer, sizeof(buffer), &got, nullptr) &&
+            got > 0) {
+          output.append(buffer, got);
+        }
+        continue;
+      }
+      if (WaitForSingleObject(proc.hProcess, 0) == WAIT_OBJECT_0) {
+        break; // Exited: drain whatever remains.
+      }
+      if (std::chrono::steady_clock::now() >= deadline) {
+        timed_out = true;
+        break;
+      }
+      Sleep(5);
+    }
+    CloseHandle(read_handle);
+    if (timed_out) {
+      TerminateProcess(proc.hProcess, 1);
+    }
+  } else {
+    DWORD got = 0;
+    while (ReadFile(read_handle, buffer, sizeof(buffer), &got, nullptr) &&
+           got > 0) {
+      output.append(buffer, got);
+    }
+    CloseHandle(read_handle);
   }
-  CloseHandle(read_handle);
-  WaitForSingleObject(proc.hProcess, INFINITE);
+  if (!timed_out) {
+    WaitForSingleObject(proc.hProcess, INFINITE);
+  }
   DWORD code = 0;
   if (!GetExitCodeProcess(proc.hProcess, &code)) {
     code = static_cast<DWORD>(-1);
@@ -215,7 +260,8 @@ SpawnedResult SandboxService::spawn_capture(
   CloseHandle(proc.hProcess);
   CloseHandle(proc.hThread);
   result.output = output;
-  result.exit_code = static_cast<int>(code);
+  result.timed_out = timed_out;
+  result.exit_code = timed_out ? -1 : static_cast<int>(code);
   return result;
 #else
   int pipefd[2] = {-1, -1};
@@ -231,6 +277,12 @@ SpawnedResult SandboxService::spawn_capture(
     return result;
   }
   if (pid == 0) {
+    if (timeout_seconds > 0) {
+      // Own process group, so a timeout can kill the whole tree rather than
+      // just this process. Unbounded callers keep the inherited group so
+      // their existing signal behavior is unchanged.
+      setpgid(0, 0);
+    }
     dup2(pipefd[1], STDOUT_FILENO);
     dup2(pipefd[1], STDERR_FILENO);
     close(pipefd[0]);
@@ -245,18 +297,67 @@ SpawnedResult SandboxService::spawn_capture(
     _exit(127);
   }
   close(pipefd[1]);
+  if (timeout_seconds > 0) {
+    // Mirror the child's setpgid here so the group is established before the
+    // timeout can fire, whichever call wins the race.
+    setpgid(pid, pid);
+  }
   std::string output;
   char buffer[4096];
-  ssize_t count = 0;
-  while ((count = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
-    output.append(buffer, static_cast<size_t>(count));
+  bool timed_out = false;
+
+  if (timeout_seconds > 0) {
+    // Drain without blocking so a stalled child cannot pin the agent. The
+    // pipe is polled against a deadline; on expiry the child is killed and
+    // reaped, and the result is reported as a failure rather than a success.
+    const int flags = fcntl(pipefd[0], F_GETFL, 0);
+    if (flags >= 0) {
+      fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
+    }
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(timeout_seconds);
+    for (;;) {
+      const ssize_t count = read(pipefd[0], buffer, sizeof(buffer));
+      if (count > 0) {
+        output.append(buffer, static_cast<size_t>(count));
+        continue;
+      }
+      if (count == 0) {
+        break; // EOF: the child closed its end.
+      }
+      if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+        break;
+      }
+      if (std::chrono::steady_clock::now() >= deadline) {
+        timed_out = true;
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+  } else {
+    // Unbounded: drain until EOF, as before. The pipe must stay open until
+    // the child finishes writing, otherwise it would die of SIGPIPE instead
+    // of exiting normally.
+    ssize_t count = 0;
+    while ((count = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
+      output.append(buffer, static_cast<size_t>(count));
+    }
   }
+
   close(pipefd[0]);
+  if (timed_out) {
+    // Kill the whole process group. Signalling only the direct child would
+    // orphan anything it spawned, which for a wedged daemon means a stray
+    // process outliving the probe.
+    kill(-pid, SIGKILL);
+  }
   int status = 0;
   while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
   }
   result.output = output;
-  result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  result.timed_out = timed_out;
+  result.exit_code =
+      timed_out ? -1 : (WIFEXITED(status) ? WEXITSTATUS(status) : -1);
   return result;
 #endif
 }

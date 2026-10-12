@@ -35,6 +35,9 @@ struct SandboxResult {
 struct SpawnedResult {
   std::string output{};
   int exit_code{-1};
+  // True when a positive timeout_seconds elapsed and the child was killed.
+  // exit_code is then -1, never a success value.
+  bool timed_out{false};
 };
 
 // Result of a deadline-bounded spawn. timed_out implies the stop command
@@ -90,12 +93,31 @@ public:
   static bool remove_container(const std::string &container_name);
   static void cleanup_old_containers();
 
+  // Outcome of a Docker availability probe. Availability is only ever
+  // reported when the daemon actually answered.
+  enum class DockerStatus {
+    Available,
+    Unavailable,
+    TimedOut,
+  };
+
+  // Seconds allowed for the availability probe. A healthy daemon answers
+  // "docker info" in well under a second; the bound exists so a stalled or
+  // wedged daemon cannot block the agent indefinitely.
+  static constexpr int kDockerProbeTimeoutSeconds = 5;
+
   static bool is_docker_available();
+  // Probes the daemon within timeout_seconds and reports which of the three
+  // outcomes occurred, so callers can explain a timeout rather than reporting
+  // a bare "unavailable".
+  static DockerStatus probe_docker(int timeout_seconds = kDockerProbeTimeoutSeconds);
   // Process spawning without a host shell: POSIX fork/execvp, Windows
   // CreateProcess with deterministic CRT quoting. Declared public as
   // documented test seams; see the timeout and argv tests.
+  // timeout_seconds <= 0 preserves the original unbounded behavior.
   static SpawnedResult
-  spawn_capture(const std::vector<std::string> &argv);
+  spawn_capture(const std::vector<std::string> &argv,
+                int timeout_seconds = 0);
   static BoundedResult
   run_bounded(const std::vector<std::string> &argv,
               const std::vector<std::string> &stop_argv, int timeout_seconds,

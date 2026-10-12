@@ -19,7 +19,13 @@ void record_interaction(Data::MemoryManager &memory, const std::string &tag,
                         const std::string &result);
 void record_global_fact(Data::MemoryManager &memory, const std::string &fact);
 } // namespace Core
+#include <cctype>
 #include <chrono>
+#ifndef _WIN32
+#include <csignal>
+#include <unistd.h>
+#endif
+#include <thread>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -1465,4 +1471,192 @@ TEST(SecretRedaction, LeavesOtherCommandsIntact) {
   EXPECT_EQ(Core::redact_secrets("!echo hello"), "!echo hello");
   // A provider with no key value is left as written.
   EXPECT_EQ(Core::redact_secrets("/auth key "), "/auth key ");
+}
+
+// ===== Bounded Docker availability probe =====
+//
+// A stalled daemon must not block dispatch indefinitely, and neither a failed
+// nor a timed-out probe may report the sandbox as available. Each test installs
+// a fake docker on PATH so the real daemon is never contacted.
+
+namespace {
+// Writes an executable fake docker into a fresh temp dir and points PATH at
+// it. Returns the directory so the caller can assert on it.
+struct FakeDockerFixture {
+  std::filesystem::path dir;
+  std::string saved_path;
+
+  explicit FakeDockerFixture(const std::string &name,
+                             const std::string &script_body) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    dir = fs::temp_directory_path() / ("agentware_probe_" + name);
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir / "bin", ec);
+    {
+      std::ofstream stub(dir / "bin" / "docker");
+      stub << "#!/bin/sh\n" << script_body;
+    }
+    // owner_write is required so a test can replace the stub body afterwards.
+    fs::permissions(dir / "bin" / "docker",
+                    fs::perms::owner_exec | fs::perms::owner_read |
+                        fs::perms::owner_write,
+                    ec);
+    const char *old = std::getenv("PATH");
+    saved_path = old != nullptr ? old : "";
+    setenv("PATH", ((dir / "bin").string() + ":/usr/bin:/bin").c_str(), 1);
+  }
+
+  ~FakeDockerFixture() {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    setenv("PATH", saved_path.c_str(), 1);
+    fs::remove_all(dir, ec);
+  }
+};
+} // namespace
+
+TEST(DockerProbeTest, HealthyDaemonReportsAvailable) {
+#ifdef _WIN32
+  GTEST_SKIP() << "fake-docker stub needs a POSIX shell";
+#else
+  FakeDockerFixture fixture(
+      "ok",
+      "if [ \"$1\" = \"info\" ]; then echo \"Server Version: 99.0\"; exit 0; "
+      "fi\n"
+      "exit 1\n");
+  EXPECT_EQ(Services::SandboxService::probe_docker(5),
+            Services::SandboxService::DockerStatus::Available);
+  EXPECT_TRUE(Services::SandboxService::is_docker_available());
+#endif
+}
+
+TEST(DockerProbeTest, FailedProbeDoesNotClaimAvailable) {
+#ifdef _WIN32
+  GTEST_SKIP() << "fake-docker stub needs a POSIX shell";
+#else
+  // The CLI exists but the daemon refuses, which is the daemon-stopped case.
+  FakeDockerFixture fixture(
+      "refused",
+      "if [ \"$1\" = \"--version\" ]; then echo \"Docker version 99.0\"; "
+      "exit 0; fi\n"
+      "if [ \"$1\" = \"info\" ]; then echo \"Cannot connect\" >&2; exit 1; "
+      "fi\n"
+      "exit 1\n");
+  EXPECT_EQ(Services::SandboxService::probe_docker(5),
+            Services::SandboxService::DockerStatus::Unavailable);
+  EXPECT_FALSE(Services::SandboxService::is_docker_available());
+#endif
+}
+
+TEST(DockerProbeTest, HangingProbeTimesOutAndReportsUnavailable) {
+#ifdef _WIN32
+  GTEST_SKIP() << "fake-docker stub needs a POSIX shell";
+#else
+  // A stalled daemon: 'info' never answers. Without a bound this blocks the
+  // whole agent, so the deadline must return control.
+  FakeDockerFixture fixture("hang",
+                            "if [ \"$1\" = \"info\" ]; then sleep 60; fi\n"
+                            "exit 1\n");
+
+  auto start = std::chrono::steady_clock::now();
+  auto status = Services::SandboxService::probe_docker(1);
+  auto elapsed = std::chrono::steady_clock::now() - start;
+
+  EXPECT_EQ(status, Services::SandboxService::DockerStatus::TimedOut);
+  EXPECT_FALSE(Services::SandboxService::is_docker_available());
+  // Must return near the deadline, not after the stub's 60s sleep.
+  EXPECT_LT(elapsed, std::chrono::seconds(20));
+#endif
+}
+
+TEST(DockerProbeTest, BoundedSpawnReportsTimeoutOnStall) {
+#ifdef _WIN32
+  GTEST_SKIP() << "fake-docker stub needs a POSIX shell";
+#else
+  FakeDockerFixture fixture("spawnhang", "sleep 60\n");
+  auto start = std::chrono::steady_clock::now();
+  auto out = Services::SandboxService::spawn_capture({"docker", "info"}, 1);
+  auto elapsed = std::chrono::steady_clock::now() - start;
+  EXPECT_TRUE(out.timed_out);
+  EXPECT_EQ(out.exit_code, -1);
+  EXPECT_LT(elapsed, std::chrono::seconds(20));
+#endif
+}
+
+TEST(DockerProbeTest, BoundedSpawnKeepsWorkingOutput) {
+#ifdef _WIN32
+  GTEST_SKIP() << "fake-docker stub needs a POSIX shell";
+#else
+  FakeDockerFixture fixture(
+      "echo", "if [ \"$1\" = \"info\" ]; then echo \"Server Version: 99.0\"; "
+              "exit 0; fi\n");
+  auto out = Services::SandboxService::spawn_capture({"docker", "info"}, 10);
+  EXPECT_FALSE(out.timed_out);
+  EXPECT_EQ(out.exit_code, 0);
+  EXPECT_NE(out.output.find("Server Version"), std::string::npos);
+#endif
+}
+
+TEST(DockerProbeTest, TimeoutLeavesNoSurvivingDescendant) {
+#ifdef _WIN32
+  GTEST_SKIP() << "fake-docker stub needs a POSIX shell";
+#else
+  // The stub exports the pid of a long-lived grandchild. Signalling only the
+  // direct child would leave that grandchild running, so the whole process
+  // group must be signalled. The check is scoped to this one pid rather than
+  // scanning the process table, which would be racy and machine dependent.
+  namespace fs = std::filesystem;
+  FakeDockerFixture fixture("tree", "");
+  const fs::path pid_file = fixture.dir / "grandchild.pid";
+  {
+    std::ofstream stub(fixture.dir / "bin" / "docker");
+    stub << "#!/bin/sh\n"
+            "if [ \"$1\" = \"info\" ]; then\n"
+            "  (sleep 97) &\n"
+            "  echo $! > \"" << pid_file.string() << "\"\n"
+            "  sleep 97\n"
+            "fi\n"
+            "exit 1\n";
+  }
+  std::error_code ec;
+  fs::permissions(fixture.dir / "bin" / "docker",
+                  fs::perms::owner_exec | fs::perms::owner_read, ec);
+
+  auto out = Services::SandboxService::spawn_capture({"docker", "info"}, 1);
+  EXPECT_TRUE(out.timed_out);
+
+  std::ifstream exported(pid_file);
+  ASSERT_TRUE(exported.good()) << "stub did not export a grandchild pid";
+  long grandchild = 0;
+  exported >> grandchild;
+  ASSERT_GT(grandchild, 0);
+
+  // Delivery is asynchronous, and an orphan can linger as a zombie until init
+  // reaps it, so poll rather than sampling once.
+  bool survived = false;
+  for (int i = 0; i < 60; ++i) {
+    if (kill(static_cast<pid_t>(grandchild), 0) != 0) {
+      survived = false;
+      break;
+    }
+    survived = true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+  EXPECT_FALSE(survived)
+      << "grandchild " << grandchild << " outlived the probe timeout";
+#endif
+}
+
+TEST(DockerProbeTest, ZeroTimeoutMeansUnbounded) {
+#ifdef _WIN32
+  GTEST_SKIP() << "fake-docker stub needs a POSIX shell";
+#else
+  // Existing callers pass 0 and must keep the original blocking behavior.
+  FakeDockerFixture fixture(
+      "unbounded", "if [ \"$1\" = \"info\" ]; then echo ok; exit 0; fi\n");
+  auto out = Services::SandboxService::spawn_capture({"docker", "info"}, 0);
+  EXPECT_FALSE(out.timed_out);
+  EXPECT_EQ(out.exit_code, 0);
+#endif
 }

@@ -20,12 +20,16 @@ preserved in the table cells.
 | 12. Help and status | 12.11 `/sandbox status` accuracy | 12.8 `/error` inert |
 | 1. Startup | n/a | 1.5 fatal exit on missing key, 1.6 no runtime mode switch |
 
-Follow-up backlog, in operational order: bound the Docker availability probe;
-define a redaction policy for shell-command history; colon fallback to chat
-(which also resolves the mixed-prose regression); inert `/auth set`;
-`/auth status` accuracy; `/error` wiring; HTTP status and rate limits; and the
-Windows CI job, which masks build failures with `|| true` and never runs
-CTest. See the full detail in `agent-ux-audit.md` section 0.
+Follow-up backlog, in operational order: terminate the process tree on a
+`run_bounded` timeout, which currently leaks a detached thread and a
+surviving process per timed-out sandboxed command; a redaction policy for
+shell-command history; colon fallback to chat (which also resolves the
+mixed-prose regression); inert `/auth set`; `/auth status` accuracy;
+`/error` wiring; HTTP status and rate limits; and the Windows CI job, which
+masks build failures with `|| true` and never runs CTest. The bounded Docker
+availability probe from the previous batch is now closed: rows 5.5 and 5.13
+reflect a deadline-bounded probe whose timeout signals the whole process
+group. See the full detail in `agent-ux-audit.md` section 0.
 
 ## Status legend
 

@@ -796,20 +796,30 @@ void Agent::handle_file_injection_command(const std::string &input) {
 // the command is denied unless the operator confirms unsandboxed host
 // execution at the prompt (cancellation stays the default).
 static std::string execute_routed_command(const std::string &command) {
-  Services::SandboxService::initialize();  if (Services::SandboxService::is_docker_available()) {
+  Services::SandboxService::initialize();
+  const auto docker_status = Services::SandboxService::probe_docker();
+  if (docker_status == Services::SandboxService::DockerStatus::Available) {
     auto config = Services::SandboxService::get_sandbox_config("default");
     std::cout << "Sandboxed (docker, default config, "
               << (config.network_access ? "network" : "no network") << ")"
               << std::endl;
     Services::SandboxResult sandbox_result =
         Services::SandboxService::execute_command(command);
+    // A failed sandbox run is reported as a failure. It never escalates to
+    // the host without a separate, explicit confirmation below.
     return Services::SandboxService::format_result(sandbox_result);
   }
-  // The sandbox was unavailable because the Docker daemon could not be
-  // reached. This covers both a missing CLI and a stopped daemon, so the
-  // reason is stated rather than assumed to be a missing install.
-  std::cout << "Sandbox unavailable (Docker daemon not reachable): this "
-               "command would run on the host without isolation."
+  // Availability could not be established. A timeout says the daemon never
+  // answered; an unavailable result says it refused or is absent. Neither
+  // claims the sandbox could have run the command.
+  const bool probe_timed_out =
+      docker_status == Services::SandboxService::DockerStatus::TimedOut;
+  std::cout << (probe_timed_out
+                    ? "Sandbox unavailable (Docker daemon did not respond in "
+                      "time): this command would run on the host without "
+                      "isolation."
+                    : "Sandbox unavailable (Docker daemon not reachable): this "
+                      "command would run on the host without isolation.")
             << std::endl;
   std::cout << "Run on host without isolation? (y/N): ";
   std::string confirm;
@@ -2244,13 +2254,25 @@ void Agent::handle_sandbox_command(const std::string &command) {
       }
 
     } else if (action == "status") {
-      if (Services::SandboxService::check_docker_installation()) {
+      const auto probe = Services::SandboxService::probe_docker();
+      if (probe == Services::SandboxService::DockerStatus::Available) {
         std::cout << "Docker Status: Available" << std::endl;
         std::cout << "Version: "
                   << Services::SandboxService::get_docker_version()
                   << std::endl;
       } else {
+        // Availability was not established. A timeout and a refused probe are
+        // different problems and are reported differently.
+        const bool timed_out =
+            probe == Services::SandboxService::DockerStatus::TimedOut;
         std::cout << "Docker Status: Not Available" << std::endl;
+        if (timed_out) {
+          std::cout << "Docker daemon did not respond within "
+                    << Services::SandboxService::kDockerProbeTimeoutSeconds
+                    << "s. Sandbox execution is not confirmed."
+                    << std::endl;
+          return;
+        }
         // Distinguish a missing CLI from a daemon that cannot be reached, so
         // the user is not told to install something they already have.
         const std::string version =

@@ -522,6 +522,14 @@ case "${FAKE_DOCKER_MODE:-ok}" in
     echo "fake: run failed" >&2
     exit 1
     ;;
+  wedged)
+    # Daemon accepts the connection but never answers. Exercises the bounded
+    # probe deadline.
+    if [ "$1" = "info" ]; then
+      sleep 120
+    fi
+    exit 1
+    ;;
   *)
     if [ "$1" = "info" ]; then
       echo "Server Version: 99.0-fake"
@@ -552,6 +560,21 @@ probe "routing asks consent when daemon is down" 0 "Sandbox unavailable" \
   "2" "1" "!echo hi" "N" "exit"
 probe_absent "sandbox status does not claim available when daemon is down" \
   0 "Docker Status: Available" \
+  "2" "1" "/sandbox status" "exit"
+
+# A wedged daemon must not block dispatch, and must never be reported as an
+# established sandbox.
+export FAKE_DOCKER_MODE=wedged
+probe_absent "routing does not claim sandbox when daemon wedges" 0 "Sandboxed" \
+  "2" "1" "!echo hi" "N" "exit"
+probe "routing reports a daemon that did not respond" 0 "did not respond" \
+  "2" "1" "!echo hi" "N" "exit"
+probe "routing still requires consent after a probe timeout" 0 "Command cancelled by user" \
+  "2" "1" "!echo hi" "N" "exit"
+probe_absent "sandbox status does not claim available when daemon wedges" \
+  0 "Docker Status: Available" \
+  "2" "1" "/sandbox status" "exit"
+probe "sandbox status reports an unconfirmed probe" 0 "not confirmed" \
   "2" "1" "/sandbox status" "exit"
 export FAKE_DOCKER_MODE=ok
 
