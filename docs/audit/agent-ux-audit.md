@@ -14,8 +14,10 @@ audited separately in Pass 2.
   provider call was made except one deliberate localhost connection failure.
 - **Scope of change:** none. This pass modified no source, test, config, or
   documentation. The tree was verified clean before and after.
-- **Status note (added 2026-10-12):** this audit was written against `4caff2f7`.
-  `HEAD` is now `851182a5`. Findings are preserved as audited; statuses below are
+- **Status note (added 2026-10-12):** this audit was written against `4caff2f7`,
+  and its findings were last re-checked at `851182a5`. `HEAD` has since advanced
+  through `f908f2bf` and `bdf33b2b`; `851182a5` is cited below as the sandbox
+  lifecycle fix, not as the current revision. Findings are preserved as audited; statuses below are
   updated where later committed work is verifiable, and left open otherwise. One
   lifecycle follow-up (Follow-up 2) is now resolved by `851182a5`, which is
   also the revision this document's own findings were last audited against.
