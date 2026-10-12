@@ -4,7 +4,9 @@
 
 # agentware
 
-A C++20 AI coding agent that runs in your terminal. It talks to hosted model providers, reads and edits code through MCP filesystem and git servers, and works offline against local models.
+A C++20 AI coding agent that runs in your terminal. It talks to hosted model
+providers, reads and edits files through its own commands, and works offline
+against local models.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -24,14 +26,18 @@ and need no key.
 
 ## What it does
 
-Around twenty services behind one binary: agent orchestration, AI provider calls, auth, checkpoints, codebase search, command execution, configuration, context tracking, a database layer, file and multi-file operations, git and GitHub integration, MCP client support, memory management, sandboxing, theming, input validation, and a web service.
+Around twenty services behind one binary: agent orchestration, AI provider calls, auth, checkpoints, codebase search, command execution, configuration, context tracking, a database layer, file and multi-file operations, git and GitHub integration, an MCP client module, memory management, sandboxing, theming, input validation, and a web service.
 
 Codebase search shells out to `rg` and `fd` when they are on `PATH` and falls
 back to a built-in scanner when they are not, so search works either way.
 `github:threads:owner/repo:pr` reads inline review threads without the GraphQL
 API.
 
-Model Context Protocol servers are configured in `data/mcp_servers.json`. Two ship by default, both run through `npx`: a filesystem server rooted at the working directory and a git server.
+Model Context Protocol server entries are configured in
+`data/mcp_servers.json`, and two are pre-populated by default: a filesystem
+server and a git server, both declared as `npx` commands. The MCP transport is
+not implemented, so no server process is started and no MCP tool is called;
+the `/mcp` commands report their own configuration and say so.
 
 ## Scope
 
@@ -60,13 +66,15 @@ the Actions tab.
 cmake --build build --target test
 ```
 
-`ctest` runs two targets. `basic_tests` is the unit suite, currently 68 cases
-across 26 suites, covering parsing, file-access policy, project-root discovery,
-MCP and GitHub availability, review threads, sandbox construction, spawn,
-bounded execution, safety, configuration, results, and Docker behavior, empty
-replace-pattern rejection, issue parsing, git log handling, memory persistence,
-input validation, and both search backends. `remediation_probes` is a shell harness
-that drives the built binary against known-bad input and asserts it refuses.
+`ctest` runs two targets. `basic_tests` is the unit suite, currently 85 cases
+across 31 suites, covering command dispatch and redaction, file-access policy,
+project-root discovery, MCP and GitHub availability, review threads, sandbox
+construction, spawn, bounded execution, the Docker availability probe, safety,
+configuration, results, and Docker behavior, empty replace-pattern rejection,
+issue parsing, git log handling, memory persistence, input validation, and both
+search backends. `remediation_probes` is a shell harness that drives the built
+binary against known-bad input and asserts it refuses. It is POSIX-only and is
+not run on the Windows CI job.
 
 ### Sandbox Tests
 

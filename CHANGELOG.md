@@ -13,6 +13,11 @@
 
 ### Changed
 
+* Corrected command dispatch so `clear`, `forget`, and `memory` match only the complete input, and so `!`, `/`, and colon commands are evaluated before `@` file references. Prose such as `clear: the screen please` no longer wipes memory, and `!echo hello@world` reaches the shell instead of being diverted to chat.
+* `write:` now asks for confirmation before replacing a file that already exists. Creating a new file is unchanged.
+* Shell commands run on the host without isolation now show their output, which was previously discarded.
+* Docker availability is checked against the daemon rather than the CLI binary, and the check is bounded to five seconds so a wedged daemon cannot block the agent. On timeout the command's whole process group is cleaned up.
+* Windows CI now builds and runs `basic_tests` instead of masking failures with `|| true`; `remediation_probes` remains POSIX-only and is excluded there.
 * Renamed the repository from llamaware to agentware and updated ownership, contact, organization references, README, thumbnails, and site branding.
 * Routed shell commands through the Docker sandbox with explicit fallback; bounded execution and stopped runs instead of relying on a host shell spawn.
 * Enforced file-access policy on all reading sinks; hardened file-command input handling; rejected empty replace patterns instead of hanging.
@@ -32,6 +37,7 @@
 
 ### Security
 
+* API keys supplied at runtime with `/auth key` are redacted before they reach session memory, logs, or the checkpoint copies of memory. This covers the `/auth key` value only: secrets typed into `!` or `cmd:` shell commands are still recorded verbatim in session memory, so do not treat shell command history as protected.
 * Hardened sandbox construction and validation.
 * Enforced file-access boundaries and input validation across file, search, shell, git, and GitHub paths.
 
