@@ -1,4 +1,3 @@
-#include "platform.h"
 #include "agent.h"
 #include "memory_manager.h"
 #include "ai_service.h"
@@ -21,6 +20,10 @@
 #include "ui.h"
 #include "validation.h"
 #include "version.h"
+
+// After the project headers: on Windows this pulls in <windows.h>, which
+// defines ERROR as 0 and would break enums in the headers above.
+#include "platform.h"
 
 #include <algorithm>
 #include <atomic>
