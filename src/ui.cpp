@@ -1,8 +1,12 @@
+#include "platform.h"
 #include "ui.h"
+#include <algorithm>
 #include <array>
 #include <chrono>
+#include <cctype>
 #include <cstdlib>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -80,94 +84,238 @@ void UI::print_logo() {
 }
 
 // ===== Help Menu =====
-void UI::print_help() {
-  std::cout << Color::BOLD << "Commands\n" << Color::RESET;
-  print_divider();
+namespace {
 
-  std::cout << Color::GREEN << "Files\n" << Color::RESET;
-  std::cout << Color::CYAN << "  @<path> <prompt>" << Color::RESET
-            << "        - Inject a file or directory into chat\n";
-  std::cout << Color::CYAN << "  read:<file>[:start[:count]]" << Color::RESET
-            << " - Read a file or range\n";
-  std::cout << Color::CYAN << "  write:<file> <content>" << Color::RESET
-            << "   - Write a file\n";
-  std::cout << Color::CYAN << "  replace:<file>:<old>:<new>[:count]"
-            << Color::RESET << " - Replace text\n";
-  std::cout << Color::CYAN << "  grep:<pattern>[:dir[:filter]]" << Color::RESET
-            << " - Search text\n";
-  std::cout << Color::CYAN << "  /files <path...> [options]" << Color::RESET
-            << " - Read multiple files\n";
+// One help row: command syntax and its explanation. Command syntax is
+// reproduced verbatim and never truncated, because a user who cannot read the
+// full syntax cannot type it.
+struct HelpEntry {
+  const char *command;
+  const char *description;
+};
 
-  std::cout << "\n" << Color::GREEN << "Sessions\n" << Color::RESET;
-  std::cout << Color::CYAN << "  /chat save|resume <tag>" << Color::RESET
-            << "    - Save or resume a conversation\n";
-  std::cout << Color::CYAN << "  /chat list" << Color::RESET
-            << "                 - List saved conversations\n";
-  std::cout << Color::CYAN << "  /compress" << Color::RESET
-            << "               - Compress context\n";
-  std::cout << Color::CYAN << "  remember:<fact>" << Color::RESET
-            << "          - Remember fact\n";
-  std::cout << Color::CYAN << "  memory | forget | clear" << Color::RESET
-            << "      - Show or clear memory\n";
-  std::cout << Color::CYAN << "  /memory show|add <text>" << Color::RESET
-            << "  - Inspect or add memory\n";
-  std::cout << Color::CYAN << "  /context show|refresh|create" << Color::RESET
-            << " - Manage project context\n";
+struct HelpSection {
+  const char *title;
+  std::vector<HelpEntry> entries;
+};
 
-  std::cout << "\n" << Color::GREEN << "Project\n" << Color::RESET;
-  std::cout << Color::CYAN << "  analyze: | components: | todos: | tree:"
-            << Color::RESET << " - Inspect the project\n";
-  std::cout << Color::CYAN << "  git:status | git:log | git:analyze"
-            << Color::RESET << " - Inspect Git\n";
-
-  std::cout << "\n" << Color::GREEN << "Web and GitHub\n" << Color::RESET;
-  std::cout << Color::CYAN << "  /fetch <url> [text|json|raw]" << Color::RESET
-            << " - Fetch content\n";
-  std::cout << Color::CYAN << "  search:<query>" << Color::RESET
-            << "            - Search the web\n";
-  std::cout << Color::CYAN << "  github:repo:<owner>/<repo>" << Color::RESET
-            << "  - Show repository details\n";
-  std::cout << Color::CYAN << "  github:issues:<owner>/<repo>" << Color::RESET
-            << " - List issues\n";
-  std::cout << Color::CYAN << "  github:health:<owner>/<repo>" << Color::RESET
-            << " - Run repository health checks\n";
-  std::cout << Color::CYAN << "  github:threads:<owner>/<repo>:<pr>[:query]"
-            << Color::RESET << " - List review threads\n";
-  std::cout << Color::CYAN << "  /mcp <command>" << Color::RESET
-            << "             - Inspect MCP configuration\n";
-
-  std::cout << "\n" << Color::GREEN << "Checkpoints\n" << Color::RESET;
-  std::cout << Color::CYAN << "  /checkpoint <command>" << Color::RESET
-            << "      - Create, list, inspect, or delete checkpoints\n";
-  std::cout << Color::CYAN << "  /restore [id]" << Color::RESET
-            << "               - List or restore a checkpoint\n";
-
-  std::cout << "\n" << Color::GREEN << "Settings and diagnostics\n"
-            << Color::RESET;
-  std::cout << Color::CYAN << "  /theme <command>" << Color::RESET
-            << "           - Manage themes\n";
-  std::cout << Color::CYAN << "  /auth <command>" << Color::RESET
-            << "            - Manage provider credentials\n";
-  std::cout << Color::CYAN << "  /sandbox <command>" << Color::RESET
-            << "         - Manage or run sandboxes\n";
-  std::cout << Color::CYAN << "  /error <command>" << Color::RESET
-            << "           - Inspect diagnostics\n";
-  std::cout << Color::CYAN << "  /stats" << Color::RESET
-            << "                     - Show session statistics\n";
-
-  std::cout << "\n" << Color::GREEN << "System\n" << Color::RESET;
-  std::cout << Color::CYAN << "  cmd:<command>" << Color::RESET
-            << "             - Run a command\n";
-  std::cout << Color::CYAN << "  !<command>" << Color::RESET
-            << "              - Run a shell command\n";
-  std::cout << Color::CYAN << "  /tools" << Color::RESET
-            << "                   - Show direct tools\n";
-  std::cout << Color::CYAN << "  help | /help | /?" << Color::RESET
-            << "        - Show command help\n";
-  std::cout << Color::CYAN << "  version | exit | quit" << Color::RESET
-            << "        - Show version or leave\n";
-  print_divider();
+const std::vector<HelpSection> &help_sections() {
+  static const std::vector<HelpSection> sections = {
+      {"Files",
+       {{"@<path> <prompt>", "Inject a file or directory into chat"},
+        {"read:<file>[:start[:count]]", "Read a file or range"},
+        {"write:<file> <content>", "Write a file"},
+        {"replace:<file>:<old>:<new>[:count]", "Replace text"},
+        {"grep:<pattern>[:dir[:filter]]", "Search text"},
+        {"/files <path...> [options]", "Read multiple files"}}},
+      {"Sessions",
+       {{"/chat save|resume <tag>", "Save or resume a conversation"},
+        {"/chat list", "List saved conversations"},
+        {"/compress", "Compress context"},
+        {"remember:<fact>", "Remember fact"},
+        {"memory | forget | clear", "Show or clear memory"},
+        {"/memory show|add <text>", "Inspect or add memory"},
+        {"/context show|refresh|create", "Manage project context"}}},
+      {"Project",
+       {{"analyze: | components: | todos: | tree:", "Inspect the project"},
+        {"git:status | git:log | git:analyze", "Inspect Git"}}},
+      {"Web and GitHub",
+       {{"/fetch <url> [text|json|raw]", "Fetch content"},
+        {"search:<query>", "Search the web"},
+        {"github:repo:<owner>/<repo>", "Show repository details"},
+        {"github:issues:<owner>/<repo>", "List issues"},
+        {"github:health:<owner>/<repo>", "Run repository health checks"},
+        {"github:threads:<owner>/<repo>:<pr>[:query]", "List review threads"},
+        {"/mcp <command>", "Inspect MCP configuration"}}},
+      {"Checkpoints",
+       {{"/checkpoint <command>", "Create, list, inspect, or delete checkpoints"},
+        {"/restore [id]", "List or restore a checkpoint"}}},
+      {"Settings and diagnostics",
+       {{"/theme <command>", "Manage themes"},
+        {"/auth <command>", "Manage provider credentials"},
+        {"/sandbox <command>", "Manage or run sandboxes"},
+        {"/error <command>", "Inspect diagnostics"},
+        {"/stats", "Show session statistics"}}},
+      {"System",
+       {{"cmd:<command>", "Run a command"},
+        {"!<command>", "Run a shell command"},
+        {"/tools", "Show direct tools"},
+        {"help | /help | /?", "Show command help"},
+        {"version | exit | quit", "Show version or leave"}}},
+  };
+  return sections;
 }
+
+// Quick-help starters. Each appears exactly once; the previous listing repeated
+// search:query, cmd:command and read:file across its two lines. Both spellings
+// for leaving are listed so neither has to be discovered through full help.
+const std::vector<std::string> &quick_help_tokens() {
+  static const std::vector<std::string> tokens = {
+      "help",       "version", "search:query",
+      "cmd:command", "read:file", "write:file text", "quit", "exit"};
+  return tokens;
+}
+
+const char *const kIndent = "  ";
+const char *const kContIndent = "    ";
+const char *const kSeparator = " - ";
+// Description room preferred before the description column is pulled left.
+constexpr size_t kPreferredDescriptionRoom = 16;
+
+std::string spaces(size_t count) { return std::string(count, ' '); }
+
+// Greedy word wrap. A word longer than the room is emitted whole and may
+// overflow: splitting it would corrupt command syntax.
+std::vector<std::string> wrap_words(const std::string &text, size_t room) {
+  std::vector<std::string> lines;
+  if (room == 0) {
+    lines.push_back(text);
+    return lines;
+  }
+  std::istringstream iss(text);
+  std::string word;
+  std::string current;
+  while (iss >> word) {
+    if (current.empty()) {
+      current = word;
+    } else if (current.size() + 1 + word.size() <= room) {
+      current += " " + word;
+    } else {
+      lines.push_back(current);
+      current = word;
+    }
+  }
+  if (!current.empty()) {
+    lines.push_back(current);
+  }
+  if (lines.empty()) {
+    lines.push_back("");
+  }
+  return lines;
+}
+
+size_t longest_command() {
+  size_t longest = 0;
+  for (const auto &section : help_sections()) {
+    for (const auto &entry : section.entries) {
+      longest = std::max(longest, std::string(entry.command).size());
+    }
+  }
+  return longest;
+}
+
+size_t effective_width(int width) {
+  return static_cast<size_t>(width < UI::kMinLayoutWidth ? UI::kMinLayoutWidth
+                                           : width);
+}
+
+// Joins tokens with a separator, breaking to a continuation indent whenever the
+// next token would exceed the width.
+std::vector<std::string> join_wrapped(const std::vector<std::string> &tokens,
+                                      size_t width, size_t first_sep_size,
+                                      const std::string &first_prefix,
+                                      const std::string &cont_prefix) {
+  std::vector<std::string> lines;
+  std::string line = first_prefix;
+  bool first = true;
+  for (const auto &token : tokens) {
+    const std::string sep = first ? spaces(first_sep_size) : " | ";
+    if (line.size() + sep.size() + token.size() <= width) {
+      line += sep + token;
+    } else {
+      lines.push_back(line);
+      line = cont_prefix + token;
+    }
+    first = false;
+  }
+  lines.push_back(line);
+  return lines;
+}
+
+} // namespace
+
+int UI::layout_width() {
+  const int detected = Utils::Platform::terminal_width();
+  return detected > 0 ? detected : kFallbackLayoutWidth;
+}
+
+std::vector<std::string> UI::help_lines(int width) {
+  const size_t w = effective_width(width);
+  const size_t indent = std::string(kIndent).size();
+  const size_t cont = std::string(kContIndent).size();
+  const size_t sep = std::string(kSeparator).size();
+
+  // Column at which descriptions begin. Pulled left when the widest command
+  // would leave too little room for a description beside it.
+  size_t column = indent + longest_command() + sep;
+  if (column + kPreferredDescriptionRoom > w) {
+    column = (w > kPreferredDescriptionRoom) ? w - kPreferredDescriptionRoom
+                                              : indent;
+    if (column < indent) {
+      column = indent;
+    }
+  }
+
+  std::vector<std::string> out;
+  out.push_back("Commands");
+  out.push_back(std::string(w, '-'));
+
+  bool first_section = true;
+  for (const auto &section : help_sections()) {
+    if (!first_section) {
+      out.push_back("");
+    }
+    first_section = false;
+    out.push_back(section.title);
+    for (const auto &entry : section.entries) {
+      const std::string cmd_line = std::string(kIndent) + entry.command;
+      if (cmd_line.size() < column) {
+        // Description starts beside the command and wraps below it. The
+        // separator is charged against the room on this line.
+        const auto parts =
+            wrap_words(entry.description, w - column - sep);
+        std::string line = cmd_line;
+        line.append(column - cmd_line.size(), ' ');
+        line += std::string(kSeparator) + parts.front();
+        out.push_back(line);
+        for (size_t i = 1; i < parts.size(); ++i) {
+          out.push_back(std::string(kContIndent) + parts[i]);
+        }
+        continue;
+      }
+      // Command is too long to share the line. It gets its own wrapped lines,
+      // never truncated, then the description at the continuation indent.
+      const auto cmd_parts = wrap_words(entry.command, w - cont);
+      for (size_t i = 0; i < cmd_parts.size(); ++i) {
+        out.push_back((i == 0 ? std::string(kIndent) : std::string(kContIndent)) +
+                      cmd_parts[i]);
+      }
+      for (const auto &part : wrap_words(entry.description, w - cont)) {
+        out.push_back(std::string(kContIndent) + part);
+      }
+    }
+  }
+  out.push_back(std::string(w, '-'));
+  return out;
+}
+
+std::vector<std::string> UI::status_lines(int width, const std::string &mode,
+                                          const std::string &model) {
+  const size_t w = effective_width(width);
+  const std::vector<std::string> fields = {"Mode=" + mode, "Model=" + model,
+                                           "Memory=Active",
+                                           "Commands=Available"};
+  return join_wrapped(fields, w, 1, "System:", std::string(kContIndent));
+}
+
+std::vector<std::string> UI::quick_help_lines(int width) {
+  const size_t w = effective_width(width);
+  auto out = join_wrapped(quick_help_tokens(), w, 1, "Quick Commands:",
+                          std::string(kContIndent));
+  out.push_back(std::string(w, '-'));
+  return out;
+}
+
 
 // ===== Status =====
 void UI::print_enterprise_status() {
@@ -262,40 +410,116 @@ void UI::print_divider() {
 }
 
 // ===== Quick Help Interface =====
-void UI::print_quick_help() {
-  std::cout << Color::DIM << "Quick Commands: " << Color::RESET;
-  std::cout << Color::CYAN << "help" << Color::RESET << " | ";
-
-  std::cout << Color::CYAN << "search:query" << Color::RESET << " | ";
-  std::cout << Color::CYAN << "cmd:command" << Color::RESET << " | ";
-  std::cout << Color::CYAN << "read:file" << Color::RESET << " | ";
-  std::cout << Color::CYAN << "quit" << Color::RESET << "\n";
-
-  std::cout << Color::CYAN << "version" << Color::RESET << " | ";
-  std::cout << Color::CYAN << "search:query" << Color::RESET << " | ";
-  std::cout << Color::CYAN << "cmd:command" << Color::RESET << " | ";
-  std::cout << Color::CYAN << "read:file" << Color::RESET << " | ";
-  std::cout << Color::CYAN << "write:file text" << Color::RESET << " | ";
-  std::cout << Color::CYAN << "exit" << Color::RESET << "\n";
-
-  print_divider();
+std::vector<std::string> UI::prompt_lines(int width, const std::string &prompt) {
+  const size_t w = effective_width(width);
+  const size_t cont = std::string(kContIndent).size();
+  // Trailing space separates the prompt from the cursor, so it is not part of
+  // the wrapped body and is re-appended by the caller.
+  size_t trailing = 0;
+  while (trailing < prompt.size() &&
+         std::isspace(static_cast<unsigned char>(
+             prompt[prompt.size() - 1 - trailing]))) {
+    ++trailing;
+  }
+  const std::string body = prompt.substr(0, prompt.size() - trailing);
+  return wrap_words(body, w - cont);
 }
+
+void UI::print_wrapped_prompt(const std::string &prompt) {
+  const auto parts = prompt_lines(layout_width(), prompt);
+  size_t trailing = 0;
+  while (trailing < prompt.size() &&
+         std::isspace(static_cast<unsigned char>(
+             prompt[prompt.size() - 1 - trailing]))) {
+    ++trailing;
+  }
+  for (size_t i = 0; i < parts.size(); ++i) {
+    if (i > 0) {
+      std::cout << "\n" << kContIndent;
+    }
+    std::cout << parts[i];
+  }
+  std::cout << prompt.substr(prompt.size() - trailing);
+}
+
+namespace {
+// Colors one already-laid-out help line. Builders return plain text so their
+// widths can be asserted directly; color is applied only at emission.
+std::string colorize_help_line(const std::string &line) {
+  if (line.empty()) {
+    return line;
+  }
+  if (line == "Commands") {
+    return std::string(Color::BOLD) + line + Color::RESET;
+  }
+  if (line.find_first_not_of('-') == std::string::npos) {
+    return std::string(Color::DIM) + line + Color::RESET;
+  }
+  const std::string cont = kContIndent;
+  if (line.compare(0, cont.size(), cont) == 0) {
+    return line; // Description continuation stays plain.
+  }
+  const std::string ind = kIndent;
+  if (line.compare(0, ind.size(), ind) == 0) {
+    const size_t sep = line.find(kSeparator);
+    if (sep != std::string::npos) {
+      return std::string(Color::CYAN) + line.substr(0, sep) + Color::RESET +
+             line.substr(sep);
+    }
+    return std::string(Color::CYAN) + line + Color::RESET;
+  }
+  return std::string(Color::GREEN) + line + Color::RESET;
+}
+} // namespace
+
+void UI::print_help() {
+  for (const auto &line : help_lines(layout_width())) {
+    std::cout << colorize_help_line(line) << "\n";
+  }
+}
+
+void UI::print_quick_help() {
+  const std::string prefix = "Quick Commands:";
+  for (const auto &line : quick_help_lines(layout_width())) {
+    if (line.find_first_not_of('-') == std::string::npos) {
+      std::cout << Color::DIM << line << Color::RESET << "\n";
+      continue;
+    }
+    if (line.compare(0, prefix.size(), prefix) == 0) {
+      std::cout << Color::DIM << prefix << Color::RESET << Color::CYAN
+                << line.substr(prefix.size()) << Color::RESET << "\n";
+      continue;
+    }
+    std::cout << Color::CYAN << line << Color::RESET << "\n";
+  }
+}
+
 
 // ===== System Info =====
 void UI::print_system_info(const std::string &mode, const std::string &model) {
-  std::cout << Color::DIM << "System: " << Color::RESET;
-  std::cout << Color::GREEN << "Mode=" << mode << Color::RESET << " | ";
-  std::cout << Color::GREEN << "Model=" << model << Color::RESET << " | ";
-  std::cout << Color::GREEN << "Memory=Active" << Color::RESET << " | ";
-  std::cout << Color::GREEN << "Commands=Available" << Color::RESET << "\n";
+  const std::string prefix = "System:";
+  for (const auto &line : status_lines(layout_width(), mode, model)) {
+    if (line.compare(0, prefix.size(), prefix) == 0) {
+      std::cout << Color::DIM << prefix << Color::RESET << Color::GREEN
+                << line.substr(prefix.size()) << Color::RESET << "\n";
+      continue;
+    }
+    std::cout << Color::GREEN << line << Color::RESET << "\n";
+  }
 }
+
 
 // ===== Ready Interface =====
 void UI::print_ready_interface(const std::string &mode,
                                const std::string &model) {
   print_system_info(mode, model);
   print_quick_help();
-  std::cout << "Ready - Type a command or chat naturally:\n";
+  // Wrapped like every other startup line, so it cannot overflow a narrow
+  // terminal. One line at width 40, so it costs no vertical budget.
+  for (const auto &part :
+       prompt_lines(layout_width(), "Ready - Type a command or just chat:")) {
+    std::cout << part << "\n";
+  }
 }
 
 // ===== Prompted Input =====

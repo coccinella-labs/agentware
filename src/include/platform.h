@@ -11,8 +11,10 @@
 #define SHELL_REDIRECT " 2>NUL"
 #define SHELL_REDIRECT_BOTH " >NUL 2>&1"
 #else
+#include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <termios.h>
 #define NULL_DEVICE "/dev/null"
 #define PATH_SEPARATOR "/"
 #define SHELL_REDIRECT " 2>/dev/null"
@@ -49,6 +51,41 @@ inline bool is_windows() {
   return true;
 #else
   return false;
+#endif
+}
+
+// Width of the terminal attached to stdout, in columns.
+//
+// Returns 0 when the width cannot be determined: stdout is not a terminal, or
+// the query failed. Callers apply their own fallback in that case. COLUMNS is
+// deliberately not consulted; it is frequently stale in non-interactive shells
+// and is not the project's adopted source of terminal geometry.
+inline int terminal_width() {
+#ifdef _WIN32
+  // Not implemented for Windows yet. Layout code calls through this seam so
+  // support can be added without touching the layout itself.
+  return 0;
+#else
+  struct winsize ws {};
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != 0) {
+    return 0;
+  }
+  // A zero column count means the terminal did not report a usable width.
+  if (ws.ws_col == 0) {
+    return 0;
+  }
+  return static_cast<int>(ws.ws_col);
+#endif
+}
+
+// True when stdin is an interactive terminal, which is when it echoes the
+// user's Enter as a line break. When it is not, output code must supply the
+// newline itself or consecutive prompts run together on one line.
+inline bool stdin_is_tty() {
+#ifdef _WIN32
+  return _isatty(_fileno(stdin)) != 0;
+#else
+  return isatty(STDIN_FILENO) != 0;
 #endif
 }
 

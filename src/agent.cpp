@@ -1,3 +1,4 @@
+#include "platform.h"
 #include "agent.h"
 #include "memory_manager.h"
 #include "ai_service.h"
@@ -244,9 +245,16 @@ int Agent::get_user_choice(const std::string &prompt,
                            const std::vector<int> &valid_choices,
                            int default_choice) {
   while (true) {
-    std::cout << prompt;
+    Utils::UI::print_wrapped_prompt(prompt);
     std::string input;
-    if (!std::getline(std::cin, input)) {
+    const bool got_input = static_cast<bool>(std::getline(std::cin, input));
+    // A terminal echoes the user's Enter as a line break; a pipe or redirected
+    // file does not. Without this, the next prompt concatenates onto this line
+    // and the two prompts read as one.
+    if (!Utils::Platform::stdin_is_tty()) {
+      std::cout << "\n";
+    }
+    if (!got_input) {
       // EOF -> return default
       return default_choice;
     }
