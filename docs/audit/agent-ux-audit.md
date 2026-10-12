@@ -14,6 +14,13 @@ audited separately in Pass 2.
   provider call was made except one deliberate localhost connection failure.
 - **Scope of change:** none. This pass modified no source, test, config, or
   documentation. The tree was verified clean before and after.
+- **Status note (added 2026-10-12):** this audit was written against `4caff2f7`.
+  `HEAD` is now `851182a5`. Findings are preserved as audited; statuses below are
+  updated where later committed work is verifiable, and left open otherwise. One
+  lifecycle follow-up (Follow-up 2) is now resolved by `851182a5`, which is
+  also the revision this document's own findings were last audited against.
+  That commit is the sandbox lifecycle fix, not a UI baseline; the UI baseline
+  is `bdf33b2b`. See section 0.
 
 Every finding below is tagged with how it was established:
 
@@ -43,16 +50,18 @@ changed afterwards.
 | P1-1 host fallback hides output | Host execution captures stdout. The false-positive probe now asserts `HELLO_FROM_SHELL` instead of the substring `hi`, which matched inside "**thi**s" in the consent banner |
 | P1-2 sandbox claimed pre-verification | `is_docker_available` now queries the daemon with `docker info` instead of the CLI version, so a stopped daemon routes to the explicit host fallback. `/sandbox status` distinguishes a missing CLI from an unreachable daemon |
 | Follow-up 1, unbounded Docker probe | The probe runs under a 5 second deadline. A wedged daemon returns control instead of blocking indefinitely, reports `Docker daemon did not respond in time`, and never claims the sandbox was established. On expiry the child's whole process group is signalled, so a stub that spawns a grandchild leaves nothing behind. Only the probe is bounded; every other `spawn_capture` caller keeps the original unbounded behavior |
+| Follow-up 2, `run_bounded` process-tree leak | **Resolved by `851182a5`, on POSIX only.** `run_bounded` now gives its worker the same deadline the caller waits for, so the worker finishes and releases its pipe captures instead of blocking forever in `spawn_capture`'s drain loop. `spawn_capture` kills the whole process group on expiry rather than signalling only the direct child. Covered by the committed test `SandboxBoundedTest.TimeoutLeavesNoProcessTreeBehind`, which exports both the direct child's and a descendant's PID and polls both, asserting neither outlives the bounded run; it also pins the bound itself (`elapsed < 45s`). **Scope limit:** that test is `#ifdef _WIN32`-skipped, so this resolution covers the POSIX path only. Explicitly *not* resolved by it, and still open: the Windows process-tree leak, descendants that escape the group via `setsid`, the `docker stop` worker timeout, and the blocking `waitpid` after a read error. One consequence is accepted and documented in code rather than fixed: because the child no longer shares the terminal's foreground process group, a terminal Ctrl-C no longer reaches it. |
 
 ### Recorded as follow-up (not started)
 
 These remain open by decision, to keep the batch narrow. Ordered by
-operational urgency.
+operational urgency. **Follow-up 2 has since been resolved by `851182a5`**; it
+is moved out of this table into the addressed table above, and its original text
+is preserved there.
 
 | # | Follow-up | Detail |
 | --- | --- | --- |
 | 1 | Define a redaction policy for shell-command history | Redaction covers the `/auth key` family only. The `!` and `cmd:` paths persist raw commands verbatim, so `!export TOKEN=...` or `!curl -H "Authorization: Bearer ..."` reaches memory and every checkpoint in cleartext. Verified: `cmd:echo TOKEN-VIA-CMD-PATH` was stored verbatim. This needs a deliberate policy, not fragile pattern matching. Agentware must not be described as protecting secrets in persisted command history |
-| 2 | Terminate the process tree on a `run_bounded` timeout | **Reproduced, not fixed.** `run_bounded` (`src/sandbox_service.cpp:370-411`) detaches the worker that runs the command and, once the deadline passes, returns without ever signalling that worker or its child. Isolated evidence: running only `SandboxDockerTest.HangEnforcesTimeout` leaks two processes, the stub shell and its `sleep 120` child, both reparented to init. The user-facing message already admits the container may still be running, so the leak is disclosed, but each timed-out sandboxed command still costs a detached thread and a surviving process tree. This is deliberately unchanged by the bounded availability probe, which only affects `timeout_seconds > 0`; the process-group kill there does not reach this unbounded path |
 | 3 | Fall back to chat on unmatched colon commands | Also resolves the one routing regression this batch introduced: mixed prose containing both `@` and a colon (`explain @notes.txt: what is this`) now yields `Unknown command` where it previously injected and chatted. This follows from evaluating `:` before file references. A chat fallback would route it to chat, where injection then applies |
 | 4 | Correct or implement `/auth set` | Accepted and confirmed, yet inert: `AIService` is built once and never rebuilt. Either rebuild it or label the command as applying to future sessions |
 | 5 | Make `/auth status` report actual state | It shows a model that is never sent and a provider read from the auth store rather than the live session |
@@ -648,6 +657,11 @@ shows `Exit code: 256`. **[SRC]**
 **P3-1.** `/theme set dark` succeeds and `/theme current` reports it, but it
 changes nothing about the interface, because the UI uses hardcoded ANSI
 constants and never consults `ThemeService`. **[EXEC]**
+**Still open.** Note for readers of the Pass 2 record: P1-1 made
+`ThemeService::is_color_supported()` delegate to the shared UI color policy, but
+that only unifies *gating*. No UI output reads the selected palette, so this
+finding is not addressed by that work and must not be closed on the strength of
+it.
 
 **P3-2.** `read:` documentation differs between `help` and `/tools`
 (`[:start[:count]]` versus `[:start:count]`), and the `github:threads` grammar
@@ -656,7 +670,10 @@ is written three different ways.
 **P3-3.** Error messages carry a leading space, producing a double space after
 the `> ` prompt.
 
-**P3-4.** Help column alignment is broken for the longest entries.
+**P3-4.** Help column alignment is broken for the longest entries. **Addressed in
+committed work `bdf33b2b` (P1-3)** (see `agent-ui-audit.md` U-5): alignment is now
+derived from the terminal width with wrapping instead of literal padding. That
+work is committed in `bdf33b2b`.
 
 **P3-5.** Known dead code with no user impact today: `ui.cpp:170-202`,
 `ui.cpp:299-306`, `agent.cpp:1024-1045`, `agent.cpp:894`, five unused
@@ -695,11 +712,13 @@ Credit where the behavior holds up under scrutiny:
 ## 6. Known limitations of this audit
 
 - **Coverage gap in the test suite itself.** `src/tests/main_test.cpp`
-  deliberately does not include `agent.h`, so **no unit test exercises any
-  command parsing**. `CheckpointService` has zero unit tests, and
-  `AuthService`, `AIService`, `WebService`, `ErrorService`, and `ThemeService`
-  each have zero unit tests. Most behavioral coverage comes from
-  string-matching shell probes.
+  deliberately does not include `agent.h`, so no unit test reaches `Agent`'s
+  dispatch directly. **Partly closed by the remediation pass**, which moved the
+  dispatch rules into `src/command_router.cpp` behind a header that does not pull
+  in `Agent`, so they are now unit tested; see section 0. `CheckpointService`
+  still has zero unit tests, and `AuthService`, `AIService`, `WebService`,
+  `ErrorService`, and `ThemeService` each have zero unit tests. Most remaining
+  behavioral coverage comes from string-matching shell probes.
 - **No live provider call was made**, so exact provider error bodies and the
   `usage` payloads are **[UNVERIFIED]**.
 - **Windows and containerized runs were not exercised.** This pass ran on macOS
@@ -713,9 +732,11 @@ Credit where the behavior holds up under scrutiny:
   standard-library headers and the edited test stubs sit inside pre-existing
   `#ifdef _WIN32` guards, but source inspection is not a Windows test run and
   must not be reported as one.
-- **The probe suite was verified with ripgrep shadowed out** (136/136 pass), so
-  a CI image without ripgrep exercises the native search fallback. This was run
-  on macOS only.
+- **The probe suite was verified with ripgrep shadowed out (136/136 pass), so a
+  CI image without ripgrep exercises the native search fallback. This was run on
+  macOS only.** That ripgrep-shadowed run predates the current tree: the suite has
+  since grown to 142 probes (verified 142/142 on macOS with ripgrep present), and
+  the shadowed variant has not been re-run against it.
 - **[UNVERIFIED]** The belief that `std::async`'s future destructor blocks the
   host timeout path (`src/command_service.cpp:72-76`) was not reproduced.
 - **The 100-line memory window and 5-second cache staleness** are code-path
@@ -763,6 +784,9 @@ gaps let P0-3, P1-4, and P1-8 persist undetected.
 
 ---
 
-*Pass 2 (terminal presentation audit) has not been started, per the audit
-protocol. The existing UI records under `docs/audit/` were preserved
-unaltered.*
+*Pass 2 (terminal presentation audit) was subsequently completed and is
+recorded in `agent-ui-audit.md`. Its P1-1, P1-2, and P1-3 remediations are
+implemented, measured, and committed: P1-1 in `f908f2bf`, P1-2 and P1-3 in
+`bdf33b2b`. The UI baseline is now `bdf33b2b`. `851182a5` retains its separate
+role in this document as the sandbox lifecycle fix supporting the POSIX-only
+Follow-up 2 resolution.*
