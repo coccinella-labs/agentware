@@ -1482,6 +1482,11 @@ TEST(SecretRedaction, LeavesOtherCommandsIntact) {
 namespace {
 // Writes an executable fake docker into a fresh temp dir and points PATH at
 // it. Returns the directory so the caller can assert on it.
+//
+// POSIX only: it drives the stubs through setenv, which MSVC does not
+// provide. The guarded tests below skip on Windows rather than compiling
+// this fixture there, matching the convention used elsewhere in this file.
+#ifndef _WIN32
 struct FakeDockerFixture {
   std::filesystem::path dir;
   std::string saved_path;
@@ -1514,6 +1519,7 @@ struct FakeDockerFixture {
     fs::remove_all(dir, ec);
   }
 };
+#endif // _WIN32
 } // namespace
 
 TEST(DockerProbeTest, HealthyDaemonReportsAvailable) {
