@@ -484,13 +484,20 @@ unset NO_COLOR
 probe_raw_absent "piped spinner emits no carriage returns" \
   "2" "1" "@sample.txt hi" "exit"
 if command -v script >/dev/null 2>&1; then
-  pty_out=$(printf '%s\n' "2" "1" "/stats" "exit" | env "PATH=$PROBE_PATH" script -q /dev/null "$BIN" 2>&1)
-  if printf '%s' "$pty_out" | grep -qF "$(printf '\033')"; then
-    PASS=$((PASS + 1))
-    echo "PASS: interactive pty keeps color"
+  # script(1) must actually allocate a pty; some runners lack one, in which
+  # case there is no terminal to assert color under. Probe the allocator
+  # itself first so a broken harness reads as SKIP, never as a color PASS.
+  if script -q /dev/null printf pty-alloc-ok 2>/dev/null | grep -qF "pty-alloc-ok"; then
+    pty_out=$(printf '%s\n' "2" "1" "/stats" "exit" | env "PATH=$PROBE_PATH" script -q /dev/null "$BIN" 2>&1)
+    if printf '%s' "$pty_out" | grep -qF "$(printf '\033')"; then
+      PASS=$((PASS + 1))
+      echo "PASS: interactive pty keeps color"
+    else
+      FAIL=$((FAIL + 1))
+      echo "FAIL: interactive pty keeps color (no ESC bytes under pty)"
+    fi
   else
-    FAIL=$((FAIL + 1))
-    echo "FAIL: interactive pty keeps color (no ESC bytes under pty)"
+    echo "SKIP: interactive pty keeps color (no working pty allocator)"
   fi
 fi
 
