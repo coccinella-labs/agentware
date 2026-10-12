@@ -26,7 +26,8 @@ jobs:
             const trackingNumber = parseInt(trackingIssueNumber, 10);
             if (Number.isNaN(trackingNumber)) {
               console.log(
-                'Skipping: TRACKING_ISSUE_NUMBER is not a number: ' + trackingIssueNumber
+                'Skipping: TRACKING_ISSUE_NUMBER is not a number: ' +
+                trackingIssueNumber
               );
               return;
             }
@@ -68,7 +69,8 @@ jobs:
             const type = isIssue ? 'Issue' : 'PR';
             const state = item.state;
             const title = item.title;
-            const createdAt = new Date(item.created_at).toISOString().split('T')[0];
+            const createdAt =
+              new Date(item.created_at).toISOString().split('T')[0];
             const updateMsg =
               '## Automated Update\n\n' +
               '**' + type + ' #' + item.number + '** - ' + action + '\n' +
@@ -76,7 +78,8 @@ jobs:
               '- **Status**: ' + state.toUpperCase() + '\n' +
               '- **Date**: ' + createdAt + '\n' +
               '- **Action**: ' + action + '\n\n' +
-              '*This tracking issue will be manually updated with full context.*';
+              '*This tracking issue will be manually updated with ' +
+              'full context.*';
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
