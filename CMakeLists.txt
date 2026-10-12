@@ -208,19 +208,30 @@ find_package(CURL REQUIRED)
 # The Xcode SDK libcurl stub can advertise an INTERFACE_INCLUDE_DIRECTORIES
 # entry that no longer exists, which fails the generate step for any target
 # linking CURL::libcurl (including CPR's subdirectory configure). Drop
-# missing directories so one stale SDK path cannot break the build.
+# missing directories so one stale SDK path cannot break the build. Resolve
+# through aliases first: vcpkg and curl's own build both expose CURL::libcurl
+# as an ALIAS, and set_target_properties is a hard error on aliases.
 if(TARGET CURL::libcurl)
-    get_target_property(_curl_iface_incs CURL::libcurl INTERFACE_INCLUDE_DIRECTORIES)
-    if(_curl_iface_incs)
-        set(_curl_iface_incs_fixed "")
-        foreach(_d IN LISTS _curl_iface_incs)
-            if(EXISTS "${_d}")
-                list(APPEND _curl_iface_incs_fixed "${_d}")
-            else()
-                message(STATUS "Dropping non-existent CURL include dir: ${_d}")
-            endif()
-        endforeach()
-        set_target_properties(CURL::libcurl PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_curl_iface_incs_fixed}")
+    get_target_property(_curl_aliased CURL::libcurl ALIASED_TARGET)
+    if(_curl_aliased)
+        set(_curl_strip_target ${_curl_aliased})
+    else()
+        set(_curl_strip_target CURL::libcurl)
+    endif()
+    get_target_property(_curl_strip_type ${_curl_strip_target} TYPE)
+    if(_curl_strip_type STREQUAL "UNKNOWN_LIBRARY")
+        get_target_property(_curl_iface_incs ${_curl_strip_target} INTERFACE_INCLUDE_DIRECTORIES)
+        if(_curl_iface_incs)
+            set(_curl_iface_incs_fixed "")
+            foreach(_d IN LISTS _curl_iface_incs)
+                if(EXISTS "${_d}")
+                    list(APPEND _curl_iface_incs_fixed "${_d}")
+                else()
+                    message(STATUS "Dropping non-existent CURL include dir: ${_d}")
+                endif()
+            endforeach()
+            set_target_properties(${_curl_strip_target} PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_curl_iface_incs_fixed}")
+        endif()
     endif()
 endif()
 
