@@ -22,6 +22,7 @@
 #endif
 
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 
 namespace Utils {
@@ -75,6 +76,25 @@ inline int terminal_width() {
     return 0;
   }
   return static_cast<int>(ws.ws_col);
+#endif
+}
+
+// Environment mutation that works on both platforms. MSVC provides no
+// setenv or unsetenv, and _putenv_s with an empty value deletes the variable,
+// which is the behaviour unsetenv has on POSIX.
+inline void set_env(const char *name, const char *value) {
+#ifdef _WIN32
+  _putenv_s(name, value);
+#else
+  setenv(name, value, 1);
+#endif
+}
+
+inline void unset_env(const char *name) {
+#ifdef _WIN32
+  _putenv_s(name, "");
+#else
+  unsetenv(name);
 #endif
 }
 

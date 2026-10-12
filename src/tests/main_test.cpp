@@ -1787,9 +1787,9 @@ public:
   ~ScopedEnv() {
     for (const auto &entry : saved_) {
       if (entry.was_set) {
-        setenv(entry.name.c_str(), entry.value.c_str(), 1);
+        Utils::Platform::set_env(entry.name.c_str(), entry.value.c_str());
       } else {
-        unsetenv(entry.name.c_str());
+        Utils::Platform::unset_env(entry.name.c_str());
       }
     }
   }
@@ -1823,8 +1823,8 @@ TEST(ColorPolicyTest, ThemePolicyEqualsSharedUiPolicy) {
   // diverge. A regression that reintroduced a TERM check in the theme path
   // would make the two disagree for TERM=xterm-256color.
   for (const char *term : {"xterm-256color", "dumb", ""}) {
-    setenv("TERM", term, 1);
-    unsetenv("NO_COLOR");
+    Utils::Platform::set_env("TERM", term);
+    Utils::Platform::unset_env("NO_COLOR");
     EXPECT_EQ(Services::ThemeService::is_color_supported(),
               Utils::UI::colors_enabled())
         << "TERM=" << term
@@ -1834,8 +1834,8 @@ TEST(ColorPolicyTest, ThemePolicyEqualsSharedUiPolicy) {
 
 TEST(ColorPolicyTest, NoColorSuppressesBothSurfaces) {
   ScopedEnv guard({"TERM", "NO_COLOR"});
-  setenv("TERM", "xterm-256color", 1);
-  setenv("NO_COLOR", "1", 1);
+  Utils::Platform::set_env("TERM", "xterm-256color");
+  Utils::Platform::set_env("NO_COLOR", "1");
   EXPECT_FALSE(Utils::UI::colors_enabled());
   EXPECT_FALSE(Services::ThemeService::is_color_supported());
 }
