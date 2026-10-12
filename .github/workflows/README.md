@@ -7,11 +7,11 @@ documented in `CONTRIBUTING.md` under CI troubleshooting, not here.
 | Workflow | Trigger | Purpose |
 | --- | --- | --- |
 | `agent.yml` | PR, issue, comment, manual | Agent review and issue automation. |
-| `ci.yml` | Push, PR, release, manual | Build matrix, coverage, lint, Docker end-to-end, and release creation on `VERSION` changes. |
-| `cla.yml` | PR opened, synchronized, reopened | Checks the contributor agreement using `CLA_BOT_TOKEN` and `CLA_SIGNED_JSON`. |
+| `ci.yml` | Push, PR, release, manual | Build matrix, coverage, lint, Docker end-to-end,<br>and release creation on `VERSION` changes. |
+| `cla.yml` | PR opened, synchronized, reopened | Checks the contributor agreement<br>using `CLA_BOT_TOKEN` and `CLA_SIGNED_JSON`. |
 | `labeler.yml` | PR | Labels pull requests from commits and files. |
 | `lock-merged.yml` | PR | Locks merged pull requests. |
-| `maintenance.yml` | Daily 06:00 UTC, manual | Health checks plus a dated report committed to `docs/maintenance/`. Read-only checks; no auto-fixing, no PRs. |
+| `maintenance.yml` | Daily 06:00 UTC, manual | Health checks plus a dated report committed to `docs/maintenance/`.<br>Read-only checks; no auto-fixing, no PRs. |
 | `release.yml` | Tag push, manual | Builds platform binaries and attaches them to the release. |
 | `security.yml` | Push, PR, release, weekly, manual | CodeQL, Trivy filesystem scan, and release tarball. |
 | `site.yml` | Push touching `docs/`, manual | Deploys `docs/` to GitHub Pages. Shows as `Site` in the runs list. |
