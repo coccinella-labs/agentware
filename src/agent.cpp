@@ -17,6 +17,7 @@
 #include "theme_service.h"
 #include "web_service.h"
 #include "config.h"
+#include "input_reader.h"
 #include "ui.h"
 #include "validation.h"
 #include "version.h"
@@ -115,11 +116,14 @@ void Agent::run() {
   Utils::UI::print_ready_interface(mode_name, model_name);
 
   while (true) {
-    std::cout << "> ";
-    std::string user_input;
-    if (!std::getline(std::cin, user_input)) {
-      break; // EOF or error
+    // Single input boundary: modal editing only when explicitly opted in
+    // on an interactive stdin; everything else is plain getline.
+    Utils::Input::ReadResult read =
+        Utils::Input::read_prompt_line("> ");
+    if (read.status != Utils::Input::ReadStatus::Line) {
+      break;  // EOF or error, matching the historical getline behavior.
     }
+    std::string user_input = read.line;
 
     user_input = trim_copy(user_input);
     if (user_input.empty())
