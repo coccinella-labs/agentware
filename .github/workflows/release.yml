@@ -59,9 +59,11 @@ jobs:
       - name: Install dependencies (Windows)
         if: matrix.os == 'windows-latest'
         run: |
+          # No choco packages here. The nlohmann-json package does not exist,
+          # so that install could never succeed, and choco's curl exposes no
+          # CMake-findable prefix. The vcpkg toolchain file below is the path
+          # CI already uses and the only one proven to work here.
           choco install cmake --yes
-          choco install nlohmann-json --yes
-          choco install curl --yes
 
       - name: Configure
         shell: bash
@@ -69,10 +71,16 @@ jobs:
           # Match CI: without /opt/homebrew on PATH, CMake falls back to
           # fetching zlib and curl, and the vendored zlib defines fdopen
           # as a no-op macro that collides with the macOS SDK declaration.
-          FLAGS=""
-          [[ "$RUNNER_OS" == "macOS" ]] && \
-            FLAGS="-DCMAKE_PREFIX_PATH=/opt/homebrew"
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $FLAGS
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cmake -S . -B build \
+              -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake \
+              -DCMAKE_BUILD_TYPE=Release
+          else
+            FLAGS=""
+            [[ "$RUNNER_OS" == "macOS" ]] && \
+              FLAGS="-DCMAKE_PREFIX_PATH=/opt/homebrew"
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $FLAGS
+          fi
 
       - name: Build
         run: cmake --build build --config Release
