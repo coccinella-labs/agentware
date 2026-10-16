@@ -6,6 +6,10 @@ name: CI
     branches: [main, develop]
   pull_request:
     branches: ["*"]
+  # Required by the merge queue: without this, the required checks
+  # never run on the queue synthetic merge commit and entries sit in
+  # AWAITING_CHECKS until they time out.
+  merge_group:
   release:
     types: [published]
   workflow_dispatch:
