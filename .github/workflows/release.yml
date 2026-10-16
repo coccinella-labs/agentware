@@ -60,7 +60,14 @@ jobs:
           choco install curl --yes
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: |
+          # Match CI: without /opt/homebrew on PATH, CMake falls back to
+          # fetching zlib and curl, and the vendored zlib defines fdopen
+          # as a no-op macro that collides with the macOS SDK declaration.
+          FLAGS=""
+          [[ "$RUNNER_OS" == "macOS" ]] && \
+            FLAGS="-DCMAKE_PREFIX_PATH=/opt/homebrew"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $FLAGS
 
       - name: Build
         run: cmake --build build --config Release
