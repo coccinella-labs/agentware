@@ -1,5 +1,9 @@
 # Changelog
 
+<!-- Unreleased records user-visible changes on main between releases. Move entries into a version section when that version is tagged. -->
+
+## [Unreleased]
+
 ## [0.1.7] - 2026-10-16
 
 Everything below shipped on `main` since 0.1.6 and is tagged here. The first two entries are this week's merges; the rest accumulated under `Unreleased` and moves in with them.
@@ -70,7 +74,3 @@ Everything below shipped on `main` since 0.1.6 and is tagged here. The first two
 ## [0.1] - 2025-09-21
 
 * Initial release with E2E testing, Docker mocks, and CI/CD setup
-
-<!-- Unreleased records user-visible changes on main between releases. Move entries into a version section when that version is tagged. -->
-
-## [Unreleased]
