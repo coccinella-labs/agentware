@@ -312,6 +312,29 @@ void KeyDecoder::flush(std::vector<KeyEvent> *out) {
   pending_bytes_.clear();
 }
 
+bool windows_key_event(char32_t value, KeyEvent *out) {
+  if (out == nullptr) {
+    return false;
+  }
+  if (value == 27) {
+    *out = KeyEvent{KeyKind::Escape, 0};
+  } else if (value == 13) {
+    *out = KeyEvent{KeyKind::Enter, 0};
+  } else if (value == 8) {
+    *out = KeyEvent{KeyKind::Backspace, 0};
+  } else if (value == 26) {
+    *out = KeyEvent{KeyKind::CtrlD, 0};  // Ctrl-Z: EOF key on Windows.
+  } else if (value < 0x20) {
+    // Arrows, function keys, Home and End all report UnicodeChar == 0.
+    // The POSIX path drops unmapped control bytes; do the same here rather
+    // than inserting a NUL into the submitted line.
+    return false;
+  } else {
+    *out = KeyEvent{KeyKind::Char, value};
+  }
+  return true;
+}
+
 InputBackend select_backend(bool opt_in, bool stdin_tty, bool guard_ok) {
   if (opt_in && stdin_tty && guard_ok) {
     return InputBackend::Modal;
@@ -433,15 +456,10 @@ bool read_windows_events(ModalEditor *editor, std::string *line,
   } else {
     value = static_cast<char32_t>(wc);
   }
-  KeyEvent event{KeyKind::Char, value};
-  if (value == 27) {
-    event = KeyEvent{KeyKind::Escape, 0};
-  } else if (value == 13) {
-    event = KeyEvent{KeyKind::Enter, 0};
-  } else if (value == 8) {
-    event = KeyEvent{KeyKind::Backspace, 0};
-  } else if (value == 26) {
-    event = KeyEvent{KeyKind::CtrlD, 0};  // Ctrl-Z: EOF key on Windows.
+  KeyEvent event{KeyKind::Char, 0};
+  if (!windows_key_event(value, &event)) {
+    // Special key with no text and no mapping: nothing to insert.
+    return true;
   }
   FeedResult result = editor->feed(event, line);
   if (result == FeedResult::Submitted || result == FeedResult::Eof) {

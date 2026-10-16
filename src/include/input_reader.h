@@ -90,6 +90,13 @@ class KeyDecoder {
   std::string pending_bytes_;
 };
 
+// Maps a decoded Windows console character to a key event. Returns false
+// when the value carries no text and no mapped key, which is how special
+// keys arrive: arrows, function keys, Home and End all report
+// UnicodeChar == 0 on Windows. Declared outside the Win32 guard so the
+// mapping is testable on any platform.
+bool windows_key_event(char32_t value, KeyEvent *out);
+
 // Backend selection. Modal input requires all three; everything else
 // uses plain getline. Pure function of its inputs for table testing.
 enum class InputBackend { Line, Modal };

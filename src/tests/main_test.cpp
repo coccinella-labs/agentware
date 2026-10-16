@@ -1074,6 +1074,30 @@ TEST(KeyDecoderTest, ConsecutiveSplitSequences) {
   }
 }
 
+// Windows special keys report UnicodeChar == 0. They must insert nothing,
+// matching the POSIX path's treatment of unmapped control bytes.
+TEST(WindowsKeyMappingTest, UnmappedSpecialKeyInsertsNothing) {
+  Utils::Input::KeyEvent event{Utils::Input::KeyKind::Char, 0xFFFF};
+  EXPECT_FALSE(Utils::Input::windows_key_event(0, &event));
+  EXPECT_FALSE(Utils::Input::windows_key_event(9, &event));   // Tab: unmapped.
+  EXPECT_FALSE(Utils::Input::windows_key_event(31, &event));  // unit separator.
+}
+
+TEST(WindowsKeyMappingTest, MappedKeysAndText) {
+  Utils::Input::KeyEvent event{Utils::Input::KeyKind::Char, 0};
+  EXPECT_TRUE(Utils::Input::windows_key_event(27, &event));
+  EXPECT_EQ(event.kind, Utils::Input::KeyKind::Escape);
+  EXPECT_TRUE(Utils::Input::windows_key_event(13, &event));
+  EXPECT_EQ(event.kind, Utils::Input::KeyKind::Enter);
+  EXPECT_TRUE(Utils::Input::windows_key_event(8, &event));
+  EXPECT_EQ(event.kind, Utils::Input::KeyKind::Backspace);
+  EXPECT_TRUE(Utils::Input::windows_key_event(26, &event));
+  EXPECT_EQ(event.kind, Utils::Input::KeyKind::CtrlD);
+  EXPECT_TRUE(Utils::Input::windows_key_event('z', &event));
+  EXPECT_EQ(event.kind, Utils::Input::KeyKind::Char);
+  EXPECT_EQ(event.ch, static_cast<char32_t>('z'));
+}
+
 TEST(KeyDecoderTest, InvalidBytesBecomeReplacement) {
   Utils::Input::KeyDecoder decoder;
   std::vector<Utils::Input::KeyEvent> out;
