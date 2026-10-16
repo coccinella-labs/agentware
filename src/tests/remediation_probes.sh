@@ -600,6 +600,11 @@ probe_raw_absent() {
 export NO_COLOR=1
 probe_raw_absent "NO_COLOR disables escapes" \
   "2" "1" "/stats" "exit"
+# The theme path used to consult only TERM, so it kept emitting escapes into
+# pipes and under NO_COLOR=1 while the rest of the UI honored both. Cover the
+# theme surface explicitly, with TERM set to a color-capable value.
+probe_raw_absent "NO_COLOR disables theme escapes" \
+  "2" "1" "/theme current" "/theme list" "exit"
 unset NO_COLOR
 probe_raw_absent "piped spinner emits no carriage returns" \
   "2" "1" "@sample.txt hi" "exit"

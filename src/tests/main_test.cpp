@@ -4,10 +4,16 @@
 #include "git_service.h"
 #include "github_service.h"
 #include "sandbox_service.h"
+#include "theme_service.h"
+#include "ui.h"
 #include "validation.h"
 #include "version.h"
 #include "memory_manager.h"
 #include "search_service.h"
+
+// After the project headers: on Windows this pulls in <windows.h>, which
+// defines ERROR as 0 and would break the ERROR enum in theme_service.h.
+#include "platform.h"
 // NOTE: do not include agent.h here. It defines Agent with defaulted move
 // operations over unique_ptr<Services::AIService>, which is only forward
 // declared there; MSVC instantiates the deleter eagerly and fails, while
@@ -31,6 +37,7 @@ void record_global_fact(Data::MemoryManager &memory, const std::string &fact);
 #include <fstream>
 #include <gtest/gtest.h>
 #include <numeric>
+#include <vector>
 #include <set>
 #include <sstream>
 #include <string>
@@ -1757,4 +1764,304 @@ TEST(SandboxBoundedTest, TimeoutLeavesNoProcessTreeBehind) {
   }
   fs::remove_all(dir, ec);
 #endif
+}
+
+namespace {
+// Restores environment variables exactly as found, on every exit path
+// including an early return from an assertion. It records whether each
+// variable was merely absent, because "unset" and "set to empty" are
+// different states and setenv(name, "") does not reproduce absence.
+class ScopedEnv {
+public:
+  explicit ScopedEnv(const std::vector<std::string> &names) {
+    for (const auto &name : names) {
+      const char *value = std::getenv(name.c_str());
+      Entry entry;
+      entry.name = name;
+      entry.was_set = value != nullptr;
+      entry.value = entry.was_set ? std::string(value) : std::string();
+      saved_.push_back(entry);
+    }
+  }
+
+  ~ScopedEnv() {
+    for (const auto &entry : saved_) {
+      if (entry.was_set) {
+        Utils::Platform::set_env(entry.name.c_str(), entry.value.c_str());
+      } else {
+        Utils::Platform::unset_env(entry.name.c_str());
+      }
+    }
+  }
+
+  ScopedEnv(const ScopedEnv &) = delete;
+  ScopedEnv &operator=(const ScopedEnv &) = delete;
+
+private:
+  struct Entry {
+    std::string name;
+    bool was_set;
+    std::string value;
+  };
+  std::vector<Entry> saved_;
+};
+} // namespace
+
+// U-1 / P1-1: one color policy for the whole process.
+//
+// The theme path previously consulted only $TERM, so it emitted escapes into
+// pipes and kept emitting them under NO_COLOR=1 while the rest of the UI
+// honored both. Both surfaces must now follow UI::colors_enabled exactly:
+// colored only when stdout is a TTY and NO_COLOR is unset. TERM is not part
+// of the decision, so a real TTY colors even with TERM=dumb or TERM unset.
+
+TEST(ColorPolicyTest, ThemePolicyEqualsSharedUiPolicy) {
+  ScopedEnv guard({"TERM", "NO_COLOR"});
+  // Vary TERM, including values the old TERM-only check would have accepted
+  // or rejected. The test runner's stdout is not a TTY, so both surfaces
+  // should report false throughout; what is asserted is that they never
+  // diverge. A regression that reintroduced a TERM check in the theme path
+  // would make the two disagree for TERM=xterm-256color.
+  for (const char *term : {"xterm-256color", "dumb", ""}) {
+    Utils::Platform::set_env("TERM", term);
+    Utils::Platform::unset_env("NO_COLOR");
+    EXPECT_EQ(Services::ThemeService::is_color_supported(),
+              Utils::UI::colors_enabled())
+        << "TERM=" << term
+        << ": theme color policy diverged from the shared UI policy";
+  }
+}
+
+TEST(ColorPolicyTest, NoColorSuppressesBothSurfaces) {
+  ScopedEnv guard({"TERM", "NO_COLOR"});
+  Utils::Platform::set_env("TERM", "xterm-256color");
+  Utils::Platform::set_env("NO_COLOR", "1");
+  EXPECT_FALSE(Utils::UI::colors_enabled());
+  EXPECT_FALSE(Services::ThemeService::is_color_supported());
+}
+
+namespace {
+
+bool is_divider(const std::string &line) {
+  return !line.empty() && line.find_first_not_of('-') == std::string::npos;
+}
+
+// Re-joins laid-out lines. Wrapping only ever breaks at spaces, so trimming
+// each line and re-joining with a single space reconstructs the original text
+// and a preserved command can be found as a substring even after it wrapped.
+std::string reflow(const std::vector<std::string> &lines) {
+  std::string joined;
+  for (const auto &line : lines) {
+    if (line.empty() || is_divider(line) || line == "Commands") {
+      continue;
+    }
+    const size_t begin = line.find_first_not_of(' ');
+    const size_t end = line.find_last_not_of(' ');
+    const std::string trimmed = line.substr(begin, end - begin + 1);
+    if (trimmed.empty()) {
+      continue;
+    }
+    if (!joined.empty()) {
+      joined += " ";
+    }
+    joined += trimmed;
+  }
+  return joined;
+}
+
+} // namespace
+
+TEST(LayoutTest, HelpLinesStayWithinWidth) {
+  for (int width : {24, 40, 60, 80, 120}) {
+    for (const auto &line : Utils::UI::help_lines(width)) {
+      if (static_cast<int>(line.size()) <= width) {
+        continue;
+      }
+      // Overflow is permitted only for an unsplittable token: a command line
+      // with no space to break at. Anything else is a wrapping defect.
+      const std::string body = line.substr(2);
+      EXPECT_EQ(body.find(' '), std::string::npos)
+          << "width=" << width
+          << ": line exceeds the width without an unsplittable token: [" << line
+          << "]";
+    }
+  }
+}
+
+TEST(LayoutTest, HelpPreservesCompleteCommandSyntax) {
+  const std::vector<std::string> commands = {
+      "github:threads:<owner>/<repo>:<pr>[:query]",
+      "replace:<file>:<old>:<new>[:count]",
+      "grep:<pattern>[:dir[:filter]]",
+      "read:<file>[:start[:count]]",
+      "/files <path...> [options]",
+      "analyze: | components: | todos: | tree:",
+      "git:status | git:log | git:analyze",
+      "/checkpoint <command>",
+      "version | exit | quit",
+  };
+  for (int width : {24, 40, 60, 80, 120}) {
+    const std::string joined = reflow(Utils::UI::help_lines(width));
+    for (const auto &command : commands) {
+      EXPECT_NE(joined.find(command), std::string::npos)
+          << "width=" << width << ": command was truncated or lost: " << command;
+    }
+  }
+}
+
+TEST(LayoutTest, HelpIndentsAreConsistent) {
+  for (int width : {24, 40, 60, 80, 120}) {
+    for (const auto &line : Utils::UI::help_lines(width)) {
+      if (line.empty() || is_divider(line) || line == "Commands") {
+        continue;
+      }
+      const size_t lead = line.find_first_not_of(' ');
+      if (lead == std::string::npos || lead == 0) {
+        continue; // Divider content or section title.
+      }
+      EXPECT_TRUE(lead == 2 || lead == 4)
+          << "width=" << width << ": indent of " << lead
+          << " spaces breaks the convention: [" << line << "]";
+    }
+  }
+}
+
+TEST(LayoutTest, HelpNarrowsWithoutLosingEntries) {
+  const auto wide = Utils::UI::help_lines(120);
+  const auto narrow = Utils::UI::help_lines(40);
+  // Narrower output may use more lines, but must not drop content: every
+  // command present at width 120 must still be present at width 40.
+  const std::string wide_text = reflow(wide);
+  const std::string narrow_text = reflow(narrow);
+  for (const char *section : {"Files", "Sessions", "Project", "Web and GitHub",
+                              "Checkpoints", "Settings and diagnostics",
+                              "System"}) {
+    EXPECT_NE(narrow_text.find(section), std::string::npos)
+        << "section lost at width 40: " << section;
+  }
+  EXPECT_NE(wide_text.find("github:threads:"), std::string::npos);
+  EXPECT_NE(narrow_text.find("github:threads:"), std::string::npos);
+}
+
+TEST(LayoutTest, StatusFitsOrWrapsWithContinuationIndent) {
+  for (int width : {40, 60, 80, 120}) {
+    const auto lines =
+        Utils::UI::status_lines(width, "Offline", "llama3.2:3b");
+    for (const auto &line : lines) {
+      EXPECT_LE(static_cast<int>(line.size()), width)
+          << "width=" << width << ": status line too long: [" << line << "]";
+    }
+    if (lines.size() == 1) {
+      continue; // Fit on one line, nothing to indent.
+    }
+    EXPECT_EQ(lines.front().compare(0, 7, "System:"), 0);
+    for (size_t i = 1; i < lines.size(); ++i) {
+      EXPECT_EQ(lines[i].compare(0, 4, "    "), 0)
+          << "width=" << width << ": continuation not indented: [" << lines[i]
+          << "]";
+    }
+  }
+}
+
+TEST(LayoutTest, StatusKeepsEveryFieldWhenWrapped) {
+  for (int width : {24, 40, 60, 80, 120}) {
+    std::string joined;
+    for (const auto &line : Utils::UI::status_lines(width, "Online", "GPT-4")) {
+      joined += line + " ";
+    }
+    for (const char *field : {"Mode=Online", "Model=GPT-4", "Memory=Active",
+                              "Commands=Available"}) {
+      EXPECT_NE(joined.find(field), std::string::npos)
+          << "width=" << width << ": status field lost: " << field;
+    }
+  }
+}
+
+TEST(LayoutTest, QuickHelpHasNoDuplicateTokens) {
+  for (int width : {24, 40, 60, 80, 120}) {
+    std::set<std::string> seen;
+    std::string joined;
+    for (const auto &line : Utils::UI::quick_help_lines(width)) {
+      if (is_divider(line)) {
+        continue;
+      }
+      joined += line + "\n";
+    }
+    std::istringstream lines(joined);
+    std::string chunk;
+    while (std::getline(lines, chunk, '|')) {
+      std::istringstream words(chunk);
+      std::string word;
+      while (words >> word) {
+        std::string key;
+        for (const char c : word) {
+          if (!std::ispunct(static_cast<unsigned char>(c))) {
+            key += c;
+          }
+        }
+        if (key.empty()) {
+          continue;
+        }
+        EXPECT_TRUE(seen.insert(key).second)
+            << "width=" << width << ": duplicated quick-help token: " << key;
+      }
+    }
+  }
+}
+
+TEST(LayoutTest, LayoutWidthFallsBackWhenDetectionFails) {
+  const int detected = Utils::Platform::terminal_width();
+  if (detected == 0) {
+    // Detection failed, so the documented fallback must apply.
+    EXPECT_EQ(Utils::UI::layout_width(), Utils::UI::kFallbackLayoutWidth);
+    EXPECT_EQ(Utils::UI::kFallbackLayoutWidth, 80);
+  } else {
+    EXPECT_EQ(Utils::UI::layout_width(), detected);
+  }
+}
+
+TEST(LayoutTest, ExtremelyNarrowWidthClampsToMinimum) {
+  const auto clamped = Utils::UI::help_lines(10);
+  const auto minimum = Utils::UI::help_lines(Utils::UI::kMinLayoutWidth);
+  ASSERT_EQ(clamped.size(), minimum.size());
+  for (size_t i = 0; i < clamped.size(); ++i) {
+    EXPECT_EQ(clamped[i], minimum[i]);
+  }
+}
+
+TEST(LayoutTest, PromptsWrapToWidth) {
+  const std::vector<std::string> prompts = {
+      "Mode [1=Online / 2=Offline] (default 2): ",
+      "Model [1=llama3.2:3b / 2=llama3.2:latest / 3=llama3.1:latest] "
+      "(default 1): ",
+  };
+  for (const auto &prompt : prompts) {
+    for (int width : {24, 40, 60, 80, 120}) {
+      const auto parts = Utils::UI::prompt_lines(width, prompt);
+      for (size_t i = 0; i < parts.size(); ++i) {
+        const size_t lead = i == 0 ? 0 : 4; // Continuation indent.
+        EXPECT_LE(static_cast<int>(lead + parts[i].size()), width)
+            << "width=" << width << ": prompt part exceeds width: [" << parts[i]
+            << "]";
+      }
+    }
+  }
+}
+
+TEST(LayoutTest, NarrowPromptWrapsAndWidePromptDoesNot) {
+  const std::string mode = "Mode [1=Online / 2=Offline] (default 2): ";
+  const std::string model = "Model [1=llama3.2:3b / 2=llama3.2:latest / "
+                            "3=llama3.1:latest] (default 1): ";
+  EXPECT_GT(Utils::UI::prompt_lines(40, mode).size(), 1u);
+  EXPECT_GT(Utils::UI::prompt_lines(40, model).size(), 1u);
+  EXPECT_EQ(Utils::UI::prompt_lines(80, mode).size(), 1u);
+  EXPECT_EQ(Utils::UI::prompt_lines(120, model).size(), 1u);
+}
+
+TEST(LayoutTest, PromptBodyExcludesTrailingSpace) {
+  // The trailing space is re-appended by the emitter so the cursor lands after
+  // the colon; it must not be consumed into the wrapped body.
+  const auto parts = Utils::UI::prompt_lines(80, "Mode (default 2): ");
+  ASSERT_EQ(parts.size(), 1u);
+  EXPECT_EQ(parts[0].back(), ':');
 }

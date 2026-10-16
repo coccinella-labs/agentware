@@ -1,4 +1,5 @@
 #include "theme_service.h"
+#include "ui.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -414,16 +415,12 @@ void ThemeService::print_theme_preview(const std::string &theme_name) {
 void ThemeService::reset_colors() { std::cout << "\033[0m" << std::flush; }
 
 bool ThemeService::is_color_supported() {
-  // Check if terminal supports colors
-  const char *term = std::getenv("TERM");
-  if (term == nullptr) {
-    return false;
-  }
-
-  std::string term_str(term);
-  return term_str.find("color") != std::string::npos ||
-         term_str.find("xterm") != std::string::npos ||
-         term_str.find("screen") != std::string::npos || term_str == "vt100" ||
-         term_str == "vt220";
+  // Defer to the shared UI policy instead of deciding again. The previous
+  // implementation consulted only $TERM, which ignored both TTY state and
+  // NO_COLOR: it emitted escapes into pipes and kept emitting them under
+  // NO_COLOR=1, while the rest of the UI honored both. TERM is deliberately
+  // still not part of the decision, so a real TTY colors even when TERM is
+  // "dumb".
+  return Utils::UI::colors_enabled();
 }
 } // namespace Services
