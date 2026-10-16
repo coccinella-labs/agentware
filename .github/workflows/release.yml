@@ -58,10 +58,22 @@ jobs:
 
       - name: Install dependencies (Windows)
         if: matrix.os == 'windows-latest'
+        # Mirrors ci.yml exactly. The toolchain file on the Configure step
+        # points at C:\vcpkg, so vcpkg must be cloned, bootstrapped, and
+        # populated with cpr and the headers. The toolchain alone is not
+        # enough: an empty vcpkg tree yields Could NOT find CURL.
+        # Keep this string free of # prose, PowerShell reads it as commands.
         run: |
-          choco install cmake --yes
-          choco install nlohmann-json --yes
-          choco install curl --yes
+          powershell -Command "
+            Set-ExecutionPolicy Bypass -Scope Process -Force;
+            iwr https://chocolatey.org/install.ps1
+            -UseBasicParsing | iex;
+            choco install -y cmake --no-progress;
+            git clone https://github.com/microsoft/vcpkg.git C:\vcpkg;
+            C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics;
+            C:\vcpkg\vcpkg.exe integrate install;
+            C:\vcpkg\vcpkg.exe install cpr nlohmann-json libpqxx --triplet x64-windows
+          "
 
       - name: Configure
         shell: bash
@@ -69,10 +81,16 @@ jobs:
           # Match CI: without /opt/homebrew on PATH, CMake falls back to
           # fetching zlib and curl, and the vendored zlib defines fdopen
           # as a no-op macro that collides with the macOS SDK declaration.
-          FLAGS=""
-          [[ "$RUNNER_OS" == "macOS" ]] && \
-            FLAGS="-DCMAKE_PREFIX_PATH=/opt/homebrew"
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $FLAGS
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cmake -S . -B build \
+              -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake \
+              -DCMAKE_BUILD_TYPE=Release
+          else
+            FLAGS=""
+            [[ "$RUNNER_OS" == "macOS" ]] && \
+              FLAGS="-DCMAKE_PREFIX_PATH=/opt/homebrew"
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $FLAGS
+          fi
 
       - name: Build
         run: cmake --build build --config Release
@@ -81,8 +99,15 @@ jobs:
         shell: bash
         run: |
           mkdir -p release
-          cp build/bin/agentware-agent${{ matrix.ext }} \
+          # Multi-config generators put the binary one level deeper on
+          # Windows. CI already lists both locations for its artifacts.
+          if [ -f build/bin/Release/agentware-agent${{ matrix.ext }} ]; then
+            cp build/bin/Release/agentware-agent${{ matrix.ext }} \
               release/${{ matrix.artifact_name }}${{ matrix.ext }}
+          else
+            cp build/bin/agentware-agent${{ matrix.ext }} \
+              release/${{ matrix.artifact_name }}${{ matrix.ext }}
+          fi
           if [ "${{ matrix.os }}" == "windows-latest" ]; then
             7z a -tzip release-${{ matrix.artifact_name }}.zip release/*
           else
@@ -91,6 +116,7 @@ jobs:
 
       - name: Resolve tag
         # Manual runs carry the tag as an input; tag pushes carry it as the ref.
+        shell: bash
         run: |
           if [ "${{ inputs.tag }}" != "" ]; then
             echo "TAG_NAME=${{ inputs.tag }}" >> "$GITHUB_ENV"
