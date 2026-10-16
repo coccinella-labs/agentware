@@ -39,6 +39,37 @@ server and a git server, both declared as `npx` commands. The MCP transport is
 not implemented, so no server process is started and no MCP tool is called;
 the `/mcp` commands report their own configuration and say so.
 
+## Modal line editing (optional)
+
+Set `AGENTWARE_VIM_MODE=1` to edit the REPL prompt with Vim-style keys
+instead of plain `std::getline`. The default is off, so nothing changes until
+you opt in. Piped and redirected stdin always uses plain line input, so
+scripts and CI are unaffected even with the variable set.
+
+Insert mode is the usual one: characters insert, Backspace deletes. These
+keys work in **normal** mode, reached with `i`:
+
+| Key | Action |
+|---|---|
+| `i` | back to insert mode |
+| `h` | cursor left |
+| `l` | cursor right |
+| `0` | cursor to start of line |
+| `$` | cursor to end of line |
+| `x` | delete the character under the cursor |
+
+Enter submits through the existing REPL flow. Anything else in normal mode is
+a silent no-op rather than an error.
+
+Two limits worth knowing before you enable it:
+
+- **Arrow keys, function keys, Home and End do nothing.** Escape sequences
+  are consumed and ignored in this version, so there is no `j`/`k` movement
+  and no history navigation.
+- **Windows key identity is unverified.** The console mapping handles the
+  unmapped keys that arrows and function keys produce, but nothing
+  distinguishes one special key from another on that platform.
+
 ## Scope
 
 `src/` holds the implementation, public headers under `src/include/`, tests under `src/tests/`, and automation under `src/scripts/`. `CMakeLists.txt` and `Makefile` both build the same targets; `make` wraps the CMake invocation.
