@@ -59,11 +59,20 @@ jobs:
       - name: Install dependencies (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          # No choco packages here. The nlohmann-json package does not exist,
-          # so that install could never succeed, and choco's curl exposes no
-          # CMake-findable prefix. The vcpkg toolchain file below is the path
-          # CI already uses and the only one proven to work here.
-          choco install cmake --yes
+          # Mirrors ci.yml exactly. The toolchain file on the Configure step
+          # points at C:\vcpkg, so it has to be cloned, bootstrapped, and
+          # populated with cpr and the headers. The toolchain alone is not
+          # enough: an empty vcpkg tree yields Could NOT find CURL.
+          powershell -Command "
+            Set-ExecutionPolicy Bypass -Scope Process -Force;
+            iwr https://chocolatey.org/install.ps1
+            -UseBasicParsing | iex;
+            choco install -y cmake --no-progress;
+            git clone https://github.com/microsoft/vcpkg.git C:\vcpkg;
+            C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics;
+            C:\vcpkg\vcpkg.exe integrate install;
+            C:\vcpkg\vcpkg.exe install cpr nlohmann-json libpqxx --triplet x64-windows
+          "
 
       - name: Configure
         shell: bash
