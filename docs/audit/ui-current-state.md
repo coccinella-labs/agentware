@@ -8,7 +8,9 @@ audit report.
 > state it means. Any claim below is scoped to a named revision. Source in this
 > repository now matches `HEAD`: there is no uncommitted application code, so
 > the historical hazard of reading the working tree as if it were `main` no
-> longer applies. The P1 presentation work is committed and reviewable.
+> longer applies. The P1 presentation work is merged: `f908f2bf` and
+> `bdf33b2b` are both on `main`, so the baseline below is shipped code
+> rather than pending review.
 
 | Document | Responsibility |
 | --- | --- |
