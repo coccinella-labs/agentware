@@ -30,13 +30,15 @@ document is correct.
 | --- | --- |
 | `851182a5` | Sandbox lifecycle fix bounding the `run_bounded` worker. **Supports the POSIX-only Follow-up 2 resolution in `agent-ux-audit.md`.** Not a UI baseline. |
 | `f908f2bf` | P1-1, color-policy unification. |
-| `bdf33b2b` | P1-2 and P1-3, terminal width and width-aware UI. **Current `HEAD` and UI baseline.** |
+| `bdf33b2b` | P1-2 and P1-3, terminal width and width-aware UI. **UI baseline**, the newest revision carrying P1 work. Not necessarily `HEAD`. |
 
-## 1. Committed baseline: `HEAD` at `bdf33b2b`
+## 1. Committed baseline: `bdf33b2b`
 
-What a fresh clone of `main` contains once these commits are published. Until
-the two commits are pushed, a fresh clone of `origin/main` has only `851182a5`
-and therefore none of this.
+What a fresh clone of `main` will contain once these commits are published.
+Until they are pushed, a fresh clone of `origin/main` has only `851182a5` and
+therefore none of this. Check `git log --oneline -1 main` before reading this
+document as current; the baseline moves when P1 work lands, not when `HEAD`
+does.
 
 ### P1-1: color-policy unification (`f908f2bf`)
 
