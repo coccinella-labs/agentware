@@ -64,6 +64,7 @@ jobs:
           choco install curl --yes
 
       - name: Configure
+        shell: bash
         run: |
           # Match CI: without /opt/homebrew on PATH, CMake falls back to
           # fetching zlib and curl, and the vendored zlib defines fdopen
