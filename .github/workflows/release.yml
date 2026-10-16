@@ -50,7 +50,11 @@ jobs:
       - name: Install dependencies (macOS)
         if: matrix.os == 'macos-15'
         run: |
-          brew install cmake nlohmann-json curl
+          # zlib is what makes CMAKE_PREFIX_PATH work here: without it
+          # CMake finds no zlib and FetchContent pulls a vendored copy
+          # that collides with the macOS SDK's fdopen declaration.
+          brew update
+          brew install cmake nlohmann-json curl zlib
 
       - name: Install dependencies (Windows)
         if: matrix.os == 'windows-latest'
