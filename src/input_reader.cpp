@@ -214,7 +214,13 @@ FeedResult ModalEditor::feed(const KeyEvent &event, std::string *out_line) {
 
 KeyDecoder::KeyDecoder() = default;
 
-bool KeyDecoder::has_pending_escape() const { return pending_escape_; }
+bool KeyDecoder::has_pending_escape() const {
+  // An escape sequence is pending when the held bytes start with ESC.
+  // Deriving this rather than storing it keeps one source of truth: there
+  // is no flag that can disagree with the bytes it describes.
+  return !pending_bytes_.empty() &&
+         static_cast<unsigned char>(pending_bytes_[0]) == 0x1B;
+}
 
 void KeyDecoder::feed(const uint8_t *data, size_t size,
                       std::vector<KeyEvent> *out) {
@@ -222,24 +228,17 @@ void KeyDecoder::feed(const uint8_t *data, size_t size,
     return;
   }
   pending_bytes_.append(reinterpret_cast<const char *>(data), size);
+  // A sequence held from a previous chunk resumes through the same loop
+  // below, because the held bytes still contain its ESC. There is no
+  // special case here to get out of sync with the parser.
   size_t pos = 0;
-  // A pending ESC from a previous chunk followed by '[' starts CSI.
-  if (pending_escape_) {
-    pending_escape_ = false;
-    if (pos < pending_bytes_.size() && pending_bytes_[pos] == '[') {
-      ++pos;  // fall through to CSI consumption below.
-    } else {
-      out->push_back(KeyEvent{KeyKind::Escape, 0});
-      // Continue scanning the rest as normal input.
-    }
-  }
   while (pos < pending_bytes_.size()) {
     unsigned char c = static_cast<unsigned char>(pending_bytes_[pos]);
     if (c == 0x1B) {
-      // Possible CSI start: hold for more bytes or flush().
+      // Possible CSI start: hold the ESC itself so the next chunk can
+      // tell '[' (a sequence) from anything else (a lone Escape).
       if (pos + 1 >= pending_bytes_.size()) {
-        pending_escape_ = true;
-        pending_bytes_.erase(0, pos + 1);
+        pending_bytes_.erase(0, pos);
         return;
       }
       if (pending_bytes_[pos + 1] == '[') {
@@ -251,7 +250,6 @@ void KeyDecoder::feed(const uint8_t *data, size_t size,
         }
         if (end >= pending_bytes_.size()) {
           // Incomplete sequence: hold everything from ESC onward.
-          pending_escape_ = true;
           pending_bytes_.erase(0, pos);
           return;
         }
@@ -300,8 +298,10 @@ void KeyDecoder::flush(std::vector<KeyEvent> *out) {
   if (out == nullptr) {
     return;
   }
-  if (pending_escape_) {
-    pending_escape_ = false;
+  // A held ESC that never grew into a sequence is a lone Escape press.
+  if (!pending_bytes_.empty() &&
+      static_cast<unsigned char>(pending_bytes_[0]) == 0x1B) {
+    pending_bytes_.erase(0, 1);
     out->push_back(KeyEvent{KeyKind::Escape, 0});
   }
   // Any held partial UTF-8 becomes replacement characters.

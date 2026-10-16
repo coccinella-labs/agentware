@@ -997,6 +997,83 @@ TEST(KeyDecoderTest, MultibyteKeptWhole) {
   EXPECT_EQ(second[0].ch, static_cast<char32_t>(0xE9));
 }
 
+// A CSI sequence must decode identically however the reads split it.
+// Every split point is exercised, including the two the old flag-based
+// resume mishandled: immediately after ESC, and after ESC '['.
+TEST(KeyDecoderTest, CsiSplitAcrossChunksMatchesWholeChunk) {
+  const uint8_t arrow[] = {0x1B, '[', 'A'};
+  for (size_t split = 1; split < sizeof(arrow); ++split) {
+    Utils::Input::KeyDecoder decoder;
+    std::vector<Utils::Input::KeyEvent> events;
+    decoder.feed(arrow, split, &events);
+    EXPECT_TRUE(events.empty()) << "emitted before completion at split "
+                               << split;
+    decoder.feed(arrow + split, sizeof(arrow) - split, &events);
+    EXPECT_TRUE(events.empty()) << "CSI not ignored at split " << split;
+    decoder.flush(&events);
+    EXPECT_TRUE(events.empty()) << "flush invented an event at split "
+                                << split;
+  }
+}
+
+// Byte-for-byte: a split sequence must produce exactly the events the same
+// sequence produces in one chunk, including the trailing text after it.
+TEST(KeyDecoderTest, CsiSplitDoesNotLeakParametersAsText) {
+  const uint8_t seq[] = {0x1B, '[', '1', ';', '5', 'C', 'z'};
+  for (size_t split = 1; split < sizeof(seq); ++split) {
+    Utils::Input::KeyDecoder whole, split_decoder;
+    std::vector<Utils::Input::KeyEvent> expected, actual;
+    whole.feed(seq, sizeof(seq), &expected);
+    whole.flush(&expected);
+
+    split_decoder.feed(seq, split, &actual);
+    split_decoder.feed(seq + split, sizeof(seq) - split, &actual);
+    split_decoder.flush(&actual);
+
+    ASSERT_EQ(actual.size(), expected.size())
+        << "event count differs at split " << split;
+    for (size_t i = 0; i < expected.size(); ++i) {
+      EXPECT_EQ(actual[i].kind, expected[i].kind) << "split " << split;
+      EXPECT_EQ(actual[i].ch, expected[i].ch) << "split " << split;
+    }
+    // 'z' follows the sequence and must survive exactly once.
+    ASSERT_EQ(actual.size(), 1u) << "split " << split;
+    EXPECT_EQ(actual[0].kind, Utils::Input::KeyKind::Char);
+    EXPECT_EQ(actual[0].ch, static_cast<char32_t>('z'));
+  }
+}
+
+// An ESC held from a previous chunk that turns out not to be a CSI is a
+// lone Escape press, and must not also leave its successor as text.
+TEST(KeyDecoderTest, HeldEscapeThenNonBracketIsEscapeOnly) {
+  Utils::Input::KeyDecoder decoder;
+  std::vector<Utils::Input::KeyEvent> events;
+  const uint8_t esc = 0x1B;
+  const uint8_t q = 'q';
+  decoder.feed(&esc, 1, &events);
+  EXPECT_TRUE(decoder.has_pending_escape());
+  decoder.feed(&q, 1, &events);
+  ASSERT_EQ(events.size(), 2u);
+  EXPECT_EQ(events[0].kind, Utils::Input::KeyKind::Escape);
+  EXPECT_EQ(events[1].kind, Utils::Input::KeyKind::Char);
+  EXPECT_EQ(events[1].ch, static_cast<char32_t>('q'));
+}
+
+// Two consecutive sequences split at every point, so the second cannot be
+// mistaken for a continuation of the first.
+TEST(KeyDecoderTest, ConsecutiveSplitSequences) {
+  const uint8_t seq[] = {0x1B, '[', 'A', 0x1B, '[', 'B', 'k'};
+  for (size_t split = 1; split < sizeof(seq); ++split) {
+    Utils::Input::KeyDecoder decoder;
+    std::vector<Utils::Input::KeyEvent> events;
+    decoder.feed(seq, split, &events);
+    decoder.feed(seq + split, sizeof(seq) - split, &events);
+    decoder.flush(&events);
+    ASSERT_EQ(events.size(), 1u) << "split " << split;
+    EXPECT_EQ(events[0].ch, static_cast<char32_t>('k')) << "split " << split;
+  }
+}
+
 TEST(KeyDecoderTest, InvalidBytesBecomeReplacement) {
   Utils::Input::KeyDecoder decoder;
   std::vector<Utils::Input::KeyEvent> out;

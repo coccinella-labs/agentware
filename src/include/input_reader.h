@@ -72,6 +72,12 @@ class ModalEditor {
 // Decodes a byte stream into key events. Holds a trailing lone ESC or a
 // partial UTF-8 sequence until more bytes arrive or flush() is called.
 // CSI escape sequences (arrows etc.) are consumed and ignored in v1.
+//
+// An incomplete escape sequence is held as its actual bytes, never as a
+// flag. A flag cannot record how much of the sequence arrived, so a split
+// anywhere other than the first byte had to be resumed from state the
+// parser no longer had. Keeping the bytes means every split point resumes
+// through the same CSI path.
 class KeyDecoder {
  public:
   KeyDecoder();
@@ -82,7 +88,6 @@ class KeyDecoder {
 
  private:
   std::string pending_bytes_;
-  bool pending_escape_ = false;
 };
 
 // Backend selection. Modal input requires all three; everything else
