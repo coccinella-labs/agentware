@@ -68,7 +68,7 @@ runs:
         NOTES_FILE=$(mktemp)
         CHANGELOG_NOTES=$(awk -v ver="${{ steps.version.outputs.version }}" '
           $0 ~ "^## \\["ver"\\]" {insec=1; next}
-          insec && /^## \\[/ {insec=0}
+          insec && /^## \[/ {insec=0}
           insec {print}
         ' CHANGELOG.md | sed '/^[[:space:]]*$/d')
         if [ -n "$CHANGELOG_NOTES" ] && ! printf '%s\n' "$CHANGELOG_NOTES" | grep -qx '\*'; then
