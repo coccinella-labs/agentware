@@ -116,6 +116,7 @@ jobs:
 
       - name: Resolve tag
         # Manual runs carry the tag as an input; tag pushes carry it as the ref.
+        shell: bash
         run: |
           if [ "${{ inputs.tag }}" != "" ]; then
             echo "TAG_NAME=${{ inputs.tag }}" >> "$GITHUB_ENV"
