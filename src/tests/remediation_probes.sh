@@ -626,6 +626,12 @@ if command -v script >/dev/null 2>&1; then
   fi
 fi
 
+# Vim opt-in with piped stdin falls back to plain line input (no TTY).
+export AGENTWARE_VIM_MODE=1
+probe "vim opt-in piped falls back" 0 "Commands Processed" \
+  "2" "1" "/stats" "exit"
+unset AGENTWARE_VIM_MODE
+
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

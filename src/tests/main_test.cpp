@@ -3,6 +3,7 @@
 #include "file_service.h"
 #include "git_service.h"
 #include "github_service.h"
+#include "input_reader.h"
 #include "sandbox_service.h"
 #include "theme_service.h"
 #include "ui.h"
@@ -847,6 +848,285 @@ TEST(GitLogTest, WorksInRepoAndRefusesHostilePath) {
   EXPECT_NE(Services::GitService::get_git_log(hostile, 30).find("Unsafe"), std::string::npos);
   EXPECT_FALSE(fs::exists("/tmp/pwned", ec));
   fs::remove_all(dir, ec);
+}
+
+// Modal editing state machine: insert/normal transitions, cursor bounds,
+// submit and EOF contract. No TTY required.
+TEST(ModalEditorTest, InsertTypesAndSubmits) {
+  Utils::Input::ModalEditor editor;
+  EXPECT_EQ(editor.mode(), Utils::Input::EditMode::Insert);
+  std::string line;
+  EXPECT_EQ(editor.feed({Utils::Input::KeyKind::Char, U'a'}, &line),
+            Utils::Input::FeedResult::Continue);
+  EXPECT_EQ(editor.feed({Utils::Input::KeyKind::Char, U'b'}, &line),
+            Utils::Input::FeedResult::Continue);
+  EXPECT_EQ(editor.feed({Utils::Input::KeyKind::Enter, 0}, &line),
+            Utils::Input::FeedResult::Submitted);
+  EXPECT_EQ(line, "ab");
+}
+
+TEST(ModalEditorTest, EscapeClampsCursorToLastChar) {
+  Utils::Input::ModalEditor editor;
+  std::string line;
+  editor.feed({Utils::Input::KeyKind::Char, U'a'}, &line);
+  editor.feed({Utils::Input::KeyKind::Char, U'b'}, &line);
+  // Cursor sits at 2 (one past end) in insert mode.
+  EXPECT_EQ(editor.cursor(), 2u);
+  editor.feed({Utils::Input::KeyKind::Escape, 0}, &line);
+  EXPECT_EQ(editor.mode(), Utils::Input::EditMode::Normal);
+  EXPECT_EQ(editor.cursor(), 1u);
+  editor.feed({Utils::Input::KeyKind::Char, U'i'}, &line);
+  EXPECT_EQ(editor.mode(), Utils::Input::EditMode::Insert);
+  EXPECT_EQ(editor.cursor(), 1u);
+}
+
+TEST(ModalEditorTest, EmptyBufferBoundsAreNoOps) {
+  Utils::Input::ModalEditor editor;
+  std::string line;
+  editor.feed({Utils::Input::KeyKind::Escape, 0}, &line);
+  EXPECT_EQ(editor.mode(), Utils::Input::EditMode::Normal);
+  EXPECT_EQ(editor.cursor(), 0u);
+  EXPECT_EQ(editor.feed({Utils::Input::KeyKind::Char, U'h'}, &line),
+            Utils::Input::FeedResult::Continue);
+  EXPECT_EQ(editor.feed({Utils::Input::KeyKind::Char, U'l'}, &line),
+            Utils::Input::FeedResult::Continue);
+  EXPECT_EQ(editor.feed({Utils::Input::KeyKind::Char, U'x'}, &line),
+            Utils::Input::FeedResult::Continue);
+  EXPECT_EQ(editor.cursor(), 0u);
+  EXPECT_TRUE(editor.buffer().empty());
+  EXPECT_EQ(editor.feed({Utils::Input::KeyKind::Enter, 0}, &line),
+            Utils::Input::FeedResult::Submitted);
+  EXPECT_TRUE(line.empty());
+}
+
+TEST(ModalEditorTest, MotionsAndDelete) {
+  Utils::Input::ModalEditor editor;
+  std::string line;
+  for (char c : std::string("abc")) {
+    editor.feed({Utils::Input::KeyKind::Char, static_cast<char32_t>(c)},
+                &line);
+  }
+  editor.feed({Utils::Input::KeyKind::Escape, 0}, &line);  // cursor -> 2
+  editor.feed({Utils::Input::KeyKind::Char, U'h'}, &line);  // -> 1
+  EXPECT_EQ(editor.cursor(), 1u);
+  editor.feed({Utils::Input::KeyKind::Char, U'l'}, &line);  // -> 2
+  EXPECT_EQ(editor.cursor(), 2u);
+  editor.feed({Utils::Input::KeyKind::Char, U'l'}, &line);  // stays 2
+  EXPECT_EQ(editor.cursor(), 2u);
+  editor.feed({Utils::Input::KeyKind::Char, U'0'}, &line);
+  EXPECT_EQ(editor.cursor(), 0u);
+  editor.feed({Utils::Input::KeyKind::Char, U'$'}, &line);
+  EXPECT_EQ(editor.cursor(), 2u);
+  editor.feed({Utils::Input::KeyKind::Char, U'x'}, &line);  // delete 'c'
+  EXPECT_EQ(editor.buffer_utf8(), "ab");
+  EXPECT_EQ(editor.cursor(), 1u);
+  editor.feed({Utils::Input::KeyKind::Char, U'q'}, &line);  // unknown: no-op
+  EXPECT_EQ(editor.buffer_utf8(), "ab");
+  EXPECT_EQ(editor.feed({Utils::Input::KeyKind::Backspace, 0}, &line),
+            Utils::Input::FeedResult::Continue);  // normal: move left
+  EXPECT_EQ(editor.cursor(), 0u);
+}
+
+TEST(ModalEditorTest, InsertBackspaceDeletesLeft) {
+  Utils::Input::ModalEditor editor;
+  std::string line;
+  editor.feed({Utils::Input::KeyKind::Char, U'a'}, &line);
+  editor.feed({Utils::Input::KeyKind::Char, U'b'}, &line);
+  editor.feed({Utils::Input::KeyKind::Backspace, 0}, &line);
+  EXPECT_EQ(editor.buffer_utf8(), "a");
+  EXPECT_EQ(editor.cursor(), 1u);
+  editor.feed({Utils::Input::KeyKind::Backspace, 0}, &line);
+  editor.feed({Utils::Input::KeyKind::Backspace, 0}, &line);  // clamped
+  EXPECT_TRUE(editor.buffer().empty());
+  EXPECT_EQ(editor.cursor(), 0u);
+}
+
+TEST(ModalEditorTest, EofContract) {
+  Utils::Input::ModalEditor editor;
+  std::string line;
+  // Ctrl-D on empty buffer: immediate Eof.
+  EXPECT_EQ(editor.feed({Utils::Input::KeyKind::CtrlD, 0}, &line),
+            Utils::Input::FeedResult::Eof);
+  // Ctrl-D with pending input: no-op, keep editing.
+  editor.feed({Utils::Input::KeyKind::Char, U'a'}, &line);
+  EXPECT_EQ(editor.feed({Utils::Input::KeyKind::CtrlD, 0}, &line),
+            Utils::Input::FeedResult::Continue);
+  EXPECT_EQ(editor.buffer_utf8(), "a");
+  // Stream end with pending input: submit once...
+  EXPECT_EQ(editor.feed({Utils::Input::KeyKind::StreamEnd, 0}, &line),
+            Utils::Input::FeedResult::Submitted);
+  EXPECT_EQ(line, "a");
+  // ...then a fresh read on the dead stream reports Eof.
+  Utils::Input::ModalEditor fresh;
+  EXPECT_EQ(fresh.feed({Utils::Input::KeyKind::StreamEnd, 0}, &line),
+            Utils::Input::FeedResult::Eof);
+}
+
+// Byte decoder: CSI consumed, multibyte kept whole, invalid -> U+FFFD,
+// split sequences held until complete or flushed.
+TEST(KeyDecoderTest, CsiSequencesIgnored) {
+  Utils::Input::KeyDecoder decoder;
+  std::vector<Utils::Input::KeyEvent> out;
+  const uint8_t arrow[] = {0x1B, '[', 'A'};
+  decoder.feed(arrow, sizeof(arrow), &out);
+  EXPECT_TRUE(out.empty());
+  decoder.flush(&out);
+  EXPECT_TRUE(out.empty());
+}
+
+TEST(KeyDecoderTest, LoneEscapeSurvives) {
+  Utils::Input::KeyDecoder decoder;
+  std::vector<Utils::Input::KeyEvent> out;
+  const uint8_t esc = 0x1B;
+  decoder.feed(&esc, 1, &out);
+  EXPECT_TRUE(out.empty());  // held for a possible CSI follow-up.
+  decoder.flush(&out);
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out[0].kind, Utils::Input::KeyKind::Escape);
+}
+
+TEST(KeyDecoderTest, MultibyteKeptWhole) {
+  Utils::Input::KeyDecoder decoder;
+  std::vector<Utils::Input::KeyEvent> out;
+  const uint8_t text[] = {'a', 0xC3, 0xA9};  // 'a' + U+00E9.
+  decoder.feed(text, sizeof(text), &out);
+  ASSERT_EQ(out.size(), 2u);
+  EXPECT_EQ(out[1].ch, static_cast<char32_t>(0xE9));
+  // Split across chunks resolves once complete.
+  Utils::Input::KeyDecoder split;
+  std::vector<Utils::Input::KeyEvent> first, second;
+  const uint8_t part1[] = {'b', 0xC3};
+  const uint8_t part2[] = {0xA9};
+  split.feed(part1, sizeof(part1), &first);
+  ASSERT_EQ(first.size(), 1u);
+  split.feed(part2, sizeof(part2), &second);
+  ASSERT_EQ(second.size(), 1u);
+  EXPECT_EQ(second[0].ch, static_cast<char32_t>(0xE9));
+}
+
+// A CSI sequence must decode identically however the reads split it.
+// Every split point is exercised, including the two the old flag-based
+// resume mishandled: immediately after ESC, and after ESC '['.
+TEST(KeyDecoderTest, CsiSplitAcrossChunksMatchesWholeChunk) {
+  const uint8_t arrow[] = {0x1B, '[', 'A'};
+  for (size_t split = 1; split < sizeof(arrow); ++split) {
+    Utils::Input::KeyDecoder decoder;
+    std::vector<Utils::Input::KeyEvent> events;
+    decoder.feed(arrow, split, &events);
+    EXPECT_TRUE(events.empty()) << "emitted before completion at split "
+                               << split;
+    decoder.feed(arrow + split, sizeof(arrow) - split, &events);
+    EXPECT_TRUE(events.empty()) << "CSI not ignored at split " << split;
+    decoder.flush(&events);
+    EXPECT_TRUE(events.empty()) << "flush invented an event at split "
+                                << split;
+  }
+}
+
+// Byte-for-byte: a split sequence must produce exactly the events the same
+// sequence produces in one chunk, including the trailing text after it.
+TEST(KeyDecoderTest, CsiSplitDoesNotLeakParametersAsText) {
+  const uint8_t seq[] = {0x1B, '[', '1', ';', '5', 'C', 'z'};
+  for (size_t split = 1; split < sizeof(seq); ++split) {
+    Utils::Input::KeyDecoder whole, split_decoder;
+    std::vector<Utils::Input::KeyEvent> expected, actual;
+    whole.feed(seq, sizeof(seq), &expected);
+    whole.flush(&expected);
+
+    split_decoder.feed(seq, split, &actual);
+    split_decoder.feed(seq + split, sizeof(seq) - split, &actual);
+    split_decoder.flush(&actual);
+
+    ASSERT_EQ(actual.size(), expected.size())
+        << "event count differs at split " << split;
+    for (size_t i = 0; i < expected.size(); ++i) {
+      EXPECT_EQ(actual[i].kind, expected[i].kind) << "split " << split;
+      EXPECT_EQ(actual[i].ch, expected[i].ch) << "split " << split;
+    }
+    // 'z' follows the sequence and must survive exactly once.
+    ASSERT_EQ(actual.size(), 1u) << "split " << split;
+    EXPECT_EQ(actual[0].kind, Utils::Input::KeyKind::Char);
+    EXPECT_EQ(actual[0].ch, static_cast<char32_t>('z'));
+  }
+}
+
+// An ESC held from a previous chunk that turns out not to be a CSI is a
+// lone Escape press, and must not also leave its successor as text.
+TEST(KeyDecoderTest, HeldEscapeThenNonBracketIsEscapeOnly) {
+  Utils::Input::KeyDecoder decoder;
+  std::vector<Utils::Input::KeyEvent> events;
+  const uint8_t esc = 0x1B;
+  const uint8_t q = 'q';
+  decoder.feed(&esc, 1, &events);
+  EXPECT_TRUE(decoder.has_pending_escape());
+  decoder.feed(&q, 1, &events);
+  ASSERT_EQ(events.size(), 2u);
+  EXPECT_EQ(events[0].kind, Utils::Input::KeyKind::Escape);
+  EXPECT_EQ(events[1].kind, Utils::Input::KeyKind::Char);
+  EXPECT_EQ(events[1].ch, static_cast<char32_t>('q'));
+}
+
+// Two consecutive sequences split at every point, so the second cannot be
+// mistaken for a continuation of the first.
+TEST(KeyDecoderTest, ConsecutiveSplitSequences) {
+  const uint8_t seq[] = {0x1B, '[', 'A', 0x1B, '[', 'B', 'k'};
+  for (size_t split = 1; split < sizeof(seq); ++split) {
+    Utils::Input::KeyDecoder decoder;
+    std::vector<Utils::Input::KeyEvent> events;
+    decoder.feed(seq, split, &events);
+    decoder.feed(seq + split, sizeof(seq) - split, &events);
+    decoder.flush(&events);
+    ASSERT_EQ(events.size(), 1u) << "split " << split;
+    EXPECT_EQ(events[0].ch, static_cast<char32_t>('k')) << "split " << split;
+  }
+}
+
+// Windows special keys report UnicodeChar == 0. They must insert nothing,
+// matching the POSIX path's treatment of unmapped control bytes.
+TEST(WindowsKeyMappingTest, UnmappedSpecialKeyInsertsNothing) {
+  Utils::Input::KeyEvent event{Utils::Input::KeyKind::Char, 0xFFFF};
+  EXPECT_FALSE(Utils::Input::windows_key_event(0, &event));
+  EXPECT_FALSE(Utils::Input::windows_key_event(9, &event));   // Tab: unmapped.
+  EXPECT_FALSE(Utils::Input::windows_key_event(31, &event));  // unit separator.
+}
+
+TEST(WindowsKeyMappingTest, MappedKeysAndText) {
+  Utils::Input::KeyEvent event{Utils::Input::KeyKind::Char, 0};
+  EXPECT_TRUE(Utils::Input::windows_key_event(27, &event));
+  EXPECT_EQ(event.kind, Utils::Input::KeyKind::Escape);
+  EXPECT_TRUE(Utils::Input::windows_key_event(13, &event));
+  EXPECT_EQ(event.kind, Utils::Input::KeyKind::Enter);
+  EXPECT_TRUE(Utils::Input::windows_key_event(8, &event));
+  EXPECT_EQ(event.kind, Utils::Input::KeyKind::Backspace);
+  EXPECT_TRUE(Utils::Input::windows_key_event(26, &event));
+  EXPECT_EQ(event.kind, Utils::Input::KeyKind::CtrlD);
+  EXPECT_TRUE(Utils::Input::windows_key_event('z', &event));
+  EXPECT_EQ(event.kind, Utils::Input::KeyKind::Char);
+  EXPECT_EQ(event.ch, static_cast<char32_t>('z'));
+}
+
+TEST(KeyDecoderTest, InvalidBytesBecomeReplacement) {
+  Utils::Input::KeyDecoder decoder;
+  std::vector<Utils::Input::KeyEvent> out;
+  const uint8_t bad[] = {0xFF, 'x'};
+  decoder.feed(bad, sizeof(bad), &out);
+  ASSERT_EQ(out.size(), 2u);
+  EXPECT_EQ(out[0].ch, static_cast<char32_t>(0xFFFD));
+  EXPECT_EQ(out[1].ch, U'x');
+}
+
+// Backend selection: modal only when opt-in, TTY, and guard all hold.
+TEST(BackendSelectionTest, RequiresAllThreeConditions) {
+  using Utils::Input::InputBackend;
+  using Utils::Input::select_backend;
+  EXPECT_EQ(select_backend(false, false, false), InputBackend::Line);
+  EXPECT_EQ(select_backend(false, false, true), InputBackend::Line);
+  EXPECT_EQ(select_backend(false, true, false), InputBackend::Line);
+  EXPECT_EQ(select_backend(false, true, true), InputBackend::Line);
+  EXPECT_EQ(select_backend(true, false, false), InputBackend::Line);
+  EXPECT_EQ(select_backend(true, false, true), InputBackend::Line);
+  EXPECT_EQ(select_backend(true, true, false), InputBackend::Line);
+  EXPECT_EQ(select_backend(true, true, true), InputBackend::Modal);
 }
 
 int main(int argc, char **argv) {
