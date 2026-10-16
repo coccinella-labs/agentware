@@ -99,8 +99,15 @@ jobs:
         shell: bash
         run: |
           mkdir -p release
-          cp build/bin/agentware-agent${{ matrix.ext }} \
+          # Multi-config generators put the binary one level deeper on
+          # Windows. CI already lists both locations for its artifacts.
+          if [ -f build/bin/Release/agentware-agent${{ matrix.ext }} ]; then
+            cp build/bin/Release/agentware-agent${{ matrix.ext }} \
               release/${{ matrix.artifact_name }}${{ matrix.ext }}
+          else
+            cp build/bin/agentware-agent${{ matrix.ext }} \
+              release/${{ matrix.artifact_name }}${{ matrix.ext }}
+          fi
           if [ "${{ matrix.os }}" == "windows-latest" ]; then
             7z a -tzip release-${{ matrix.artifact_name }}.zip release/*
           else
