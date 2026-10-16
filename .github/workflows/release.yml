@@ -58,11 +58,12 @@ jobs:
 
       - name: Install dependencies (Windows)
         if: matrix.os == 'windows-latest'
+        # Mirrors ci.yml exactly. The toolchain file on the Configure step
+        # points at C:\vcpkg, so vcpkg must be cloned, bootstrapped, and
+        # populated with cpr and the headers. The toolchain alone is not
+        # enough: an empty vcpkg tree yields Could NOT find CURL.
+        # Keep this string free of # prose, PowerShell reads it as commands.
         run: |
-          # Mirrors ci.yml exactly. The toolchain file on the Configure step
-          # points at C:\vcpkg, so it has to be cloned, bootstrapped, and
-          # populated with cpr and the headers. The toolchain alone is not
-          # enough: an empty vcpkg tree yields Could NOT find CURL.
           powershell -Command "
             Set-ExecutionPolicy Bypass -Scope Process -Force;
             iwr https://chocolatey.org/install.ps1
