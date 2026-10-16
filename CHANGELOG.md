@@ -2,12 +2,10 @@
 
 ## [0.1.7] - 2026-10-16
 
+Everything below shipped on `main` since 0.1.6 and is tagged here. The first two entries are this week's merges; the rest accumulated under `Unreleased` and moves in with them.
+
 * Terminal layout is width-aware: help, status, prompt, and quick-help output are laid out against the detected terminal width, falling back to 80 columns when unavailable. `ThemeService` now defers to the shared UI color policy.
 * Optional Vim-style modal editing for the REPL prompt, disabled by default (`AGENTWARE_VIM_MODE=1` to enable). Piped and redirected stdin keep plain line input.
-
-<!-- Unreleased records user-visible changes on main between releases. Move entries into a version section when that version is tagged. -->
-
-## [Unreleased]
 
 ### Added
 
@@ -72,3 +70,7 @@
 ## [0.1] - 2025-09-21
 
 * Initial release with E2E testing, Docker mocks, and CI/CD setup
+
+<!-- Unreleased records user-visible changes on main between releases. Move entries into a version section when that version is tagged. -->
+
+## [Unreleased]
