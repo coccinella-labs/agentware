@@ -304,13 +304,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          pr_id=$(gh pr list --head "$BRANCH" --state open --json id --jq '.[0].id // empty')
-          if [ -z "$pr_id" ]; then
+          # One query returns the number, the node id and the head sha. The
+          # number is what gh pr view accepts; the node id is what the GraphQL
+          # calls need. They are different identifiers and mixing them up makes
+          # gh pr view fall back to the current branch and print a misleading
+          # "no pull requests found" for what it thinks is a branch name.
+          pr_number=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -z "$pr_number" ]; then
             echo "::error::no open report pull request for $BRANCH; nothing to enqueue"
             exit 1
           fi
-          head_oid=$(gh pr view "$pr_id" --json headRefOid --jq .headRefOid) || \
+          pr_id=$(gh pr view "$pr_number" --json id --jq .id) || \
+            { echo "::error::could not read the report pull request id; human intervention needed"; exit 1; }
+          head_oid=$(gh pr view "$pr_number" --json headRefOid --jq .headRefOid) || \
             { echo "::error::could not read the report head sha; human intervention needed"; exit 1; }
+          echo "Enqueuing pull request #$pr_number ($pr_id) at $head_oid"
 
           # A pull request that is already in the queue must not be enqueued
           # again. The mutation would either be refused or create a second
@@ -324,7 +332,6 @@ jobs:
             exit 0
           fi
 
-          echo "Enqueuing pull request $pr_id at $head_oid"
           gh api graphql -f query='
             mutation($pr: ID!, $oid: GitObjectID!) {
               enqueuePullRequest(input: {pullRequestId: $pr, expectedHeadOid: $oid}) {
