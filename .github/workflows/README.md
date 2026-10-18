@@ -11,7 +11,7 @@ documented in `CONTRIBUTING.md` under CI troubleshooting, not here.
 | `cla.yml` | PR opened, sync, reopened | Contributor-agreement check. Needs `CLA_BOT_TOKEN`, `CLA_SIGNED_JSON`. |
 | `labeler.yml` | PR | Labels pull requests from commits and files. |
 | `lock-merged.yml` | PR | Locks merged pull requests. |
-| `maintenance.yml` | Daily 06:00 UTC, manual | Health checks and a dated `docs/maintenance/` report. No auto-fixing. |
+| `maintenance.yml` | Daily 06:00 UTC, manual | Health checks and a dated `docs/maintenance/` report, as a PR. |
 | `release.yml` | Tag push, manual | Builds platform binaries and attaches them to the release. |
 | `security.yml` | Push, PR, release, weekly, manual | CodeQL, Trivy filesystem scan, and release tarball. |
 | `site.yml` | Push touching `docs/`, manual | Deploys `docs/` to GitHub Pages. Shows as `Site` in the runs list. |

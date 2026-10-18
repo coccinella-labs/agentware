@@ -17,7 +17,11 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write  # only to commit the dated log file, nothing else
+  # Push the report branch, and open the pull request that carries it. Both
+  # are needed: with only contents: write, gh pr create is refused because an
+  # unlisted scope defaults to none.
+  contents: write
+  pull-requests: write
 
 jobs:
   maintain:
@@ -208,10 +212,15 @@ jobs:
       - name: Commit report
         # Always runs so failures are recorded, not lost. Scoped to the log
         # directory only: nothing else in the tree can be committed from here.
-        # Never force-pushes. On a rejected push (a concurrent run or a human
-        # push landed first), rebase the log commit and retry once; if that
-        # still fails, exit non-zero so a human intervenes.
+        # Never force-pushes to a branch anyone else writes to.
+        #
+        # The report is published as a pull request, not a direct push. The
+        # main-merge-queue ruleset requires three status checks on main, and a
+        # direct push carries none, so every scheduled run failed with
+        # "3 of 3 required status checks are expected" until this changed.
         if: always()
+        env:
+          BRANCH: maintenance/daily-${{ github.run_id }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -223,7 +232,49 @@ jobs:
           git commit -m "Daily maintenance report $(date -u +%F) $(date -u +%H%M%S) UTC"
           git fetch origin main
           git rebase origin/main || { echo "::error::rebase failed; human intervention needed"; exit 1; }
-          # Fully qualified refspec. A short "HEAD:main" is ambiguous if a tag named
-          # "main" ever exists, since git cannot tell branch from tag.
-          git push origin HEAD:refs/heads/main || \
-            { echo "::error::push rejected after rebase; human intervention needed"; exit 1; }
+          # A fresh branch per run, so a concurrent run never races this one
+          # and no existing history is ever overwritten.
+          git switch -c "$BRANCH"
+          git push --force origin "$BRANCH"
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+
+      - name: Open pull request for the report
+        # Guarded so an unchanged report never opens an empty pull request.
+        if: always() && env.BRANCH != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "Daily maintenance report $(date -u +%F)" \
+            --body "Automated daily repository health report. The checks are read-only; anything the report finds wrong is fixed by a human through the normal pull request process.
+
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            || { echo "::error::could not open the report pull request; human intervention needed"; exit 1; }
+
+      - name: Queue the report for merge
+        # The repository merges only through the merge queue, so the pull
+        # request is enqueued directly. Auto-merge is not enabled on this
+        # repository (allow_auto_merge is false), so gh pr merge --auto would
+        # be refused; the GraphQL enqueue is the supported path.
+        #
+        # On failure the pull request is left open for a human, which is the
+        # correct outcome: the report is preserved and nothing is lost.
+        if: always() && env.BRANCH != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pr_id=$(gh pr view "$BRANCH" --json id --jq .id) || \
+            { echo "::error::report pull request not found; it stays open for a human"; exit 1; }
+          head_oid=$(gh pr view "$BRANCH" --json headRefOid --jq .headRefOid) || \
+            { echo "::error::could not read the report head sha; human intervention needed"; exit 1; }
+          echo "Enqueuing pull request $pr_id at $head_oid"
+          gh api graphql -f query='
+            mutation($pr: ID!, $oid: GitObjectID!) {
+              enqueuePullRequest(input: {pullRequestId: $pr, expectedHeadOid: $oid}) {
+                mergeQueueEntry { position }
+              }
+            }' -f pr="$pr_id" -f oid="$head_oid" \
+            || { echo "::error::could not enqueue the report; it stays open for a human"; exit 1; }
+          echo "Report will merge through the queue once its checks are green."
