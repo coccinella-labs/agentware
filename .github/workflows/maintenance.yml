@@ -250,6 +250,16 @@ jobs:
             git switch -C "$BRANCH" "origin/main"
           fi
 
+          # Establish the lease before it is used. --force-with-lease compares
+          # the remote head against the local remote-tracking ref, and in this
+          # path that ref has never been fetched, so it is stale or absent and
+          # the push is rejected as stale info even when nothing has moved.
+          # Fetching the branch first, or taking its current value when it is
+          # absent, makes the comparison mean something: the push is refused only
+          # if the branch actually changed after we looked at it.
+          git fetch origin "$BRANCH" 2>/dev/null || true
+          lease=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
+
           git add docs/maintenance/
           if git diff --cached --quiet; then
             echo "No report changes to commit."
@@ -261,7 +271,7 @@ jobs:
           # With-lease rather than plain force. The remote head was fetched
           # above, so the push is refused if anything else wrote to the branch
           # in the meantime, rather than silently overwriting it.
-          git push --force-with-lease origin "$BRANCH" \
+          git push --force-with-lease="$BRANCH:$lease" origin "$BRANCH" \
             || { echo "::error::branch moved unexpectedly; not overwriting it. A human push to $BRANCH needs reconciling."; exit 1; }
           echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
 
