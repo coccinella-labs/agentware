@@ -314,8 +314,10 @@ jobs:
             echo "::error::no open report pull request for $BRANCH; nothing to enqueue"
             exit 1
           fi
-          pr_id=$(gh pr view "$pr_number" --json id --jq .id)
-          head_oid=$(gh pr view "$pr_number" --json headRefOid --jq .headRefOid)
+          pr_id=$(gh pr view "$pr_number" --json id --jq .id) || \
+            { echo "::error::could not read the report pull request id; human intervention needed"; exit 1; }
+          head_oid=$(gh pr view "$pr_number" --json headRefOid --jq .headRefOid) || \
+            { echo "::error::could not read the report head sha; human intervention needed"; exit 1; }
           echo "Enqueuing pull request #$pr_number ($pr_id) at $head_oid"
 
           # A pull request that is already in the queue must not be enqueued
