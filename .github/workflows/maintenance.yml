@@ -17,7 +17,11 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write  # only to commit the dated log file, nothing else
+  # Push the report branch, and open the pull request that carries it. Both
+  # are needed: with only contents: write, gh pr create is refused because an
+  # unlisted scope defaults to none.
+  contents: write
+  pull-requests: write
 
 jobs:
   maintain:
@@ -208,13 +212,44 @@ jobs:
       - name: Commit report
         # Always runs so failures are recorded, not lost. Scoped to the log
         # directory only: nothing else in the tree can be committed from here.
-        # Never force-pushes. On a rejected push (a concurrent run or a human
-        # push landed first), rebase the log commit and retry once; if that
-        # still fails, exit non-zero so a human intervenes.
+        # Never force-pushes to a branch anyone else writes to.
+        #
+        # The report is published as a pull request, not a direct push. The
+        # main-merge-queue ruleset requires three status checks on main, and a
+        # direct push carries none, so every scheduled run failed with
+        # "3 of 3 required status checks are expected" until this changed.
+        #
+        # One persistent branch, reused across runs. A branch named per run
+        # would open a second pull request the next day while the first was
+        # still open, so skipping a merge would grow a backlog of redundant
+        # pull requests. Here each run adds one commit to the same branch, and
+        # the single pull request keeps being updated until it is merged.
         if: always()
+        env:
+          BRANCH: maintenance/daily
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # An open pull request for this branch is what makes the branch
+          # worth continuing. Otherwise it is either the first run, or a
+          # previous report pull request was merged and left its branch
+          # behind, and the branch is restarted from main so it never carries
+          # reports that are already merged.
+          open_pr=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$open_pr" ]; then
+            git fetch origin "$BRANCH"
+            git switch -C "$BRANCH" "origin/$BRANCH"
+            # Exported before the no-change check on purpose. A rerun that has
+            # nothing new to commit must still reach the enqueue step, or a
+            # previous enqueue failure would never be retried.
+            echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+          else
+            git fetch origin main
+            git switch -C "$BRANCH" "origin/main"
+          fi
+
           git add docs/maintenance/
           if git diff --cached --quiet; then
             echo "No report changes to commit."
@@ -223,7 +258,78 @@ jobs:
           git commit -m "Daily maintenance report $(date -u +%F) $(date -u +%H%M%S) UTC"
           git fetch origin main
           git rebase origin/main || { echo "::error::rebase failed; human intervention needed"; exit 1; }
-          # Fully qualified refspec. A short "HEAD:main" is ambiguous if a tag named
-          # "main" ever exists, since git cannot tell branch from tag.
-          git push origin HEAD:refs/heads/main || \
-            { echo "::error::push rejected after rebase; human intervention needed"; exit 1; }
+          # With-lease rather than plain force. The remote head was fetched
+          # above, so the push is refused if anything else wrote to the branch
+          # in the meantime, rather than silently overwriting it.
+          git push --force-with-lease origin "$BRANCH" \
+            || { echo "::error::branch moved unexpectedly; not overwriting it. A human push to $BRANCH needs reconciling."; exit 1; }
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+
+      - name: Open or update the report pull request
+        # Reuses the existing pull request when one is already open for the
+        # branch. Opening a second one would fail on GitHub anyway, but failing
+        # there would mark the whole run red for no useful reason, so the
+        # existing pull request is detected and left alone.
+        if: always() && env.BRANCH != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # --state open, not gh pr view on the branch. A merged pull request
+          # still answers to its branch name, so the view form would report a
+          # merged pull request as the open one and skip creating the new one.
+          if [ -n "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')" ]; then
+            echo "Pull request already open for $BRANCH; it now includes today's report."
+            exit 0
+          fi
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "Daily maintenance report $(date -u +%F)" \
+            --body "Automated daily repository health report. The checks are read-only; anything the report finds wrong is fixed by a human through the normal pull request process.
+
+          Each run adds one dated report to this branch and updates this pull request. It is merged through the merge queue like any other change, so the required checks apply.
+
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            || { echo "::error::could not open the report pull request; human intervention needed"; exit 1; }
+
+      - name: Queue the report for merge
+        # The repository merges only through the merge queue, so the pull
+        # request is enqueued directly. Auto-merge is not enabled on this
+        # repository (allow_auto_merge is false), so gh pr merge --auto would
+        # be refused; the GraphQL enqueue is the supported path.
+        #
+        # On failure the pull request is left open for a human, which is the
+        # correct outcome: the report is preserved and nothing is lost.
+        if: always() && env.BRANCH != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pr_id=$(gh pr list --head "$BRANCH" --state open --json id --jq '.[0].id // empty')
+          if [ -z "$pr_id" ]; then
+            echo "::error::no open report pull request for $BRANCH; nothing to enqueue"
+            exit 1
+          fi
+          head_oid=$(gh pr view "$pr_id" --json headRefOid --jq .headRefOid) || \
+            { echo "::error::could not read the report head sha; human intervention needed"; exit 1; }
+
+          # A pull request that is already in the queue must not be enqueued
+          # again. The mutation would either be refused or create a second
+          # entry, and either way the run would go red for no real reason.
+          queued=$(gh api graphql -f query='
+            query($pr: ID!) {
+              node(id: $pr) { ... on PullRequest { mergeQueueEntry { id } } }
+            }' -f pr="$pr_id" --jq '.data.node.mergeQueueEntry.id // empty')
+          if [ -n "$queued" ]; then
+            echo "Report pull request is already in the merge queue ($queued); leaving it alone."
+            exit 0
+          fi
+
+          echo "Enqueuing pull request $pr_id at $head_oid"
+          gh api graphql -f query='
+            mutation($pr: ID!, $oid: GitObjectID!) {
+              enqueuePullRequest(input: {pullRequestId: $pr, expectedHeadOid: $oid}) {
+                mergeQueueEntry { position }
+              }
+            }' -f pr="$pr_id" -f oid="$head_oid" \
+            || { echo "::error::could not enqueue the report; it stays open for a human"; exit 1; }
+          echo "Report will merge through the queue once its checks are green."

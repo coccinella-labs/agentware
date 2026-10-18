@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The daily maintenance workflow publishes its report as a pull request instead
+  of pushing straight to `main`. The `main-merge-queue` ruleset requires three
+  status checks on `main`, and a direct push carries none, so every scheduled
+  run failed with `3 of 3 required status checks are expected` from 2026-10-17
+  until this change.
+
 ## [0.1.7] - 2026-10-16
 
 Everything below shipped on `main` since 0.1.6 and is tagged here. The first two entries are this week's merges; the rest accumulated under `Unreleased` and moves in with them.
