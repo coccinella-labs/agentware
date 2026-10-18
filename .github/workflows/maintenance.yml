@@ -227,16 +227,29 @@ jobs:
         if: always()
         env:
           BRANCH: maintenance/daily
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Continue an existing branch if a previous run left one open,
-          # otherwise start it from the checked-out commit.
-          if git fetch origin "$BRANCH" && git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
+
+          # An open pull request for this branch is what makes the branch
+          # worth continuing. Otherwise it is either the first run, or a
+          # previous report pull request was merged and left its branch
+          # behind, and the branch is restarted from main so it never carries
+          # reports that are already merged.
+          open_pr=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$open_pr" ]; then
+            git fetch origin "$BRANCH"
             git switch -C "$BRANCH" "origin/$BRANCH"
+            # Exported before the no-change check on purpose. A rerun that has
+            # nothing new to commit must still reach the enqueue step, or a
+            # previous enqueue failure would never be retried.
+            echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
           else
-            git switch -C "$BRANCH"
+            git fetch origin main
+            git switch -C "$BRANCH" "origin/main"
           fi
+
           git add docs/maintenance/
           if git diff --cached --quiet; then
             echo "No report changes to commit."
@@ -245,7 +258,11 @@ jobs:
           git commit -m "Daily maintenance report $(date -u +%F) $(date -u +%H%M%S) UTC"
           git fetch origin main
           git rebase origin/main || { echo "::error::rebase failed; human intervention needed"; exit 1; }
-          git push --force origin "$BRANCH"
+          # With-lease rather than plain force. The remote head was fetched
+          # above, so the push is refused if anything else wrote to the branch
+          # in the meantime, rather than silently overwriting it.
+          git push --force-with-lease origin "$BRANCH" \
+            || { echo "::error::branch moved unexpectedly; not overwriting it. A human push to $BRANCH needs reconciling."; exit 1; }
           echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
 
       - name: Open or update the report pull request
@@ -257,7 +274,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh pr view "$BRANCH" --json number --jq .number >/dev/null 2>&1; then
+          # --state open, not gh pr view on the branch. A merged pull request
+          # still answers to its branch name, so the view form would report a
+          # merged pull request as the open one and skip creating the new one.
+          if [ -n "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')" ]; then
             echo "Pull request already open for $BRANCH; it now includes today's report."
             exit 0
           fi
@@ -284,10 +304,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          pr_id=$(gh pr view "$BRANCH" --json id --jq .id) || \
-            { echo "::error::report pull request not found; it stays open for a human"; exit 1; }
-          head_oid=$(gh pr view "$BRANCH" --json headRefOid --jq .headRefOid) || \
+          pr_id=$(gh pr list --head "$BRANCH" --state open --json id --jq '.[0].id // empty')
+          if [ -z "$pr_id" ]; then
+            echo "::error::no open report pull request for $BRANCH; nothing to enqueue"
+            exit 1
+          fi
+          head_oid=$(gh pr view "$pr_id" --json headRefOid --jq .headRefOid) || \
             { echo "::error::could not read the report head sha; human intervention needed"; exit 1; }
+
+          # A pull request that is already in the queue must not be enqueued
+          # again. The mutation would either be refused or create a second
+          # entry, and either way the run would go red for no real reason.
+          queued=$(gh api graphql -f query='
+            query($pr: ID!) {
+              node(id: $pr) { ... on PullRequest { mergeQueueEntry { id } } }
+            }' -f pr="$pr_id" --jq '.data.node.mergeQueueEntry.id // empty')
+          if [ -n "$queued" ]; then
+            echo "Report pull request is already in the merge queue ($queued); leaving it alone."
+            exit 0
+          fi
+
           echo "Enqueuing pull request $pr_id at $head_oid"
           gh api graphql -f query='
             mutation($pr: ID!, $oid: GitObjectID!) {
