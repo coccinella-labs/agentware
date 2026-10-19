@@ -284,9 +284,9 @@ jobs:
           git commit -m "Daily maintenance report $(date -u +%F) $(date -u +%H%M%S) UTC"
           git fetch origin main
           git rebase origin/main || { echo "::error::rebase failed; human intervention needed"; exit 1; }
-          # With-lease rather than plain force. The remote head was fetched
-          # above, so the push is refused if anything else wrote to the branch
-          # in the meantime, rather than silently overwriting it.
+          # With-lease rather than plain force. The expected remote head
+          # was read with ls-remote above, so the push is refused if the
+          # branch changes before the update is accepted.
           git push --force-with-lease="$BRANCH:$lease" origin "$BRANCH" \
             || { echo "::error::branch moved unexpectedly; not overwriting it. A human push to $BRANCH needs reconciling."; exit 1; }
           echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
