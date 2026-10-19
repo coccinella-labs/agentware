@@ -250,6 +250,32 @@ jobs:
             git switch -C "$BRANCH" "origin/main"
           fi
 
+          # Establish the lease before it is used. --force-with-lease compares the
+          # remote head against an expected value, and with no value the push is
+          # rejected as stale info even when nothing moved.
+          #
+          # The value is read with ls-remote, not from origin/$BRANCH. Under the
+          # refspec this repository is configured with, the fetch refspec tracks
+          # main only, so `git fetch origin "$BRANCH"` updates FETCH_HEAD but does
+          # not refresh refs/remotes/origin/$BRANCH. Reading that ref would give a
+          # stale lease, which is worse than none: it accepts when it should refuse
+          # and refuses when it should accept. ls-remote queries the remote and
+          # caches nothing.
+          #
+          # An empty result means the branch does not exist, but only after the
+          # command succeeded. A network or authentication failure also produces
+          # no output, and treating that as an absent branch would hand an empty
+          # lease to the push and defeat the guard entirely.
+          # The || form is required, not stylistic. Under bash -e an assignment
+          # whose command substitution fails terminates the step immediately, so a
+          # following `if [ $? -ne 0 ]` is never reached and the step dies without
+          # the annotation below it.
+          remote_ref=$(git ls-remote --heads origin "$BRANCH") || {
+            echo "::error::could not read the remote head of $BRANCH; refusing to push"
+            exit 1
+          }
+          lease=$(printf '%s\n' "$remote_ref" | cut -f1)
+
           git add docs/maintenance/
           if git diff --cached --quiet; then
             echo "No report changes to commit."
@@ -258,10 +284,10 @@ jobs:
           git commit -m "Daily maintenance report $(date -u +%F) $(date -u +%H%M%S) UTC"
           git fetch origin main
           git rebase origin/main || { echo "::error::rebase failed; human intervention needed"; exit 1; }
-          # With-lease rather than plain force. The remote head was fetched
-          # above, so the push is refused if anything else wrote to the branch
-          # in the meantime, rather than silently overwriting it.
-          git push --force-with-lease origin "$BRANCH" \
+          # With-lease rather than plain force. The expected remote head
+          # was read with ls-remote above, so the push is refused if the
+          # branch changes before the update is accepted.
+          git push --force-with-lease="$BRANCH:$lease" origin "$BRANCH" \
             || { echo "::error::branch moved unexpectedly; not overwriting it. A human push to $BRANCH needs reconciling."; exit 1; }
           echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
 
