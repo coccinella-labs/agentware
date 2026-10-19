@@ -112,16 +112,22 @@ jobs:
         run: |
           gh api "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_SHA/check-runs?per_page=100" > checks.json
           overall=success
+          blocked=""
           for name in "lint" "build (ubuntu, debug)" "build (windows, release)"; do
             # A context counts as successful when some check run with that name
             # succeeded. A duplicate or cancelled run of the same name must not
             # turn a green context red.
+            #
+            # A context that completed without a success reports its actual
+            # conclusion, or the set of them, instead of a single flattened
+            # label. A timeout is then reported as a timeout.
             state=$(jq -r --arg n "$name" '
               [.check_runs[] | select(.name == $n)]
               | if length == 0 then "absent"
                 elif any(.conclusion == "success") then "success"
                 elif any(.status != "completed") then "pending"
-                else "failed" end' checks.json)
+                else ([.[] | select(.status == "completed" and .conclusion != "success")
+                       | .conclusion] | unique | join("+")) end' checks.json)
             echo "$name: $state"
             if [ "$state" = "absent" ] && [ "$overall" = "success" ]; then
               overall=absent
@@ -129,10 +135,21 @@ jobs:
             if [ "$state" = "pending" ] && [ "$overall" = "success" ]; then
               overall=pending
             fi
-            if [ "$state" = "failed" ]; then
-              overall=failed
-            fi
+            # Every completed non-success outcome blocks the enqueue. The set is
+            # deduplicated so two timeouts read as "timed_out", not twice over.
+            case "$state" in
+              success|absent|pending) ;;
+              *)
+                case "+$blocked+" in
+                  *"+$state+"*) ;;
+                  *) blocked="${blocked:+$blocked+}$state" ;;
+                esac
+                ;;
+            esac
           done
+          if [ -n "$blocked" ]; then
+            overall="$blocked"
+          fi
           echo "required_contexts=$overall" >> "$GITHUB_OUTPUT"
 
       - name: Enqueue, or stop and say why
@@ -152,13 +169,13 @@ jobs:
               echo "::error::Wait for them to finish, then dispatch again."
               exit 1
               ;;
-            failed)
-              echo "::error::required contexts failed on $EXPECTED_SHA."
-              echo "::error::Remediation is needed before another dispatch. Not enqueuing."
-              exit 1
-              ;;
             *)
-              echo "::error::could not determine the required contexts; inspect checks.json."
+              # Success, absent and pending are handled above. Everything else
+              # is one or more completed non-success outcomes, and the value is
+              # printed verbatim so the actual conclusion is visible.
+              echo "::error::required contexts are not successful on $EXPECTED_SHA."
+              echo "::error::reported outcomes: ${{ steps.checks.outputs.required_contexts }}"
+              echo "::error::Every non-success outcome blocks. Remediation is needed first."
               exit 1
               ;;
           esac
