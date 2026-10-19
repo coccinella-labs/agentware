@@ -4,6 +4,14 @@ name: Daily Maintenance
 # under docs/maintenance/. Read-only checks plus a log commit. No auto-fixing,
 # no dependency upgrades, no releases. Anything the report finds wrong is
 # fixed by a human through the normal PR process.
+#
+# This workflow prepares the report and stops. Enqueueing it for merge is a
+# separate, manually dispatched workflow (maintenance-enqueue.yml). The split
+# exists because GitHub holds the workflow runs of a pull request created by
+# github-actions[bot] until a user with write access approves them, so the
+# required status contexts on the report head do not exist at the moment this
+# run would otherwise enqueue. Enqueueing then fails with "required status
+# checks are expected", which is what every scheduled run did before the split.
 on:
   schedule:
     - cron: '0 6 * * *'
@@ -241,9 +249,9 @@ jobs:
           if [ -n "$open_pr" ]; then
             git fetch origin "$BRANCH"
             git switch -C "$BRANCH" "origin/$BRANCH"
-            # Exported before the no-change check on purpose. A rerun that has
-            # nothing new to commit must still reach the enqueue step, or a
-            # previous enqueue failure would never be retried.
+            # Exported before the no-change check on purpose. A rerun with
+            # nothing new to commit still refreshes the prepared-head comment
+            # below, so a maintainer is never pointed at a superseded sha.
             echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
           else
             git fetch origin main
@@ -318,51 +326,65 @@ jobs:
           Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             || { echo "::error::could not open the report pull request; human intervention needed"; exit 1; }
 
-      - name: Queue the report for merge
-        # The repository merges only through the merge queue, so the pull
-        # request is enqueued directly. Auto-merge is not enabled on this
-        # repository (allow_auto_merge is false), so gh pr merge --auto would
-        # be refused; the GraphQL enqueue is the supported path.
+      - name: Record the prepared head for the enqueue phase
+        # Enqueueing happens in maintenance-enqueue.yml, dispatched by a
+        # maintainer after they approve this pull request's held workflow runs.
+        # That workflow is told which revision to enqueue; it never guesses, so
+        # the sha a human reviewed is published here.
         #
-        # On failure the pull request is left open for a human, which is the
-        # correct outcome: the report is preserved and nothing is lost.
+        # One comment, updated in place. Appending would grow a trail of
+        # superseded shas on a pull request that stays open for days.
+        #
+        # Identified by a hidden marker AND the author. The marker alone would
+        # match a maintainer quoting it; the author alone would match any bot
+        # comment.
         if: always() && env.BRANCH != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # One query returns the number, the node id and the head sha. The
-          # number is what gh pr view accepts; the node id is what the GraphQL
-          # calls need. They are different identifiers and mixing them up makes
-          # gh pr view fall back to the current branch and print a misleading
-          # "no pull requests found" for what it thinks is a branch name.
           pr_number=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
           if [ -z "$pr_number" ]; then
-            echo "::error::no open report pull request for $BRANCH; nothing to enqueue"
+            echo "::error::no open report pull request for $BRANCH; nothing to record"
             exit 1
           fi
-          pr_id=$(gh pr view "$pr_number" --json id --jq .id) || \
-            { echo "::error::could not read the report pull request id; human intervention needed"; exit 1; }
           head_oid=$(gh pr view "$pr_number" --json headRefOid --jq .headRefOid) || \
             { echo "::error::could not read the report head sha; human intervention needed"; exit 1; }
-          echo "Enqueuing pull request #$pr_number ($pr_id) at $head_oid"
+          echo "Prepared head is $head_oid on pull request #$pr_number"
 
-          # A pull request that is already in the queue must not be enqueued
-          # again. The mutation would either be refused or create a second
-          # entry, and either way the run would go red for no real reason.
-          queued=$(gh api graphql -f query='
-            query($pr: ID!) {
-              node(id: $pr) { ... on PullRequest { mergeQueueEntry { id } } }
-            }' -f pr="$pr_id" --jq '.data.node.mergeQueueEntry.id // empty')
-          if [ -n "$queued" ]; then
-            echo "Report pull request is already in the merge queue ($queued); leaving it alone."
-            exit 0
+          MARKER='<!-- maintenance-prepared-head -->'
+          body_file=$(mktemp)
+          {
+            printf '%s\n\n' "$MARKER"
+            printf 'Prepared head: `%s`\n\n' "$head_oid"
+            echo "This pull request was prepared by the daily maintenance workflow."
+            echo "The workflow stops here. Nothing is enqueued automatically."
+            echo ""
+            echo "To merge it, a maintainer:"
+            echo ""
+            echo "1. Approves the held workflow runs on this pull request."
+            echo "2. Waits for lint, build (ubuntu, debug) and build (windows, release) to pass."
+            echo "3. Dispatches the \"Enqueue report for merge\" workflow with expected_sha"
+            printf '   set to `%s`.\n' "$head_oid"
+          } > "$body_file"
+
+          ids=$(gh api "repos/$GITHUB_REPOSITORY/issues/$pr_number/comments?per_page=100" \
+            | jq -r --arg m "$MARKER" \
+              '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains($m)) | .id')
+          count=$(printf '%s\n' "$ids" | grep -c . || true)
+
+          if [ "$count" -eq 0 ]; then
+            gh api "repos/$GITHUB_REPOSITORY/issues/$pr_number/comments" \
+              -f body="$(cat "$body_file")" --jq '.html_url'
+          elif [ "$count" -eq 1 ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$ids" \
+              -f body="$(cat "$body_file")" --jq '.html_url'
+          else
+            # More than one marked comment means an earlier update failed
+            # part-way. The oldest is updated, because that is where a
+            # maintainer has already been looking, and the duplicates are left
+            # alone rather than deleted on a guess.
+            oldest=$(printf '%s\n' "$ids" | head -n 1)
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$oldest" \
+              -f body="$(cat "$body_file")" --jq '.html_url'
+            echo "::warning::$count marked comments; updated the oldest and left the rest."
           fi
-
-          gh api graphql -f query='
-            mutation($pr: ID!, $oid: GitObjectID!) {
-              enqueuePullRequest(input: {pullRequestId: $pr, expectedHeadOid: $oid}) {
-                mergeQueueEntry { position }
-              }
-            }' -f pr="$pr_id" -f oid="$head_oid" \
-            || { echo "::error::could not enqueue the report; it stays open for a human"; exit 1; }
-          echo "Report will merge through the queue once its checks are green."
