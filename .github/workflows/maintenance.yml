@@ -288,7 +288,8 @@ jobs:
           # was read with ls-remote above, so the push is refused if the
           # branch changes before the update is accepted.
           git push --force-with-lease="$BRANCH:$lease" origin "$BRANCH" \
-            || { echo "::error::branch moved unexpectedly; not overwriting it. A human push to $BRANCH needs reconciling."; exit 1; }
+            || { echo "::error::branch moved unexpectedly; not overwriting it." \
+                     "A human push to $BRANCH needs reconciling."; exit 1; }
           echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
 
       - name: Open or update the report pull request
@@ -311,9 +312,11 @@ jobs:
             --base main \
             --head "$BRANCH" \
             --title "Daily maintenance report $(date -u +%F)" \
-            --body "Automated daily repository health report. The checks are read-only; anything the report finds wrong is fixed by a human through the normal pull request process.
+            --body "Automated daily repository health report. The checks are read-only; anything the
+          report finds wrong is fixed by a human through the normal pull request process.
 
-          Each run adds one dated report to this branch and updates this pull request. It is merged through the merge queue like any other change, so the required checks apply.
+          Each run adds one dated report to this branch and updates this pull request. It is merged
+          through the merge queue like any other change, so the required checks apply.
 
           Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             || { echo "::error::could not open the report pull request; human intervention needed"; exit 1; }
