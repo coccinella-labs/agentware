@@ -1,8 +1,8 @@
 # UI Completeness and State Consistency Report
 
-**Target:** Agentware v0.2.0 (`aa6c72ee`)  
-**Audit Dimension:** User interface fidelity, state consistency, feedback loops, and error transparency  
-**Verification Method:** REPL inspection, command parsing tracing, output text verification  
+**Target:** Agentware v0.2.0 (`aa6c72ee`)
+**Audit Dimension:** User interface fidelity, state consistency, feedback loops, and error transparency
+**Verification Method:** REPL inspection, command parsing tracing, output text verification
 
 ---
 

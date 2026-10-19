@@ -26,7 +26,7 @@ enum class ReadStatus { Line, Eof, Error };
 
 struct ReadResult {
   ReadStatus status;
-  std::string line;  // valid only when status == Line (may be empty).
+  std::string line; // valid only when status == Line (may be empty).
 };
 
 enum class EditMode { Insert, Normal };
@@ -41,14 +41,14 @@ enum class KeyKind { Char, Escape, Enter, Backspace, CtrlD, StreamEnd };
 
 struct KeyEvent {
   KeyKind kind;
-  char32_t ch = 0;  // valid only for Char.
+  char32_t ch = 0; // valid only for Char.
 };
 
 // Pure editing state machine: no TTY, no syscalls, fully unit-testable.
 // Buffer holds Unicode scalar values. Cursor is a code-point index with
 // insert range [0, len], normal range [0, len-1], sentinel 0 when empty.
 class ModalEditor {
- public:
+public:
   ModalEditor();
 
   EditMode mode() const;
@@ -61,7 +61,7 @@ class ModalEditor {
   // observes the dead stream and reports Eof, mirroring getline.
   FeedResult feed(const KeyEvent &event, std::string *out_line);
 
- private:
+private:
   EditMode mode_ = EditMode::Insert;
   std::u32string buffer_;
   size_t cursor_ = 0;
@@ -79,14 +79,14 @@ class ModalEditor {
 // parser no longer had. Keeping the bytes means every split point resumes
 // through the same CSI path.
 class KeyDecoder {
- public:
+public:
   KeyDecoder();
 
   void feed(const uint8_t *data, size_t size, std::vector<KeyEvent> *out);
   void flush(std::vector<KeyEvent> *out);
   bool has_pending_escape() const;
 
- private:
+private:
   std::string pending_bytes_;
 };
 
@@ -108,5 +108,5 @@ InputBackend select_backend(bool opt_in, bool stdin_tty, bool guard_ok);
 // terminal guard constructs. Never throws for input errors.
 ReadResult read_prompt_line(const std::string &prompt);
 
-}  // namespace Input
-}  // namespace Utils
+} // namespace Input
+} // namespace Utils

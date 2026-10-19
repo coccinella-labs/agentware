@@ -1,0 +1,15 @@
+# Style for the pre-commit clang-format hook and for editors.
+#
+# The repository had no style file, so clang-format fell back to whichever
+# style the local build defaults to, which is not the same on every machine.
+# With this file in place the hook is reproducible.
+#
+# LLVM is the closest of the built-in styles to the existing sources. Every
+# other built-in style rewrites all 55 C++ files, while LLVM rewrites 20, and
+# 18 once include sorting is off.
+#
+# SortIncludes is off because the include order in these files is deliberate
+# and reordering includes can change behaviour, which is not something a
+# formatting tool should decide.
+BasedOnStyle: LLVM
+SortIncludes: false

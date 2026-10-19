@@ -67,7 +67,7 @@ inline int terminal_width() {
   // support can be added without touching the layout itself.
   return 0;
 #else
-  struct winsize ws {};
+  struct winsize ws{};
   if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != 0) {
     return 0;
   }

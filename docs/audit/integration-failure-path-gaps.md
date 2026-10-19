@@ -1,7 +1,7 @@
 # Integration and Failure-Path Coverage Gaps
 
-**Target:** Agentware v0.2.0 (`aa6c72ee`)  
-**Audit Dimension:** Automated test efficacy, failure scenario coverage, cross-layer contract verification  
+**Target:** Agentware v0.2.0 (`aa6c72ee`)
+**Audit Dimension:** Automated test efficacy, failure scenario coverage, cross-layer contract verification
 **Test Suite Inventory:**
 - GoogleTest Unit Tests: `build/agentware-tests` (64/64 passed)
 - CTest Integration Harness: `ctest --test-dir build` (2/2 passed)

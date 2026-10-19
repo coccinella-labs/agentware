@@ -525,9 +525,8 @@ std::string GitHubService::parse_link_next(const HeaderMap &headers) {
     std::string url = rest.substr(open + 1, close - open - 1);
     size_t comma = rest.find(',', close + 1);
     std::string params =
-        rest.substr(close + 1, comma == std::string::npos
-                                     ? std::string::npos
-                                     : comma - close - 1);
+        rest.substr(close + 1, comma == std::string::npos ? std::string::npos
+                                                          : comma - close - 1);
     if (params.find("rel=\"next\"") != std::string::npos) {
       return url;
     }
@@ -569,11 +568,11 @@ ReviewThreadList GitHubService::collect_review_threads(
   return list;
 }
 
-ReviewThreadList
-GitHubService::get_review_threads(const std::string &owner,
-                                  const std::string &repo, int pr_number) {
-  std::string first_url = get_api_base_url() + "/repos/" + owner + "/" +
-                          repo + "/pulls/" + std::to_string(pr_number) +
+ReviewThreadList GitHubService::get_review_threads(const std::string &owner,
+                                                   const std::string &repo,
+                                                   int pr_number) {
+  std::string first_url = get_api_base_url() + "/repos/" + owner + "/" + repo +
+                          "/pulls/" + std::to_string(pr_number) +
                           "/comments?per_page=100";
   auto fetch = [](const std::string &url) {
     HeaderMap headers;

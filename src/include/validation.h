@@ -24,9 +24,8 @@ public:
   // paths outside `root` must pass the restricted-path rules. The path is
   // canonicalized (resolving `..` and symlinks) before deciding, so
   // string-prefix checks cannot be bypassed. Never throws.
-  static ValidationResult
-  validate_file_access(const std::string &path,
-                       const std::string &root = "");
+  static ValidationResult validate_file_access(const std::string &path,
+                                               const std::string &root = "");
 
   // Text validation
   static ValidationResult

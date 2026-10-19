@@ -63,14 +63,9 @@ AGENTWARE_API const std::string PINK = code("\033[38;2;243;75;125m");
 // ===== Logo =====
 void UI::print_logo() {
   static const std::array<std::string_view, 8> kLogo = {
-      "██         █",
-      "██  █  ██  ██",
-      "██ ██  ██  ███",
-      "██ ██  ██   ██",
-      "██ ██  ██   ███",
-      "██ ██  ██    ██",
-      "██ ██  ██    ███",
-      "██ ██  ██     ██",
+      "██         █",     "██  █  ██  ██",    "██ ██  ██  ███",
+      "██ ██  ██   ██",   "██ ██  ██   ███",  "██ ██  ██    ██",
+      "██ ██  ██    ███", "██ ██  ██     ██",
   };
 
   std::cout << Color::PINK;
@@ -131,7 +126,8 @@ const std::vector<HelpSection> &help_sections() {
         {"github:threads:<owner>/<repo>:<pr>[:query]", "List review threads"},
         {"/mcp <command>", "Inspect MCP configuration"}}},
       {"Checkpoints",
-       {{"/checkpoint <command>", "Create, list, inspect, or delete checkpoints"},
+       {{"/checkpoint <command>",
+         "Create, list, inspect, or delete checkpoints"},
         {"/restore [id]", "List or restore a checkpoint"}}},
       {"Settings and diagnostics",
        {{"/theme <command>", "Manage themes"},
@@ -154,8 +150,8 @@ const std::vector<HelpSection> &help_sections() {
 // for leaving are listed so neither has to be discovered through full help.
 const std::vector<std::string> &quick_help_tokens() {
   static const std::vector<std::string> tokens = {
-      "help",       "version", "search:query",
-      "cmd:command", "read:file", "write:file text", "quit", "exit"};
+      "help",      "version",         "search:query", "cmd:command",
+      "read:file", "write:file text", "quit",         "exit"};
   return tokens;
 }
 
@@ -209,7 +205,7 @@ size_t longest_command() {
 
 size_t effective_width(int width) {
   return static_cast<size_t>(width < UI::kMinLayoutWidth ? UI::kMinLayoutWidth
-                                           : width);
+                                                         : width);
 }
 
 // Joins tokens with a separator, breaking to a continuation indent whenever the
@@ -253,7 +249,7 @@ std::vector<std::string> UI::help_lines(int width) {
   size_t column = indent + longest_command() + sep;
   if (column + kPreferredDescriptionRoom > w) {
     column = (w > kPreferredDescriptionRoom) ? w - kPreferredDescriptionRoom
-                                              : indent;
+                                             : indent;
     if (column < indent) {
       column = indent;
     }
@@ -275,8 +271,7 @@ std::vector<std::string> UI::help_lines(int width) {
       if (cmd_line.size() < column) {
         // Description starts beside the command and wraps below it. The
         // separator is charged against the room on this line.
-        const auto parts =
-            wrap_words(entry.description, w - column - sep);
+        const auto parts = wrap_words(entry.description, w - column - sep);
         std::string line = cmd_line;
         line.append(column - cmd_line.size(), ' ');
         line += std::string(kSeparator) + parts.front();
@@ -290,8 +285,9 @@ std::vector<std::string> UI::help_lines(int width) {
       // never truncated, then the description at the continuation indent.
       const auto cmd_parts = wrap_words(entry.command, w - cont);
       for (size_t i = 0; i < cmd_parts.size(); ++i) {
-        out.push_back((i == 0 ? std::string(kIndent) : std::string(kContIndent)) +
-                      cmd_parts[i]);
+        out.push_back(
+            (i == 0 ? std::string(kIndent) : std::string(kContIndent)) +
+            cmd_parts[i]);
       }
       for (const auto &part : wrap_words(entry.description, w - cont)) {
         out.push_back(std::string(kContIndent) + part);
@@ -305,20 +301,18 @@ std::vector<std::string> UI::help_lines(int width) {
 std::vector<std::string> UI::status_lines(int width, const std::string &mode,
                                           const std::string &model) {
   const size_t w = effective_width(width);
-  const std::vector<std::string> fields = {"Mode=" + mode, "Model=" + model,
-                                           "Memory=Active",
-                                           "Commands=Available"};
+  const std::vector<std::string> fields = {
+      "Mode=" + mode, "Model=" + model, "Memory=Active", "Commands=Available"};
   return join_wrapped(fields, w, 1, "System:", std::string(kContIndent));
 }
 
 std::vector<std::string> UI::quick_help_lines(int width) {
   const size_t w = effective_width(width);
-  auto out = join_wrapped(quick_help_tokens(), w, 1, "Quick Commands:",
-                          std::string(kContIndent));
+  auto out = join_wrapped(quick_help_tokens(), w, 1,
+                          "Quick Commands:", std::string(kContIndent));
   out.push_back(std::string(w, '-'));
   return out;
 }
-
 
 // ===== Status =====
 void UI::print_enterprise_status() {
@@ -413,7 +407,8 @@ void UI::print_divider() {
 }
 
 // ===== Quick Help Interface =====
-std::vector<std::string> UI::prompt_lines(int width, const std::string &prompt) {
+std::vector<std::string> UI::prompt_lines(int width,
+                                          const std::string &prompt) {
   const size_t w = effective_width(width);
   const size_t cont = std::string(kContIndent).size();
   // Trailing space separates the prompt from the cursor, so it is not part of
@@ -497,7 +492,6 @@ void UI::print_quick_help() {
   }
 }
 
-
 // ===== System Info =====
 void UI::print_system_info(const std::string &mode, const std::string &model) {
   const std::string prefix = "System:";
@@ -510,7 +504,6 @@ void UI::print_system_info(const std::string &mode, const std::string &model) {
     std::cout << Color::GREEN << line << Color::RESET << "\n";
   }
 }
-
 
 // ===== Ready Interface =====
 void UI::print_ready_interface(const std::string &mode,

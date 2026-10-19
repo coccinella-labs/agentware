@@ -10,7 +10,7 @@ blocks safe use.
 Items are preserved as originally proposed. Status against the current tree
 (`bdf33b2b`):
 
-- **"ANSI always emitted, even piped or under `NO_COLOR=1` / `TERM=dumb`"** 
+- **"ANSI always emitted, even piped or under `NO_COLOR=1` / `TERM=dumb`"**
   **implemented (P1-1, `f908f2bf`).** Both surfaces now honor TTY state and `NO_COLOR`.
 - **"duplicate quick-help lines (collapse to one line)"**: **implemented
   (P1-2).** Quick help is generated from one de-duplicated list.

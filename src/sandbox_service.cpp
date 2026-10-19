@@ -130,8 +130,7 @@ std::string SandboxService::generate_container_name() {
   return ss.str();
 }
 
-SandboxService::DockerStatus
-SandboxService::probe_docker(int timeout_seconds) {
+SandboxService::DockerStatus SandboxService::probe_docker(int timeout_seconds) {
   // A present CLI binary is not evidence that the sandbox can proceed: with
   // the daemon stopped the CLI still answers --version, which would let the UI
   // claim isolation it cannot provide. Query the daemon instead, within a
@@ -148,8 +147,9 @@ bool SandboxService::is_docker_available() {
   return probe_docker(kDockerProbeTimeoutSeconds) == DockerStatus::Available;
 }
 
-SpawnedResult SandboxService::spawn_capture(
-    const std::vector<std::string> &argv, int timeout_seconds) {
+SpawnedResult
+SandboxService::spawn_capture(const std::vector<std::string> &argv,
+                              int timeout_seconds) {
   SpawnedResult result;
   if (argv.empty()) {
     result.exit_code = -1;
@@ -220,7 +220,8 @@ SpawnedResult SandboxService::spawn_capture(
                           std::chrono::seconds(timeout_seconds);
     for (;;) {
       DWORD available = 0;
-      if (PeekNamedPipe(read_handle, nullptr, 0, nullptr, &available, nullptr) &&
+      if (PeekNamedPipe(read_handle, nullptr, 0, nullptr, &available,
+                        nullptr) &&
           available > 0) {
         DWORD got = 0;
         if (ReadFile(read_handle, buffer, sizeof(buffer), &got, nullptr) &&
@@ -384,10 +385,10 @@ SpawnedResult SandboxService::spawn_capture(
 #endif
 }
 
-BoundedResult SandboxService::run_bounded(
-    const std::vector<std::string> &argv,
-    const std::vector<std::string> &stop_argv, int timeout_seconds,
-    int stop_timeout_seconds) {
+BoundedResult
+SandboxService::run_bounded(const std::vector<std::string> &argv,
+                            const std::vector<std::string> &stop_argv,
+                            int timeout_seconds, int stop_timeout_seconds) {
   BoundedResult result;
   std::promise<SpawnedResult> done;
   std::future<SpawnedResult> finished = done.get_future();
@@ -397,11 +398,9 @@ BoundedResult SandboxService::run_bounded(
   // write end of the pipe closed, which needs the whole process tree gone.
   // Bounding the spawn is what lets the worker finish and release its
   // captures; the detached thread then exits on its own instead of leaking.
-  std::thread(
-      [promise = std::move(done), argv, timeout_seconds]() mutable {
-        promise.set_value(spawn_capture(argv, timeout_seconds));
-      })
-      .detach();
+  std::thread([promise = std::move(done), argv, timeout_seconds]() mutable {
+    promise.set_value(spawn_capture(argv, timeout_seconds));
+  }).detach();
   if (finished.wait_for(std::chrono::seconds(timeout_seconds)) ==
       std::future_status::ready) {
     SpawnedResult spawned = finished.get();
@@ -421,11 +420,9 @@ BoundedResult SandboxService::run_bounded(
   // daemon is wedged the wait below expires and control still returns.
   std::promise<SpawnedResult> stop_done;
   std::future<SpawnedResult> stop_finished = stop_done.get_future();
-  std::thread(
-      [promise = std::move(stop_done), stop_argv]() mutable {
-        promise.set_value(spawn_capture(stop_argv));
-      })
-      .detach();
+  std::thread([promise = std::move(stop_done), stop_argv]() mutable {
+    promise.set_value(spawn_capture(stop_argv));
+  }).detach();
   stop_finished.wait_for(std::chrono::seconds(stop_timeout_seconds));
   constexpr int kReapGraceSeconds = 10;
   if (finished.wait_for(std::chrono::seconds(kReapGraceSeconds)) ==
@@ -434,7 +431,8 @@ BoundedResult SandboxService::run_bounded(
     result.output = spawned.output;
     result.exit_code = spawned.exit_code;
     result.timed_out = true;
-    result.error_message = "Command execution timed out; container stop requested";
+    result.error_message =
+        "Command execution timed out; container stop requested";
     return result;
   }
   result.timed_out = true;
@@ -540,8 +538,8 @@ SandboxResult SandboxService::execute_command(const std::string &command,
   std::string container_name = generate_container_name();
   std::vector<std::string> argv =
       build_docker_argv(resolved, command, container_name);
-  BoundedResult bounded = run_bounded(
-      argv, {"docker", "stop", container_name}, resolved.timeout_seconds, 15);
+  BoundedResult bounded = run_bounded(argv, {"docker", "stop", container_name},
+                                      resolved.timeout_seconds, 15);
 
   auto end_time = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -554,15 +552,20 @@ SandboxResult SandboxService::execute_command(const std::string &command,
   return result;
 }
 
-std::vector<std::string> SandboxService::build_docker_argv(
-    const SandboxConfig &config, const std::string &command,
-    const std::string &container_name) {
+std::vector<std::string>
+SandboxService::build_docker_argv(const SandboxConfig &config,
+                                  const std::string &command,
+                                  const std::string &container_name) {
   // Argv elements reach the child verbatim: no shell ever parses this
   // vector, so hostile values cannot break out regardless of content.
-  std::vector<std::string> argv = {
-      "docker",      "run",         "--rm",
-      "--name",      container_name, "--memory",
-      std::to_string(config.memory_limit_mb) + "m"};
+  std::vector<std::string> argv = {"docker",
+                                   "run",
+                                   "--rm",
+                                   "--name",
+                                   container_name,
+                                   "--memory",
+                                   std::to_string(config.memory_limit_mb) +
+                                       "m"};
   {
     std::ostringstream cpus;
     cpus << (config.cpu_limit_percent / 100.0);
@@ -680,8 +683,8 @@ SandboxResult SandboxService::execute_file(const std::string &file_path,
 }
 
 bool SandboxService::copy_file_to_sandbox(const std::string &host_path,
-                                           const std::string &container_path,
-                                           const std::string &container_name) {
+                                          const std::string &container_path,
+                                          const std::string &container_name) {
   SpawnedResult result = spawn_capture(
       {"docker", "cp", host_path, container_name + ":" + container_path});
   return result.exit_code == 0;
@@ -697,9 +700,9 @@ bool SandboxService::copy_file_from_sandbox(const std::string &container_path,
 
 std::vector<std::string> SandboxService::list_active_containers() {
   std::vector<std::string> containers;
-  SpawnedResult result = spawn_capture(
-      {"docker", "ps", "--filter", "name=agentware_sandbox_", "--format",
-       "{{.Names}}"});
+  SpawnedResult result =
+      spawn_capture({"docker", "ps", "--filter", "name=agentware_sandbox_",
+                     "--format", "{{.Names}}"});
   if (result.exit_code != 0) {
     return containers;
   }
@@ -725,8 +728,8 @@ bool SandboxService::remove_container(const std::string &container_name) {
 }
 
 void SandboxService::cleanup_old_containers() {
-  spawn_capture(
-      {"docker", "container", "prune", "-f", "--filter", "label=agentware_sandbox"});
+  spawn_capture({"docker", "container", "prune", "-f", "--filter",
+                 "label=agentware_sandbox"});
 }
 
 bool SandboxService::is_command_safe(const std::string &command) {
@@ -736,13 +739,13 @@ bool SandboxService::is_command_safe(const std::string &command) {
   // "cat README.md") while missing whole dangerous classes. Keep entries
   // structural; prove each one with a test before adding.
   std::vector<std::string> dangerous_patterns = {
-      "rm -rf",    "format",   "del /f",  "sudo",     "su -",      "chmod 777",
-      "wget",      "curl",     "nc ",     "netcat",   "telnet",    "ssh",
-      "scp",       "iptables", "ufw",     "firewall", "systemctl", "service",
-      "mount",     "umount",   "fdisk",   "mkfs",     "dd if=",    "dd of=",
-      ">/dev/",    "< /dev/",  "| /dev/", "& /dev/",  "$(",        "`",
-      "eval",      "exec",     "source",  "bash -c",  "sh -c",
-      "python -c", "perl -e",  "ruby -e"};
+      "rm -rf",  "format",   "del /f",  "sudo",     "su -",      "chmod 777",
+      "wget",    "curl",     "nc ",     "netcat",   "telnet",    "ssh",
+      "scp",     "iptables", "ufw",     "firewall", "systemctl", "service",
+      "mount",   "umount",   "fdisk",   "mkfs",     "dd if=",    "dd of=",
+      ">/dev/",  "< /dev/",  "| /dev/", "& /dev/",  "$(",        "`",
+      "eval",    "exec",     "source",  "bash -c",  "sh -c",     "python -c",
+      "perl -e", "ruby -e"};
 
   std::string lower_command = command;
   std::transform(lower_command.begin(), lower_command.end(),
@@ -799,9 +802,8 @@ bool is_safe_volume_spec(const std::string &volume,
   size_t pos = 0;
   while (true) {
     size_t colon = volume.find(':', pos);
-    parts.push_back(volume.substr(pos, colon == std::string::npos
-                                           ? std::string::npos
-                                           : colon - pos));
+    parts.push_back(volume.substr(
+        pos, colon == std::string::npos ? std::string::npos : colon - pos));
     if (colon == std::string::npos) {
       break;
     }
@@ -809,8 +811,7 @@ bool is_safe_volume_spec(const std::string &volume,
   }
   if (parts.size() < 2 || parts.size() > 3 || parts[0].empty() ||
       parts[1].empty()) {
-    error_message =
-        "Volume must have host:container[:options] form: " + volume;
+    error_message = "Volume must have host:container[:options] form: " + volume;
     return false;
   }
   if (!is_absolute_container_path(parts[1])) {
@@ -822,7 +823,7 @@ bool is_safe_volume_spec(const std::string &volume,
 } // namespace
 
 bool SandboxService::validate_sandbox_config(const SandboxConfig &config,
-                                              std::string &error_message) {
+                                             std::string &error_message) {
   if (config.name.empty()) {
     error_message = "Sandbox name cannot be empty";
     return false;

@@ -122,10 +122,9 @@ void Agent::run() {
   while (true) {
     // Single input boundary: modal editing only when explicitly opted in
     // on an interactive stdin; everything else is plain getline.
-    Utils::Input::ReadResult read =
-        Utils::Input::read_prompt_line("> ");
+    Utils::Input::ReadResult read = Utils::Input::read_prompt_line("> ");
     if (read.status != Utils::Input::ReadStatus::Line) {
-      break;  // EOF or error, matching the historical getline behavior.
+      break; // EOF or error, matching the historical getline behavior.
     }
     std::string user_input = read.line;
 
@@ -380,8 +379,8 @@ void Agent::handle_direct_command(const std::string &input) {
               result = "Error: invalid start line '" + range_params +
                        "'. Use read:filename:start[:count] with numbers.";
             } else {
-              result = Services::FileService::read_file_range(filename,
-                                                               start_line);
+              result =
+                  Services::FileService::read_file_range(filename, start_line);
             }
           }
         }
@@ -500,8 +499,7 @@ void Agent::handle_direct_command(const std::string &input) {
       search_options.directory = directory;
       search_options.pattern = pattern;
       search_options.file_filter = filter;
-      auto search_result =
-          Services::search_code(search_caps_, search_options);
+      auto search_result = Services::search_code(search_caps_, search_options);
 
       if (search_result.matches.empty()) {
         result = "No matches found for pattern: " + pattern;
@@ -513,9 +511,8 @@ void Agent::handle_direct_command(const std::string &input) {
                     ": " + match.line_content + "\n";
         }
         if (search_result.truncated) {
-          result +=
-              "(output truncated at the search limit; narrow the pattern "
-              "or directory for the rest)\n";
+          result += "(output truncated at the search limit; narrow the pattern "
+                    "or directory for the rest)\n";
         }
       }
     }
@@ -571,8 +568,7 @@ void Agent::handle_direct_command(const std::string &input) {
       if (todos.empty()) {
         result = "No task comments found";
       } else {
-        result =
-            "Found " + std::to_string(todos.size()) + " task comments:\n";
+        result = "Found " + std::to_string(todos.size()) + " task comments:\n";
         for (const auto &todo : todos) {
           result += todo + "\n";
         }
@@ -666,9 +662,8 @@ void Agent::handle_direct_command(const std::string &input) {
       size_t sep = rest.find(':');
       std::string repo_spec =
           (sep == std::string::npos) ? rest : trim_copy(rest.substr(0, sep));
-      std::string tail = (sep == std::string::npos)
-                             ? ""
-                             : trim_copy(rest.substr(sep + 1));
+      std::string tail =
+          (sep == std::string::npos) ? "" : trim_copy(rest.substr(sep + 1));
       size_t query_sep = tail.find(':');
       std::string pr_text = (query_sep == std::string::npos)
                                 ? tail
@@ -885,8 +880,8 @@ void Agent::handle_meta_command(const std::string &input) {
   // Normalize exact verbs to the spaced form so handlers reach their
   // existing usage paths instead of "Unknown meta command".
   static const std::vector<std::string> spaced_verbs = {
-      "chat", "context", "files", "fetch", "checkpoint",
-      "restore", "mcp", "theme", "auth", "sandbox", "error"};
+      "chat", "context", "files", "fetch",   "checkpoint", "restore",
+      "mcp",  "theme",   "auth",  "sandbox", "error"};
   for (const auto &verb : spaced_verbs) {
     if (command == verb) {
       command += " ";
@@ -1126,8 +1121,7 @@ void Agent::show_meta_help() {
   std::cout << "  Example: @src/main.cpp What does this code do?" << std::endl;
   std::cout << std::endl;
   std::cout << "Shell commands:" << std::endl;
-  std::cout << "  !<command>            - Execute shell command"
-            << std::endl;
+  std::cout << "  !<command>            - Execute shell command" << std::endl;
 }
 
 void Agent::clear_screen() {
@@ -1192,7 +1186,8 @@ void Agent::show_available_tools() {
   std::cout << "    write:file content          - Write to file" << std::endl;
   std::cout << "    replace:file:old:new        - Replace text in file"
             << std::endl;
-  std::cout << "    grep:pattern[:dir[:filter]]  - Search in files" << std::endl;
+  std::cout << "    grep:pattern[:dir[:filter]]  - Search in files"
+            << std::endl;
   std::cout << "  Project Analysis:" << std::endl;
   std::cout << "    analyze:[path]              - Analyze project structure"
             << std::endl;
@@ -1213,8 +1208,10 @@ void Agent::show_available_tools() {
   std::cout << "    search:query                - Web search" << std::endl;
   std::cout << "    remember:fact               - Save to memory" << std::endl;
   std::cout << "    memory                      - Show memories" << std::endl;
-  std::cout << "    forget                      - Clear global memory" << std::endl;
-  std::cout << "    clear                       - Clear session memory" << std::endl;
+  std::cout << "    forget                      - Clear global memory"
+            << std::endl;
+  std::cout << "    clear                       - Clear session memory"
+            << std::endl;
   std::cout << "  GitHub Operations:" << std::endl;
   std::cout << "    github:repo:owner/repo      - Get repository info"
             << std::endl;
@@ -1614,19 +1611,19 @@ void Agent::handle_checkpoint_command(const std::string &command) {
         auto info =
             Services::CheckpointService::get_checkpoint_info(checkpoint_id);
         std::cout << "Checkpoint Details:" << std::endl;
-      std::cout << "  ID: " << info.id << std::endl;
-      std::cout << "  Name: " << info.name << std::endl;
-      std::cout << "  Created: " << info.timestamp << std::endl;
-      if (!info.description.empty()) {
-        std::cout << "  Description: " << info.description << std::endl;
-      }
-      std::cout << "  Total Size: " << (info.total_size / 1024) << " KB"
-                << std::endl;
-      std::cout << "  Files (" << info.backed_up_files.size()
-                << "):" << std::endl;
-      for (const auto &file : info.backed_up_files) {
-        std::cout << "    " << file << std::endl;
-      }
+        std::cout << "  ID: " << info.id << std::endl;
+        std::cout << "  Name: " << info.name << std::endl;
+        std::cout << "  Created: " << info.timestamp << std::endl;
+        if (!info.description.empty()) {
+          std::cout << "  Description: " << info.description << std::endl;
+        }
+        std::cout << "  Total Size: " << (info.total_size / 1024) << " KB"
+                  << std::endl;
+        std::cout << "  Files (" << info.backed_up_files.size()
+                  << "):" << std::endl;
+        for (const auto &file : info.backed_up_files) {
+          std::cout << "    " << file << std::endl;
+        }
       } catch (const std::exception &e) {
         std::cout << "Error: " << e.what() << std::endl;
         std::cout << "Tip: if you used a name, retry with the checkpoint ID "
@@ -1721,7 +1718,7 @@ void Agent::handle_checkpoint_command(const std::string &command) {
 
   // Save to memory for AI context
   record_interaction(*memory_, "/checkpoint " + command,
-                            "Checkpoint command executed");
+                     "Checkpoint command executed");
 }
 
 void Agent::handle_mcp_command(const std::string &command) {
@@ -2201,8 +2198,7 @@ void Agent::handle_auth_command(const std::string &command) {
 
   // Never let a key supplied at runtime reach memory, logs, or the
   // checkpoint copies of memory.
-  record_interaction(*memory_,
-                     Core::redact_secrets("/auth " + command),
+  record_interaction(*memory_, Core::redact_secrets("/auth " + command),
                      "Auth command executed");
 }
 
@@ -2284,8 +2280,7 @@ void Agent::handle_sandbox_command(const std::string &command) {
         if (timed_out) {
           std::cout << "Docker daemon did not respond within "
                     << Services::SandboxService::kDockerProbeTimeoutSeconds
-                    << "s. Sandbox execution is not confirmed."
-                    << std::endl;
+                    << "s. Sandbox execution is not confirmed." << std::endl;
           return;
         }
         // Distinguish a missing CLI from a daemon that cannot be reached, so
@@ -2328,7 +2323,8 @@ void Agent::handle_sandbox_command(const std::string &command) {
     std::cout << "Error: " << e.what() << std::endl;
   }
 
-  record_interaction(*memory_, "/sandbox " + command, "Sandbox command executed");
+  record_interaction(*memory_, "/sandbox " + command,
+                     "Sandbox command executed");
 }
 
 void Agent::handle_error_command(const std::string &command) {

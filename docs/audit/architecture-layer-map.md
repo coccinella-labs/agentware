@@ -1,8 +1,8 @@
 # Layer Architecture Map
 
-**Target:** Agentware v0.2.0 (`aa6c72ee`)  
-**Audit Model:** 4-Layer Product-Level Architecture with Presentation Return Path  
-**Audit Date:** 2026-10-11  
+**Target:** Agentware v0.2.0 (`aa6c72ee`)
+**Audit Model:** 4-Layer Product-Level Architecture with Presentation Return Path
+**Audit Date:** 2026-10-11
 **Verification Environment:** macOS 27.0.1 (Darwin 26.0.0 arm64), Apple Clang 17.0.0, CMake 3.31.6
 
 ---
