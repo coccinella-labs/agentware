@@ -55,7 +55,7 @@ char32_t decode_one(const std::string &data, size_t &pos) {
     return 0xFFFD;
   }
   if (pos + need >= data.size()) {
-    return 0;  // incomplete: caller holds bytes for more input.
+    return 0; // incomplete: caller holds bytes for more input.
   }
   for (size_t i = 1; i <= need; ++i) {
     unsigned char c = byte(pos + i);
@@ -66,9 +66,8 @@ char32_t decode_one(const std::string &data, size_t &pos) {
     value = (value << 6) | (c & 0x3F);
   }
   pos += 1 + need;
-  if (value < low || value > 0x10FFFF ||
-      (value >= 0xD800 && value <= 0xDFFF)) {
-    return 0xFFFD;  // overlong, out of range, or surrogate.
+  if (value < low || value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) {
+    return 0xFFFD; // overlong, out of range, or surrogate.
   }
   return value;
 }
@@ -94,7 +93,7 @@ void append_utf8(std::string *out, char32_t value) {
 // True for a CSI final byte: parameter/intermediate bytes precede it.
 bool is_csi_final(unsigned char c) { return c >= 0x40 && c <= 0x7E; }
 
-}  // namespace
+} // namespace
 
 ModalEditor::ModalEditor() = default;
 
@@ -117,8 +116,8 @@ void ModalEditor::clamp_cursor() {
     cursor_ = 0;
     return;
   }
-  size_t limit = (mode_ == EditMode::Insert) ? buffer_.size()
-                                             : buffer_.size() - 1;
+  size_t limit =
+      (mode_ == EditMode::Insert) ? buffer_.size() : buffer_.size() - 1;
   if (cursor_ > limit) {
     cursor_ = limit;
   }
@@ -126,41 +125,41 @@ void ModalEditor::clamp_cursor() {
 
 FeedResult ModalEditor::feed(const KeyEvent &event, std::string *out_line) {
   switch (event.kind) {
-    case KeyKind::StreamEnd:
-      if (buffer_.empty()) {
-        return FeedResult::Eof;
-      }
-      if (out_line != nullptr) {
-        *out_line = buffer_utf8();
-      }
-      return FeedResult::Submitted;
-    case KeyKind::Enter:
-      if (out_line != nullptr) {
-        *out_line = buffer_utf8();
-      }
-      return FeedResult::Submitted;
-    case KeyKind::CtrlD:
-      if (buffer_.empty()) {
-        return FeedResult::Eof;
-      }
-      return FeedResult::Continue;  // keep editing, like canonical mode.
-    case KeyKind::Escape:
-      mode_ = EditMode::Normal;
-      clamp_cursor();
-      return FeedResult::Continue;
-    case KeyKind::Backspace:
-      if (mode_ == EditMode::Insert) {
-        if (cursor_ > 0 && cursor_ <= buffer_.size()) {
-          buffer_.erase(buffer_.begin() + (cursor_ - 1));
-          --cursor_;
-        }
-      } else if (cursor_ > 0) {
+  case KeyKind::StreamEnd:
+    if (buffer_.empty()) {
+      return FeedResult::Eof;
+    }
+    if (out_line != nullptr) {
+      *out_line = buffer_utf8();
+    }
+    return FeedResult::Submitted;
+  case KeyKind::Enter:
+    if (out_line != nullptr) {
+      *out_line = buffer_utf8();
+    }
+    return FeedResult::Submitted;
+  case KeyKind::CtrlD:
+    if (buffer_.empty()) {
+      return FeedResult::Eof;
+    }
+    return FeedResult::Continue; // keep editing, like canonical mode.
+  case KeyKind::Escape:
+    mode_ = EditMode::Normal;
+    clamp_cursor();
+    return FeedResult::Continue;
+  case KeyKind::Backspace:
+    if (mode_ == EditMode::Insert) {
+      if (cursor_ > 0 && cursor_ <= buffer_.size()) {
+        buffer_.erase(buffer_.begin() + (cursor_ - 1));
         --cursor_;
       }
-      clamp_cursor();
-      return FeedResult::Continue;
-    case KeyKind::Char:
-      break;
+    } else if (cursor_ > 0) {
+      --cursor_;
+    }
+    clamp_cursor();
+    return FeedResult::Continue;
+  case KeyKind::Char:
+    break;
   }
 
   if (mode_ == EditMode::Insert) {
@@ -175,38 +174,38 @@ FeedResult ModalEditor::feed(const KeyEvent &event, std::string *out_line) {
   // Normal mode: deliberately small command set. Anything else is a
   // silent no-op.
   switch (event.ch) {
-    case U'i':
-      mode_ = EditMode::Insert;
-      clamp_cursor();
-      break;
-    case U'h':
-      if (cursor_ > 0) {
-        --cursor_;
-      }
-      break;
-    case U'l':
-      if (!buffer_.empty() && cursor_ + 1 < buffer_.size()) {
-        ++cursor_;
-      }
-      break;
-    case U'0':
+  case U'i':
+    mode_ = EditMode::Insert;
+    clamp_cursor();
+    break;
+  case U'h':
+    if (cursor_ > 0) {
+      --cursor_;
+    }
+    break;
+  case U'l':
+    if (!buffer_.empty() && cursor_ + 1 < buffer_.size()) {
+      ++cursor_;
+    }
+    break;
+  case U'0':
+    cursor_ = 0;
+    break;
+  case U'$':
+    if (!buffer_.empty()) {
+      cursor_ = buffer_.size() - 1;
+    } else {
       cursor_ = 0;
-      break;
-    case U'$':
-      if (!buffer_.empty()) {
-        cursor_ = buffer_.size() - 1;
-      } else {
-        cursor_ = 0;
-      }
-      break;
-    case U'x':
-      if (!buffer_.empty() && cursor_ < buffer_.size()) {
-        buffer_.erase(buffer_.begin() + cursor_);
-      }
-      clamp_cursor();
-      break;
-    default:
-      break;
+    }
+    break;
+  case U'x':
+    if (!buffer_.empty() && cursor_ < buffer_.size()) {
+      buffer_.erase(buffer_.begin() + cursor_);
+    }
+    clamp_cursor();
+    break;
+  default:
+    break;
   }
   clamp_cursor();
   return FeedResult::Continue;
@@ -244,8 +243,7 @@ void KeyDecoder::feed(const uint8_t *data, size_t size,
       if (pending_bytes_[pos + 1] == '[') {
         size_t end = pos + 2;
         while (end < pending_bytes_.size() &&
-               !is_csi_final(
-                   static_cast<unsigned char>(pending_bytes_[end]))) {
+               !is_csi_final(static_cast<unsigned char>(pending_bytes_[end]))) {
           ++end;
         }
         if (end >= pending_bytes_.size()) {
@@ -253,7 +251,7 @@ void KeyDecoder::feed(const uint8_t *data, size_t size,
           pending_bytes_.erase(0, pos);
           return;
         }
-        pos = end + 1;  // consume the whole sequence, ignore it (v1).
+        pos = end + 1; // consume the whole sequence, ignore it (v1).
         continue;
       }
       out->push_back(KeyEvent{KeyKind::Escape, 0});
@@ -276,7 +274,7 @@ void KeyDecoder::feed(const uint8_t *data, size_t size,
       continue;
     }
     if (c < 0x20) {
-      ++pos;  // ignore other control bytes in v1.
+      ++pos; // ignore other control bytes in v1.
       continue;
     }
     size_t before = pos;
@@ -287,7 +285,7 @@ void KeyDecoder::feed(const uint8_t *data, size_t size,
       return;
     }
     if (value == 0) {
-      continue;  // decode_one consumed nothing; safety net.
+      continue; // decode_one consumed nothing; safety net.
     }
     out->push_back(KeyEvent{KeyKind::Char, value});
   }
@@ -323,7 +321,7 @@ bool windows_key_event(char32_t value, KeyEvent *out) {
   } else if (value == 8) {
     *out = KeyEvent{KeyKind::Backspace, 0};
   } else if (value == 26) {
-    *out = KeyEvent{KeyKind::CtrlD, 0};  // Ctrl-Z: EOF key on Windows.
+    *out = KeyEvent{KeyKind::CtrlD, 0}; // Ctrl-Z: EOF key on Windows.
   } else if (value < 0x20) {
     // Arrows, function keys, Home and End all report UnicodeChar == 0.
     // The POSIX path drops unmapped control bytes; do the same here rather
@@ -360,7 +358,7 @@ bool vim_opt_in() {
 // flags required for character input change; everything else (notably
 // signal generation) is preserved.
 class TerminalGuard {
- public:
+public:
   TerminalGuard() {
 #ifdef _WIN32
     valid_ = GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &saved_) != 0;
@@ -396,12 +394,12 @@ class TerminalGuard {
 
   bool ok() const { return valid_; }
 
- private:
+private:
   bool valid_ = false;
 #ifdef _WIN32
   DWORD saved_ = 0;
 #else
-  struct termios saved_ {};
+  struct termios saved_{};
 #endif
 };
 
@@ -412,8 +410,8 @@ bool read_windows_events(ModalEditor *editor, std::string *line,
                          bool *saw_eof) {
   static const int kPollMs = 25;
   DWORD pending = 0;
-  if (GetNumberOfConsoleInputEvents(GetStdHandle(STD_INPUT_HANDLE),
-                                   &pending) == 0) {
+  if (GetNumberOfConsoleInputEvents(GetStdHandle(STD_INPUT_HANDLE), &pending) ==
+      0) {
     *saw_eof = true;
     return true;
   }
@@ -464,7 +462,7 @@ bool read_windows_events(ModalEditor *editor, std::string *line,
   FeedResult result = editor->feed(event, line);
   if (result == FeedResult::Submitted || result == FeedResult::Eof) {
     *saw_eof = (result == FeedResult::Eof);
-    return false;  // done reading.
+    return false; // done reading.
   }
   return true;
 }
@@ -485,7 +483,7 @@ bool read_posix_chunk(ModalEditor *editor, KeyDecoder *decoder,
       return true;
     }
     *saw_eof = true;
-    return false;  // terminal error ends the loop, like getline failure.
+    return false; // terminal error ends the loop, like getline failure.
   }
   std::vector<KeyEvent> events;
   decoder->feed(chunk, static_cast<size_t>(count), &events);
@@ -497,7 +495,7 @@ bool read_posix_chunk(ModalEditor *editor, KeyDecoder *decoder,
     FD_SET(STDIN_FILENO, &fds);
     struct timeval wait = {0, 50000};
     if (select(STDIN_FILENO + 1, &fds, nullptr, nullptr, &wait) > 0) {
-      return true;  // more bytes coming; loop back to read them.
+      return true; // more bytes coming; loop back to read them.
     }
     decoder->flush(&events);
   }
@@ -536,7 +534,7 @@ void redraw_line(const std::string &prompt, const ModalEditor &editor) {
   std::cout << std::flush;
 }
 
-}  // namespace
+} // namespace
 
 ReadResult read_prompt_line(const std::string &prompt) {
   std::cout << prompt << std::flush;
@@ -580,5 +578,5 @@ ReadResult read_prompt_line(const std::string &prompt) {
   return ReadResult{ReadStatus::Line, line};
 }
 
-}  // namespace Input
-}  // namespace Utils
+} // namespace Input
+} // namespace Utils

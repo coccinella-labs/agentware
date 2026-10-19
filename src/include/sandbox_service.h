@@ -110,18 +110,18 @@ public:
   // Probes the daemon within timeout_seconds and reports which of the three
   // outcomes occurred, so callers can explain a timeout rather than reporting
   // a bare "unavailable".
-  static DockerStatus probe_docker(int timeout_seconds = kDockerProbeTimeoutSeconds);
+  static DockerStatus
+  probe_docker(int timeout_seconds = kDockerProbeTimeoutSeconds);
   // Process spawning without a host shell: POSIX fork/execvp, Windows
   // CreateProcess with deterministic CRT quoting. Declared public as
   // documented test seams; see the timeout and argv tests.
   // timeout_seconds <= 0 preserves the original unbounded behavior.
-  static SpawnedResult
-  spawn_capture(const std::vector<std::string> &argv,
-                int timeout_seconds = 0);
-  static BoundedResult
-  run_bounded(const std::vector<std::string> &argv,
-              const std::vector<std::string> &stop_argv, int timeout_seconds,
-              int stop_timeout_seconds);
+  static SpawnedResult spawn_capture(const std::vector<std::string> &argv,
+                                     int timeout_seconds = 0);
+  static BoundedResult run_bounded(const std::vector<std::string> &argv,
+                                   const std::vector<std::string> &stop_argv,
+                                   int timeout_seconds,
+                                   int stop_timeout_seconds);
   static std::vector<std::string>
   build_docker_argv(const SandboxConfig &config, const std::string &command,
                     const std::string &container_name);

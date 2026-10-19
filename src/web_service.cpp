@@ -61,8 +61,7 @@ std::string WebService::search(const std::string &query) {
       encoded_query = query; // Fallback to unencoded query if curl init fails
     }
 
-    std::string search_url =
-        "https://api.duckduckgo.com/?q=" + encoded_query;
+    std::string search_url = "https://api.duckduckgo.com/?q=" + encoded_query;
 
     std::string response_str;
     std::string response_headers;

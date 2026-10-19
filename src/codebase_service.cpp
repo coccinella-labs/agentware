@@ -58,39 +58,39 @@ std::string CodebaseService::find_main_components(const std::string &path) {
     // Look for main directories
     std::vector<std::string> main_dirs;
     for (const auto &entry : std::filesystem::directory_iterator(path)) {
-    if (entry.is_directory()) {
-      std::string dir_name = entry.path().filename().string();
-      if (dir_name[0] != '.' && dir_name != "node_modules" &&
-          dir_name != "build" && dir_name != "dist") {
-        main_dirs.push_back(dir_name);
+      if (entry.is_directory()) {
+        std::string dir_name = entry.path().filename().string();
+        if (dir_name[0] != '.' && dir_name != "node_modules" &&
+            dir_name != "build" && dir_name != "dist") {
+          main_dirs.push_back(dir_name);
+        }
       }
     }
-  }
 
-  result << "Main Directories:\n";
-  for (const auto &dir : main_dirs) {
-    result << "  - " << dir << "/\n";
+    result << "Main Directories:\n";
+    for (const auto &dir : main_dirs) {
+      result << "  - " << dir << "/\n";
 
-    // Analyze what's in each directory
-    std::string dir_path = path + "/" + dir;
-    auto file_count = count_files_in_directory(dir_path);
-    result << "    Files: " << file_count << "\n";
+      // Analyze what's in each directory
+      std::string dir_path = path + "/" + dir;
+      auto file_count = count_files_in_directory(dir_path);
+      result << "    Files: " << file_count << "\n";
 
-    // Look for key files
-    auto key_files = find_key_files(dir_path);
-    if (!key_files.empty()) {
-      result << "    Key files: ";
-      for (size_t i = 0; i < key_files.size() && i < 3; ++i) {
-        if (i > 0)
-          result << ", ";
-        result << key_files[i];
+      // Look for key files
+      auto key_files = find_key_files(dir_path);
+      if (!key_files.empty()) {
+        result << "    Key files: ";
+        for (size_t i = 0; i < key_files.size() && i < 3; ++i) {
+          if (i > 0)
+            result << ", ";
+          result << key_files[i];
+        }
+        if (key_files.size() > 3) {
+          result << " (+" << (key_files.size() - 3) << " more)";
+        }
+        result << "\n";
       }
-      if (key_files.size() > 3) {
-        result << " (+" << (key_files.size() - 3) << " more)";
-      }
-      result << "\n";
     }
-  }
 
     return result.str();
   } catch (const std::exception &e) {

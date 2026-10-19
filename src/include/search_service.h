@@ -11,9 +11,9 @@ namespace Services {
 // Which external search tools were found on PATH at startup. All false means
 // "use the native fallback for everything", which must always work.
 struct SearchCapabilities {
-  bool has_ripgrep = false;   // rg
-  bool has_fd = false;        // fd or fdfind
-  bool has_ast_grep = false;  // sg
+  bool has_ripgrep = false;  // rg
+  bool has_fd = false;       // fd or fdfind
+  bool has_ast_grep = false; // sg
   bool has_jq = false;
   bool has_git = false;
   // Which binary provides fd: "fd", "fdfind", or empty when absent.

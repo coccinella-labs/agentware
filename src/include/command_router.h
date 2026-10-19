@@ -34,13 +34,14 @@ enum class InputRoute {
 // '/'), the no-argument bare verbs, and colon commands outrank '@', so a
 // command that merely contains an at-sign is never diverted to file
 // injection.
-[[nodiscard]] AGENTWARE_API InputRoute classify_input(const std::string &trimmed);
+[[nodiscard]] AGENTWARE_API InputRoute
+classify_input(const std::string &trimmed);
 
 // True only when `input` is exactly `verb`. These verbs accept no arguments,
 // so "clear: the screen please" is prose rather than a command, and
 // "clearance-notes: x" is not a near miss for "clear".
-[[nodiscard]] AGENTWARE_API bool
-matches_bare_verb(const std::string &input, const std::string &verb);
+[[nodiscard]] AGENTWARE_API bool matches_bare_verb(const std::string &input,
+                                                   const std::string &verb);
 
 // True when the '@' at `pos` opens a file reference, meaning it starts the
 // input or follows whitespace or an opening quote. Keeping this boundary

@@ -20,8 +20,8 @@ namespace {
 // wastes tokens and memory without helping.
 const std::vector<std::string> &heavy_dirs() {
   static const std::vector<std::string> dirs = {
-      ".git",    "node_modules", "target",  "dist",  "build",
-      ".hg",     ".svn",         "__pycache__", ".idea", ".vscode",
+      ".git", "node_modules", "target",      "dist",  "build",
+      ".hg",  ".svn",         "__pycache__", ".idea", ".vscode",
   };
   return dirs;
 }
@@ -83,7 +83,8 @@ std::set<std::string> read_gitignore_dirs(const std::string &directory) {
 bool matches_glob(const std::string &filename, const std::string &glob) {
   if (glob == "*" || glob.empty())
     return true;
-  if (glob.find('*') != std::string::npos || glob.find('?') != std::string::npos) {
+  if (glob.find('*') != std::string::npos ||
+      glob.find('?') != std::string::npos) {
     std::string pattern_regex;
     for (char c : glob) {
       if (c == '*')
@@ -119,7 +120,7 @@ bool executable_on_path(const std::filesystem::path &p) {
 }
 
 std::string find_on_path_in(const std::string &path_env,
-                             const std::string &name) {
+                            const std::string &name) {
 #ifdef _WIN32
   const std::vector<std::string> suffixes = {"", ".exe", ".bat", ".cmd"};
   const char separator = ';';
@@ -206,9 +207,8 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
     // --vimgrep emits path:line:col:text, trivially parseable without a JSON
     // library. --max-count bounds per-file output; the total cap below bounds
     // the whole result. ripgrep skips non-regular files on its own.
-    std::string command =
-        "rg --vimgrep --no-heading --max-count " +
-        std::to_string(options.max_matches);
+    std::string command = "rg --vimgrep --no-heading --max-count " +
+                          std::to_string(options.max_matches);
     // Options must precede the "--" separator: anything after it is a path,
     // so appending -g/--ignore-case there silently disables filtering.
     if (options.file_filter != "*")
@@ -219,8 +219,7 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
                shell_quote(options.directory);
 
     bool truncated = false;
-    std::string output =
-        run_capture(command, options.max_bytes, truncated);
+    std::string output = run_capture(command, options.max_bytes, truncated);
     result.truncated = truncated;
 
     std::size_t bytes = 0;
@@ -244,7 +243,8 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
       FileSearchResult match;
       match.file_path = line.substr(0, first);
       try {
-        match.line_number = std::stoi(line.substr(first + 1, second - first - 1));
+        match.line_number =
+            std::stoi(line.substr(first + 1, second - first - 1));
       } catch (...) {
         continue;
       }
@@ -275,7 +275,8 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
           return;
         std::error_code iter_ec;
         for (const auto &entry : std::filesystem::directory_iterator(
-                 dir, std::filesystem::directory_options::skip_permission_denied,
+                 dir,
+                 std::filesystem::directory_options::skip_permission_denied,
                  iter_ec)) {
           if (iter_ec || result.truncated)
             return;
@@ -314,17 +315,17 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
   return result;
 }
 
-std::vector<std::string>
-find_files(const SearchCapabilities &caps, const std::string &directory,
-           const std::string &glob, std::size_t max_results) {
+std::vector<std::string> find_files(const SearchCapabilities &caps,
+                                    const std::string &directory,
+                                    const std::string &glob,
+                                    std::size_t max_results) {
   std::vector<std::string> found;
 
   if (caps.has_fd && !caps.fd_binary.empty()) {
     std::string command = shell_quote(caps.fd_binary) +
                           " --type f --max-results " +
                           std::to_string(max_results) + " --glob " +
-                          shell_quote(glob) + " -- " +
-                          shell_quote(directory);
+                          shell_quote(glob) + " -- " + shell_quote(directory);
     bool truncated = false;
     std::string output = run_capture(command, max_results * 512, truncated);
     (void)truncated;
@@ -350,7 +351,8 @@ find_files(const SearchCapabilities &caps, const std::string &directory,
           return;
         std::error_code iter_ec;
         for (const auto &entry : std::filesystem::directory_iterator(
-                 dir, std::filesystem::directory_options::skip_permission_denied,
+                 dir,
+                 std::filesystem::directory_options::skip_permission_denied,
                  iter_ec)) {
           if (iter_ec || found.size() >= max_results)
             return;

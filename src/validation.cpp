@@ -91,9 +91,8 @@ bool is_restricted_location(const std::filesystem::path &canonical) {
 }
 } // namespace
 
-ValidationResult
-Validator::validate_file_access(const std::string &path,
-                                const std::string &root) {
+ValidationResult Validator::validate_file_access(const std::string &path,
+                                                 const std::string &root) {
   ValidationResult result = {true, "", {}};
 
   if (path.empty()) {
@@ -103,9 +102,8 @@ Validator::validate_file_access(const std::string &path,
   }
 
   std::error_code ec;
-  std::filesystem::path base =
-      root.empty() ? std::filesystem::current_path(ec)
-                   : std::filesystem::path(root);
+  std::filesystem::path base = root.empty() ? std::filesystem::current_path(ec)
+                                            : std::filesystem::path(root);
   if (ec) {
     result.is_valid = false;
     result.error_message = "Cannot resolve working directory";

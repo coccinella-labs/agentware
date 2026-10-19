@@ -73,16 +73,15 @@ AGENTWARE_API int layout_width();
 // asserted directly by tests at any width, including widths no test terminal
 // has. The print_* functions below are thin emitters over these.
 AGENTWARE_API std::vector<std::string> help_lines(int width);
-AGENTWARE_API std::vector<std::string> status_lines(int width,
-                                                   const std::string &mode,
-                                                   const std::string &model);
+AGENTWARE_API std::vector<std::string>
+status_lines(int width, const std::string &mode, const std::string &model);
 AGENTWARE_API std::vector<std::string> quick_help_lines(int width);
 
 // A prompt wrapped to the layout width, with continuation lines indented.
 // Returned lines exclude the trailing space that separates the prompt from the
 // cursor, so the caller can re-append it.
 AGENTWARE_API std::vector<std::string> prompt_lines(int width,
-                                                   const std::string &prompt);
+                                                    const std::string &prompt);
 
 // Emits prompt_lines for the detected width and leaves the cursor after the
 // prompt, without emitting a trailing newline.

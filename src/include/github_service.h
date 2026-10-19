@@ -70,11 +70,10 @@ public:
   static std::string get_repo_info(const std::string &owner,
                                    const std::string &repo);
   static std::vector<GitHubIssue> get_issues(const std::string &owner,
-                                              const std::string &repo,
-                                              const std::string &state = "open");
+                                             const std::string &repo,
+                                             const std::string &state = "open");
   // Pure payload parser, directly unit-testable without network.
-  static std::vector<GitHubIssue>
-  parse_issues(const std::string &payload);
+  static std::vector<GitHubIssue> parse_issues(const std::string &payload);
   static GitHubIssue create_issue(const std::string &owner,
                                   const std::string &repo,
                                   const std::string &title,
@@ -107,7 +106,7 @@ public:
                              const std::string &url,
                              const std::vector<std::string> &events);
   static std::string run_health_check(const std::string &owner,
-                                       const std::string &repo);
+                                      const std::string &repo);
   static std::string find_related_issues(const std::string &owner,
                                          const std::string &repo,
                                          const std::string &text);
@@ -116,9 +115,9 @@ public:
   // endpoints. Throws std::runtime_error when the API call fails, so
   // callers must distinguish the throw (API failure) from an empty
   // vector (no threads). Read-only: performs GET requests only.
-  static ReviewThreadList
-  get_review_threads(const std::string &owner, const std::string &repo,
-                     int pr_number);
+  static ReviewThreadList get_review_threads(const std::string &owner,
+                                             const std::string &repo,
+                                             int pr_number);
   // Pagination core over an injectable fetch, so tests can drive multi-page,
   // failure, and malformed sequences without credentials or network.
   static ReviewThreadList collect_review_threads(

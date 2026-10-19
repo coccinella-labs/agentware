@@ -89,8 +89,7 @@ TEST(TryParseIntTest, RejectsNonNumeric) {
 // Each test builds an isolated root under the system temp directory.
 namespace {
 std::filesystem::path MakeAccessRoot() {
-  auto root = std::filesystem::temp_directory_path() /
-              "agentware_access_test";
+  auto root = std::filesystem::temp_directory_path() / "agentware_access_test";
   std::error_code ec;
   std::filesystem::remove_all(root, ec);
   std::filesystem::create_directories(root / "sub", ec);
@@ -102,9 +101,9 @@ TEST(FileAccessTest, RelativeInsideRootAllowed) {
   auto root = MakeAccessRoot();
   EXPECT_TRUE(
       Utils::Validator::validate_file_access("sub", root.string()).is_valid);
-  EXPECT_TRUE(Utils::Validator::validate_file_access(
-                                                     "sub/../sub", root.string())
-                  .is_valid);
+  EXPECT_TRUE(
+      Utils::Validator::validate_file_access("sub/../sub", root.string())
+          .is_valid);
 }
 
 TEST(FileAccessTest, TraversalEscapeRejected) {
@@ -117,8 +116,8 @@ TEST(FileAccessTest, TraversalEscapeRejected) {
 
 TEST(FileAccessTest, AbsoluteInsideRootAllowed) {
   auto root = MakeAccessRoot();
-  EXPECT_TRUE(Utils::Validator::validate_file_access(
-                                                     (root / "sub").string(), root.string())
+  EXPECT_TRUE(Utils::Validator::validate_file_access((root / "sub").string(),
+                                                     root.string())
                   .is_valid);
 }
 
@@ -155,8 +154,8 @@ TEST(FileAccessTest, SymlinkEscapeRejected) {
   if (ec) {
     GTEST_SKIP() << "symlinks unavailable: " << ec.message();
   }
-  auto result = Utils::Validator::validate_file_access("link.txt",
-                                                       root.string());
+  auto result =
+      Utils::Validator::validate_file_access("link.txt", root.string());
   EXPECT_FALSE(result.is_valid);
   std::filesystem::remove_all(root, ec);
   std::filesystem::remove(outside, ec);
@@ -171,8 +170,8 @@ TEST(FileAccessTest, EmptyPathRejected) {
 TEST(FileAccessTest, SymlinkedParentEscapeRejected) {
   auto root = MakeAccessRoot();
   std::error_code ec;
-  auto outside = std::filesystem::temp_directory_path() /
-                 "agentware_access_outside_dir";
+  auto outside =
+      std::filesystem::temp_directory_path() / "agentware_access_outside_dir";
   std::filesystem::remove_all(outside, ec);
   std::filesystem::create_directories(outside, ec);
   std::filesystem::create_symlink(outside, root / "linkdir", ec);
@@ -181,17 +180,17 @@ TEST(FileAccessTest, SymlinkedParentEscapeRejected) {
   }
   // The parent linkdir resolves outside root, so any path beneath it
   // escapes even though the destination file does not exist yet.
-  EXPECT_FALSE(Utils::Validator::validate_file_access("linkdir/evil.txt",
-                                                      root.string())
-                   .is_valid);
+  EXPECT_FALSE(
+      Utils::Validator::validate_file_access("linkdir/evil.txt", root.string())
+          .is_valid);
   std::filesystem::remove_all(outside, ec);
 }
 
 TEST(FileAccessTest, NonexistentNestedInsideAllowed) {
   auto root = MakeAccessRoot();
-  EXPECT_TRUE(Utils::Validator::validate_file_access("newdir/note.txt",
-                                                     root.string())
-                  .is_valid);
+  EXPECT_TRUE(
+      Utils::Validator::validate_file_access("newdir/note.txt", root.string())
+          .is_valid);
 }
 
 // find_project_root must terminate on marker-less directories (review
@@ -338,7 +337,8 @@ TEST(ReviewThreadsTest, MalformedPayloadThrows) {
                std::runtime_error);
 }
 
-TEST(ReviewThreadsTest, ParsesLinkNext) {  HeaderMap next_headers;
+TEST(ReviewThreadsTest, ParsesLinkNext) {
+  HeaderMap next_headers;
   next_headers["Link"] = "<https://api.github.com/p/2>; rel=\"next\", "
                          "<https://api.github.com/p/9>; rel=\"last\"";
   EXPECT_EQ(Services::GitHubService::parse_link_next(next_headers),
@@ -362,7 +362,8 @@ TEST(ReviewThreadsTest, CollectsMultiplePages) {
     response.success = true;
     response.status_code = 200;
     response.content =
-        "[{\"id\":" + std::to_string(id) + ",\"path\":\"f.cpp\",\"line\":1,"
+        "[{\"id\":" + std::to_string(id) +
+        ",\"path\":\"f.cpp\",\"line\":1,"
         "\"original_line\":1,\"commit_id\":\"c\",\"original_commit_id\":"
         "\"c\",\"diff_hunk\":\"\",\"body\":\"b\",\"user\":{\"login\":\"u\"},"
         "\"html_url\":\"https://example.com\"}]";
@@ -473,8 +474,8 @@ TEST(SandboxCommandTest, HostileValuesAreSingleElements) {
 
 TEST(SandboxSpawnTest, EchoRoundTrip) {
 #ifdef _WIN32
-  auto out = Services::SandboxService::spawn_capture(
-      {"cmd", "/c", "echo", "hello"});
+  auto out =
+      Services::SandboxService::spawn_capture({"cmd", "/c", "echo", "hello"});
 #else
   auto out = Services::SandboxService::spawn_capture({"echo", "hello"});
 #endif
@@ -493,8 +494,8 @@ TEST(SandboxSpawnTest, FailureCodePreserved) {
 }
 
 TEST(SandboxSpawnTest, MissingBinaryFailsCleanly) {
-  auto out = Services::SandboxService::spawn_capture(
-      {"__agentware_no_such_binary__"});
+  auto out =
+      Services::SandboxService::spawn_capture({"__agentware_no_such_binary__"});
 #ifdef _WIN32
   EXPECT_EQ(out.exit_code, -1);
 #else
@@ -508,8 +509,8 @@ TEST(SandboxBoundedTest, SuccessReturnsPromptly) {
   auto result = Services::SandboxService::run_bounded(
       {"cmd", "/c", "echo", "hi"}, {"cmd", "/c", "exit", "0"}, 10, 5);
 #else
-  auto result = Services::SandboxService::run_bounded(
-      {"echo", "hi"}, {"true"}, 10, 5);
+  auto result =
+      Services::SandboxService::run_bounded({"echo", "hi"}, {"true"}, 10, 5);
 #endif
   EXPECT_FALSE(result.timed_out);
   EXPECT_EQ(result.exit_code, 0);
@@ -524,8 +525,8 @@ TEST(SandboxBoundedTest, HangReturnsControl) {
   auto result = Services::SandboxService::run_bounded(
       {"ping", "-n", "30", "127.0.0.1"}, {"cmd", "/c", "exit", "0"}, 2, 5);
 #else
-  auto result = Services::SandboxService::run_bounded(
-      {"sleep", "60"}, {"true"}, 2, 5);
+  auto result =
+      Services::SandboxService::run_bounded({"sleep", "60"}, {"true"}, 2, 5);
 #endif
   auto elapsed = std::chrono::steady_clock::now() - start;
   EXPECT_TRUE(result.timed_out);
@@ -554,8 +555,7 @@ TEST(SandboxConfigTest, AcceptsSaneConfig) {
   config.working_directory = "/workspace";
   config.volumes = {"/data:/workspace:rw"};
   std::string error;
-  EXPECT_TRUE(
-      Services::SandboxService::validate_sandbox_config(config, error));
+  EXPECT_TRUE(Services::SandboxService::validate_sandbox_config(config, error));
 }
 
 TEST(SandboxConfigTest, RejectsHostileConfig) {
@@ -581,7 +581,8 @@ TEST(SandboxConfigTest, RejectsHostileConfig) {
       Services::SandboxService::validate_sandbox_config(config, error));
 }
 
-TEST(SandboxResultTest, FormatsHonestly) {  Services::SandboxResult ok;
+TEST(SandboxResultTest, FormatsHonestly) {
+  Services::SandboxResult ok;
   ok.exit_code = 0;
   ok.stdout_output = "hi";
   EXPECT_EQ(Services::SandboxService::format_result(ok), "hi");
@@ -644,7 +645,8 @@ TEST(SandboxDockerTest, ExecutesThroughFakeDocker) {
   config.name = "test-fake";
   config.image = "ubuntu:22.04";
   config.timeout_seconds = 30;
-  ASSERT_TRUE(Services::SandboxService::create_sandbox_config("test-fake", config));
+  ASSERT_TRUE(
+      Services::SandboxService::create_sandbox_config("test-fake", config));
   Services::SandboxResult result =
       Services::SandboxService::execute_command("echo hi", "test-fake");
   EXPECT_EQ(result.exit_code, 0);
@@ -691,13 +693,14 @@ TEST(SandboxDockerTest, DaemonFailureReported) {
   config.name = "test-fake-fail";
   config.image = "ubuntu:22.04";
   config.timeout_seconds = 30;
-  ASSERT_TRUE(
-      Services::SandboxService::create_sandbox_config("test-fake-fail", config));
+  ASSERT_TRUE(Services::SandboxService::create_sandbox_config("test-fake-fail",
+                                                              config));
   Services::SandboxResult result =
       Services::SandboxService::execute_command("echo hi", "test-fake-fail");
   EXPECT_EQ(result.exit_code, 1);
   EXPECT_FALSE(result.timed_out);
-  EXPECT_TRUE(Services::SandboxService::remove_sandbox_config("test-fake-fail"));
+  EXPECT_TRUE(
+      Services::SandboxService::remove_sandbox_config("test-fake-fail"));
 
   setenv("PATH", saved_path.c_str(), 1);
   fs::current_path(old_cwd, ec);
@@ -738,15 +741,16 @@ TEST(SandboxDockerTest, HangEnforcesTimeout) {
   config.name = "test-fake-hang";
   config.image = "ubuntu:22.04";
   config.timeout_seconds = 2;
-  ASSERT_TRUE(
-      Services::SandboxService::create_sandbox_config("test-fake-hang", config));
+  ASSERT_TRUE(Services::SandboxService::create_sandbox_config("test-fake-hang",
+                                                              config));
   auto start = std::chrono::steady_clock::now();
   Services::SandboxResult result =
       Services::SandboxService::execute_command("echo hi", "test-fake-hang");
   auto elapsed = std::chrono::steady_clock::now() - start;
   EXPECT_TRUE(result.timed_out);
   EXPECT_LT(elapsed, std::chrono::seconds(60));
-  EXPECT_TRUE(Services::SandboxService::remove_sandbox_config("test-fake-hang"));
+  EXPECT_TRUE(
+      Services::SandboxService::remove_sandbox_config("test-fake-hang"));
 
   setenv("PATH", saved_path.c_str(), 1);
   fs::current_path(old_cwd, ec);
@@ -763,11 +767,13 @@ TEST(ReplaceEmptyPatternTest, ReturnsPromptlyWithError) {
   fs::remove_all(dir, ec);
   fs::create_directories(dir, ec);
   auto file = dir / "sample.txt";
-  { std::ofstream out(file); out << "hello"; }
+  {
+    std::ofstream out(file);
+    out << "hello";
+  }
   auto start = std::chrono::steady_clock::now();
   Services::FileEditResult result =
-      Services::FileService::replace_text_in_file(file.string(), "", "new",
-                                                  1);
+      Services::FileService::replace_text_in_file(file.string(), "", "new", 1);
   auto elapsed = std::chrono::steady_clock::now() - start;
   EXPECT_FALSE(result.success);
   EXPECT_NE(result.message.find("Error:"), std::string::npos);
@@ -822,9 +828,7 @@ TEST(GitLogTest, WorksInRepoAndRefusesHostilePath) {
   auto dir = fs::temp_directory_path() / "agentware_git_test";
   fs::remove_all(dir, ec);
   fs::create_directories(dir, ec);
-  auto run = [&](const std::string &cmd) {
-    return std::system(cmd.c_str());
-  };
+  auto run = [&](const std::string &cmd) { return std::system(cmd.c_str()); };
   std::string d = dir.string();
   ASSERT_EQ(run("git -C \"" + d + "\" init -q"), 0);
   ASSERT_EQ(run("git -C \"" + d + "\" config user.email t@t"), 0);
@@ -841,11 +845,14 @@ TEST(GitLogTest, WorksInRepoAndRefusesHostilePath) {
 
   // Hostile paths never reach a shell: nonexistent ones fail at the
   // repository check, existing hostile-named ones at the path check.
-  EXPECT_NE(Services::GitService::get_git_log(d + "\"; touch /tmp/pwned", 30).find("Error:"), std::string::npos);
+  EXPECT_NE(Services::GitService::get_git_log(d + "\"; touch /tmp/pwned", 30)
+                .find("Error:"),
+            std::string::npos);
   std::string hostile = d + "/a;b";
   fs::create_directories(hostile, ec);
   ASSERT_EQ(run("git -C \"" + hostile + "\" init -q"), 0);
-  EXPECT_NE(Services::GitService::get_git_log(hostile, 30).find("Unsafe"), std::string::npos);
+  EXPECT_NE(Services::GitService::get_git_log(hostile, 30).find("Unsafe"),
+            std::string::npos);
   EXPECT_FALSE(fs::exists("/tmp/pwned", ec));
   fs::remove_all(dir, ec);
 }
@@ -903,27 +910,26 @@ TEST(ModalEditorTest, MotionsAndDelete) {
   Utils::Input::ModalEditor editor;
   std::string line;
   for (char c : std::string("abc")) {
-    editor.feed({Utils::Input::KeyKind::Char, static_cast<char32_t>(c)},
-                &line);
+    editor.feed({Utils::Input::KeyKind::Char, static_cast<char32_t>(c)}, &line);
   }
   editor.feed({Utils::Input::KeyKind::Escape, 0}, &line);  // cursor -> 2
-  editor.feed({Utils::Input::KeyKind::Char, U'h'}, &line);  // -> 1
+  editor.feed({Utils::Input::KeyKind::Char, U'h'}, &line); // -> 1
   EXPECT_EQ(editor.cursor(), 1u);
-  editor.feed({Utils::Input::KeyKind::Char, U'l'}, &line);  // -> 2
+  editor.feed({Utils::Input::KeyKind::Char, U'l'}, &line); // -> 2
   EXPECT_EQ(editor.cursor(), 2u);
-  editor.feed({Utils::Input::KeyKind::Char, U'l'}, &line);  // stays 2
+  editor.feed({Utils::Input::KeyKind::Char, U'l'}, &line); // stays 2
   EXPECT_EQ(editor.cursor(), 2u);
   editor.feed({Utils::Input::KeyKind::Char, U'0'}, &line);
   EXPECT_EQ(editor.cursor(), 0u);
   editor.feed({Utils::Input::KeyKind::Char, U'$'}, &line);
   EXPECT_EQ(editor.cursor(), 2u);
-  editor.feed({Utils::Input::KeyKind::Char, U'x'}, &line);  // delete 'c'
+  editor.feed({Utils::Input::KeyKind::Char, U'x'}, &line); // delete 'c'
   EXPECT_EQ(editor.buffer_utf8(), "ab");
   EXPECT_EQ(editor.cursor(), 1u);
-  editor.feed({Utils::Input::KeyKind::Char, U'q'}, &line);  // unknown: no-op
+  editor.feed({Utils::Input::KeyKind::Char, U'q'}, &line); // unknown: no-op
   EXPECT_EQ(editor.buffer_utf8(), "ab");
   EXPECT_EQ(editor.feed({Utils::Input::KeyKind::Backspace, 0}, &line),
-            Utils::Input::FeedResult::Continue);  // normal: move left
+            Utils::Input::FeedResult::Continue); // normal: move left
   EXPECT_EQ(editor.cursor(), 0u);
 }
 
@@ -936,7 +942,7 @@ TEST(ModalEditorTest, InsertBackspaceDeletesLeft) {
   EXPECT_EQ(editor.buffer_utf8(), "a");
   EXPECT_EQ(editor.cursor(), 1u);
   editor.feed({Utils::Input::KeyKind::Backspace, 0}, &line);
-  editor.feed({Utils::Input::KeyKind::Backspace, 0}, &line);  // clamped
+  editor.feed({Utils::Input::KeyKind::Backspace, 0}, &line); // clamped
   EXPECT_TRUE(editor.buffer().empty());
   EXPECT_EQ(editor.cursor(), 0u);
 }
@@ -979,7 +985,7 @@ TEST(KeyDecoderTest, LoneEscapeSurvives) {
   std::vector<Utils::Input::KeyEvent> out;
   const uint8_t esc = 0x1B;
   decoder.feed(&esc, 1, &out);
-  EXPECT_TRUE(out.empty());  // held for a possible CSI follow-up.
+  EXPECT_TRUE(out.empty()); // held for a possible CSI follow-up.
   decoder.flush(&out);
   ASSERT_EQ(out.size(), 1u);
   EXPECT_EQ(out[0].kind, Utils::Input::KeyKind::Escape);
@@ -988,7 +994,7 @@ TEST(KeyDecoderTest, LoneEscapeSurvives) {
 TEST(KeyDecoderTest, MultibyteKeptWhole) {
   Utils::Input::KeyDecoder decoder;
   std::vector<Utils::Input::KeyEvent> out;
-  const uint8_t text[] = {'a', 0xC3, 0xA9};  // 'a' + U+00E9.
+  const uint8_t text[] = {'a', 0xC3, 0xA9}; // 'a' + U+00E9.
   decoder.feed(text, sizeof(text), &out);
   ASSERT_EQ(out.size(), 2u);
   EXPECT_EQ(out[1].ch, static_cast<char32_t>(0xE9));
@@ -1013,13 +1019,12 @@ TEST(KeyDecoderTest, CsiSplitAcrossChunksMatchesWholeChunk) {
     Utils::Input::KeyDecoder decoder;
     std::vector<Utils::Input::KeyEvent> events;
     decoder.feed(arrow, split, &events);
-    EXPECT_TRUE(events.empty()) << "emitted before completion at split "
-                               << split;
+    EXPECT_TRUE(events.empty())
+        << "emitted before completion at split " << split;
     decoder.feed(arrow + split, sizeof(arrow) - split, &events);
     EXPECT_TRUE(events.empty()) << "CSI not ignored at split " << split;
     decoder.flush(&events);
-    EXPECT_TRUE(events.empty()) << "flush invented an event at split "
-                                << split;
+    EXPECT_TRUE(events.empty()) << "flush invented an event at split " << split;
   }
 }
 
@@ -1086,8 +1091,8 @@ TEST(KeyDecoderTest, ConsecutiveSplitSequences) {
 TEST(WindowsKeyMappingTest, UnmappedSpecialKeyInsertsNothing) {
   Utils::Input::KeyEvent event{Utils::Input::KeyKind::Char, 0xFFFF};
   EXPECT_FALSE(Utils::Input::windows_key_event(0, &event));
-  EXPECT_FALSE(Utils::Input::windows_key_event(9, &event));   // Tab: unmapped.
-  EXPECT_FALSE(Utils::Input::windows_key_event(31, &event));  // unit separator.
+  EXPECT_FALSE(Utils::Input::windows_key_event(9, &event));  // Tab: unmapped.
+  EXPECT_FALSE(Utils::Input::windows_key_event(31, &event)); // unit separator.
 }
 
 TEST(WindowsKeyMappingTest, MappedKeysAndText) {
@@ -1142,8 +1147,8 @@ int main(int argc, char **argv) {
 namespace {
 
 std::filesystem::path fresh_temp_dir(const std::string &name) {
-  auto dir = std::filesystem::temp_directory_path() /
-             ("agentware_test_" + name);
+  auto dir =
+      std::filesystem::temp_directory_path() / ("agentware_test_" + name);
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir);
   return dir;
@@ -1253,8 +1258,7 @@ TEST(MemoryRoundTrip, SaveAndReload) {
   }
   Data::MemoryManager reader(memfile);
   auto loaded = reader.load_memory();
-  auto joined =
-      std::accumulate(loaded.begin(), loaded.end(), std::string());
+  auto joined = std::accumulate(loaded.begin(), loaded.end(), std::string());
   EXPECT_NE(joined.find("first"), std::string::npos);
   EXPECT_NE(joined.find("second"), std::string::npos);
 
@@ -1296,8 +1300,7 @@ TEST(ValidatorGates, SearchQueryRules) {
   EXPECT_FALSE(Utils::Validator::validate_search_query("").is_valid);
   EXPECT_TRUE(Utils::Validator::validate_search_query("hello").is_valid);
 
-  auto long_q =
-      Utils::Validator::validate_search_query(std::string(1001, 'x'));
+  auto long_q = Utils::Validator::validate_search_query(std::string(1001, 'x'));
   EXPECT_TRUE(long_q.is_valid);
   EXPECT_FALSE(long_q.warnings.empty());
 
@@ -1375,12 +1378,11 @@ void make_executable_script(const std::filesystem::path &p) {
     f << "#!/bin/sh\nexit 0\n";
   }
   std::error_code ec;
-  std::filesystem::permissions(
-      p,
-      std::filesystem::perms::owner_exec |
-          std::filesystem::perms::group_exec |
-          std::filesystem::perms::others_exec,
-      ec);
+  std::filesystem::permissions(p,
+                               std::filesystem::perms::owner_exec |
+                                   std::filesystem::perms::group_exec |
+                                   std::filesystem::perms::others_exec,
+                               ec);
   // Best effort: Windows has no exec bit, and failure here must not fail the
   // test for unrelated reasons. What matters is the file existing.
 }
@@ -1750,10 +1752,8 @@ TEST(SecretRedaction, RemovesAuthKeyValue) {
 }
 
 TEST(SecretRedaction, LeavesOtherCommandsIntact) {
-  EXPECT_EQ(Core::redact_secrets("/auth status"),
-            "/auth status");
-  EXPECT_EQ(Core::redact_secrets("/auth providers"),
-            "/auth providers");
+  EXPECT_EQ(Core::redact_secrets("/auth status"), "/auth status");
+  EXPECT_EQ(Core::redact_secrets("/auth providers"), "/auth providers");
   EXPECT_EQ(Core::redact_secrets("read:notes.txt"), "read:notes.txt");
   EXPECT_EQ(Core::redact_secrets("!echo hello"), "!echo hello");
   // A provider with no key value is left as written.
@@ -1907,7 +1907,9 @@ TEST(DockerProbeTest, TimeoutLeavesNoSurvivingDescendant) {
     stub << "#!/bin/sh\n"
             "if [ \"$1\" = \"info\" ]; then\n"
             "  (sleep 97) &\n"
-            "  echo $! > \"" << pid_file.string() << "\"\n"
+            "  echo $! > \""
+         << pid_file.string()
+         << "\"\n"
             "  sleep 97\n"
             "fi\n"
             "exit 1\n";
@@ -1936,8 +1938,8 @@ TEST(DockerProbeTest, TimeoutLeavesNoSurvivingDescendant) {
     survived = true;
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
-  EXPECT_FALSE(survived)
-      << "grandchild " << grandchild << " outlived the probe timeout";
+  EXPECT_FALSE(survived) << "grandchild " << grandchild
+                         << " outlived the probe timeout";
 #endif
 }
 
@@ -1978,9 +1980,13 @@ TEST(SandboxBoundedTest, TimeoutLeavesNoProcessTreeBehind) {
             // Export this shell's own pid, which is the direct child the
             // agent forked, so the assertions below cover the whole tree and
             // not just one member of it.
-            "echo $$ > \"" << child_pid_file.string() << "\"\n"
+            "echo $$ > \""
+         << child_pid_file.string()
+         << "\"\n"
             "(sleep 89) &\n"
-            "echo $! > \"" << pid_file.string() << "\"\n"
+            "echo $! > \""
+         << pid_file.string()
+         << "\"\n"
             "sleep 89\n";
   }
   fs::permissions(dir / "bin" / "docker",
@@ -1996,18 +2002,18 @@ TEST(SandboxBoundedTest, TimeoutLeavesNoProcessTreeBehind) {
   config.name = "test-tree-leak";
   config.image = "ubuntu:22.04";
   config.timeout_seconds = 2;
-  ASSERT_TRUE(
-      Services::SandboxService::create_sandbox_config("test-tree-leak", config));
+  ASSERT_TRUE(Services::SandboxService::create_sandbox_config("test-tree-leak",
+                                                              config));
 
   auto start = std::chrono::steady_clock::now();
   Services::SandboxResult result =
       Services::SandboxService::execute_command("echo hi", "test-tree-leak");
   auto elapsed = std::chrono::steady_clock::now() - start;
 
-  EXPECT_TRUE(result.timed_out)
-      << "error_message: [" << result.error_message << "] exit: "
-      << result.exit_code;
-  EXPECT_TRUE(Services::SandboxService::remove_sandbox_config("test-tree-leak"));
+  EXPECT_TRUE(result.timed_out) << "error_message: [" << result.error_message
+                                << "] exit: " << result.exit_code;
+  EXPECT_TRUE(
+      Services::SandboxService::remove_sandbox_config("test-tree-leak"));
   // The bound must still hold; the grace path is what used to extend this.
   EXPECT_LT(elapsed, std::chrono::seconds(45));
 
@@ -2184,7 +2190,8 @@ TEST(LayoutTest, HelpPreservesCompleteCommandSyntax) {
     const std::string joined = reflow(Utils::UI::help_lines(width));
     for (const auto &command : commands) {
       EXPECT_NE(joined.find(command), std::string::npos)
-          << "width=" << width << ": command was truncated or lost: " << command;
+          << "width=" << width
+          << ": command was truncated or lost: " << command;
     }
   }
 }
@@ -2213,9 +2220,9 @@ TEST(LayoutTest, HelpNarrowsWithoutLosingEntries) {
   // command present at width 120 must still be present at width 40.
   const std::string wide_text = reflow(wide);
   const std::string narrow_text = reflow(narrow);
-  for (const char *section : {"Files", "Sessions", "Project", "Web and GitHub",
-                              "Checkpoints", "Settings and diagnostics",
-                              "System"}) {
+  for (const char *section :
+       {"Files", "Sessions", "Project", "Web and GitHub", "Checkpoints",
+        "Settings and diagnostics", "System"}) {
     EXPECT_NE(narrow_text.find(section), std::string::npos)
         << "section lost at width 40: " << section;
   }
@@ -2225,8 +2232,7 @@ TEST(LayoutTest, HelpNarrowsWithoutLosingEntries) {
 
 TEST(LayoutTest, StatusFitsOrWrapsWithContinuationIndent) {
   for (int width : {40, 60, 80, 120}) {
-    const auto lines =
-        Utils::UI::status_lines(width, "Offline", "llama3.2:3b");
+    const auto lines = Utils::UI::status_lines(width, "Offline", "llama3.2:3b");
     for (const auto &line : lines) {
       EXPECT_LE(static_cast<int>(line.size()), width)
           << "width=" << width << ": status line too long: [" << line << "]";
