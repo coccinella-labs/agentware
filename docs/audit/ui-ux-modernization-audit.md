@@ -84,7 +84,7 @@ After (plain-text mode):
 ```
 Agentware  |  Offline: llama3.2:3b
 Type a question, `help`, or `/help`.  `exit` quits.
-> 
+>
 ```
 
 Optional detail should be requested by `/status`, where every entry reports
