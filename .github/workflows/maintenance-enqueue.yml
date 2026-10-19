@@ -1,0 +1,205 @@
+name: Enqueue report for merge
+
+# Second half of the daily maintenance flow, split out on purpose.
+#
+# maintenance.yml prepares the report pull request and stops. GitHub holds the
+# workflow runs of a pull request created by github-actions[bot] until a user
+# with write access approves them, so the three required status contexts on the
+# report head do not exist until a human approves. Enqueueing before that fails
+# with "required status checks are expected".
+#
+# This workflow is therefore dispatched by a maintainer after approval. It
+# enqueues only when the required contexts are green on the exact head that was
+# prepared, and it reports which of the possible states it found.
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: >-
+          Exact head SHA of the report pull request to enqueue. Copy it from the
+          prepared-head comment on that pull request.
+        required: true
+        type: string
+      pr_number:
+        description: >-
+          Report pull request number. Leave blank to use the open
+          maintenance/daily pull request.
+        required: false
+        type: string
+
+# Two dispatches racing could both pass the "already queued" check and each
+# create an entry, so they are serialised.
+concurrency:
+  group: enqueue-report
+  cancel-in-progress: false
+
+permissions:
+  # Mirrors the prepare workflow's token shape, which previously reached the
+  # enqueue mutation's validation layer. Whether this token is permitted to
+  # complete an enqueue is not demonstrated. If it is refused, that is reported
+  # as a permission failure rather than blamed on queue timing.
+  contents: write
+  pull-requests: write
+
+jobs:
+  enqueue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BRANCH: maintenance/daily
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+    steps:
+      - name: Resolve the report pull request
+        id: pr
+        run: |
+          pr_number="${{ inputs.pr_number }}"
+          if [ -z "$pr_number" ]; then
+            pr_number=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open \
+              --json number --jq '.[0].number // empty')
+          fi
+          if [ -z "$pr_number" ]; then
+            echo "::error::no open report pull request for $BRANCH; nothing to enqueue"
+            exit 1
+          fi
+          state=$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json state --jq .state)
+          if [ "$state" != "OPEN" ]; then
+            echo "::error::report pull request #$pr_number is $state, not open; nothing to enqueue"
+            exit 1
+          fi
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+
+      - name: Reject a stale dispatch
+        # A stale dispatch would enqueue a revision no human reviewed, so the
+        # head must equal the supplied sha exactly. There is no retry against a
+        # newer head: prepare again and dispatch again instead.
+        run: |
+          head_oid=$(gh pr view "${{ steps.pr.outputs.pr_number }}" --repo "$GITHUB_REPOSITORY" \
+            --json headRefOid --jq .headRefOid)
+          echo "expected: $EXPECTED_SHA"
+          echo "actual:   $head_oid"
+          if [ "$head_oid" != "$EXPECTED_SHA" ]; then
+            echo "::error::stale dispatch: the pull request head has moved since preparation."
+            echo "::error::Re-run the prepare workflow, then dispatch again with the fresh sha."
+            echo "::error::Refusing to enqueue a revision that was not reviewed."
+            exit 1
+          fi
+
+      - name: Note an existing queue entry
+        id: queue
+        run: |
+          pr_id=$(gh pr view "${{ steps.pr.outputs.pr_number }}" --repo "$GITHUB_REPOSITORY" \
+            --json id --jq .id)
+          echo "pr_id=$pr_id" >> "$GITHUB_OUTPUT"
+          # A pull request already in the queue must not be enqueued again. The
+          # mutation would be refused or duplicate the entry, and either way the
+          # run would go red for no real reason.
+          queued=$(gh api graphql -f query='
+            query($pr: ID!) {
+              node(id: $pr) { ... on PullRequest { mergeQueueEntry { id state } } }
+            }' -f pr="$pr_id" --jq '.data.node.mergeQueueEntry.id // empty')
+          if [ -n "$queued" ]; then
+            echo "already_queued=true" >> "$GITHUB_OUTPUT"
+            echo "The report pull request is already in the merge queue ($queued)."
+            echo "Reporting success and leaving it alone."
+          else
+            echo "already_queued=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Classify the required status contexts
+        id: checks
+        if: steps.queue.outputs.already_queued == 'false'
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_SHA/check-runs?per_page=100" > checks.json
+          overall=success
+          blocked=""
+          for name in "lint" "build (ubuntu, debug)" "build (windows, release)"; do
+            # A context counts as successful when some check run with that name
+            # succeeded. A duplicate or cancelled run of the same name must not
+            # turn a green context red.
+            #
+            # A context that completed without a success reports its actual
+            # conclusion, or the set of them, instead of a single flattened
+            # label. A timeout is then reported as a timeout.
+            state=$(jq -r --arg n "$name" '
+              [.check_runs[] | select(.name == $n)]
+              | if length == 0 then "absent"
+                elif any(.conclusion == "success") then "success"
+                elif any(.status != "completed") then "pending"
+                else ([.[] | select(.status == "completed" and .conclusion != "success")
+                       | .conclusion] | unique | join("+")) end' checks.json)
+            echo "$name: $state"
+            if [ "$state" = "absent" ] && [ "$overall" = "success" ]; then
+              overall=absent
+            fi
+            if [ "$state" = "pending" ] && [ "$overall" = "success" ]; then
+              overall=pending
+            fi
+            # Every completed non-success outcome blocks the enqueue. The set is
+            # deduplicated so two timeouts read as "timed_out", not twice over.
+            case "$state" in
+              success|absent|pending) ;;
+              *)
+                case "+$blocked+" in
+                  *"+$state+"*) ;;
+                  *) blocked="${blocked:+$blocked+}$state" ;;
+                esac
+                ;;
+            esac
+          done
+          if [ -n "$blocked" ]; then
+            overall="$blocked"
+          fi
+          echo "required_contexts=$overall" >> "$GITHUB_OUTPUT"
+
+      - name: Enqueue, or stop and say why
+        if: steps.queue.outputs.already_queued == 'false'
+        run: |
+          case "${{ steps.checks.outputs.required_contexts }}" in
+            success)
+              ;;
+            absent)
+              echo "::error::required contexts are absent on $EXPECTED_SHA."
+              echo "::error::The report pull request's runs are probably still held pending approval."
+              echo "::error::Approve them, wait for the checks to pass, then dispatch again."
+              exit 1
+              ;;
+            pending)
+              echo "::error::required contexts are still running on $EXPECTED_SHA."
+              echo "::error::Wait for them to finish, then dispatch again."
+              exit 1
+              ;;
+            *)
+              # Success, absent and pending are handled above. Everything else
+              # is one or more completed non-success outcomes, and the value is
+              # printed verbatim so the actual conclusion is visible.
+              echo "::error::required contexts are not successful on $EXPECTED_SHA."
+              echo "::error::reported outcomes: ${{ steps.checks.outputs.required_contexts }}"
+              echo "::error::Every non-success outcome blocks. Remediation is needed first."
+              exit 1
+              ;;
+          esac
+
+          resp=$(gh api graphql -f query='
+            mutation($pr: ID!, $oid: GitObjectID!) {
+              enqueuePullRequest(input: {pullRequestId: $pr, expectedHeadOid: $oid}) {
+                mergeQueueEntry { id position state }
+              }
+            }' -f pr="${{ steps.queue.outputs.pr_id }}" -f oid="$EXPECTED_SHA" 2>&1) || true
+          printf '%s\n' "$resp"
+
+          if printf '%s' "$resp" | grep -q 'mergeQueueEntry'; then
+            echo "Enqueued the report pull request at $EXPECTED_SHA."
+          elif printf '%s' "$resp" | grep -qiE 'forbidden|resource not accessible|not permitted'; then
+            echo "::error::the workflow token is not permitted to enqueue."
+            echo "::error::This is a token permission failure, not a queue timing failure."
+            exit 1
+          elif printf '%s' "$resp" | grep -qi 'required status check'; then
+            echo "::error::the merge queue still expects required status checks on this head."
+            echo "::error::The contexts this run saw are not the ones the queue requires."
+            exit 1
+          else
+            echo "::error::the enqueue mutation failed and the response is not a permission denial."
+            echo "::error::Inspect the raw response above before retrying."
+            exit 1
+          fi
