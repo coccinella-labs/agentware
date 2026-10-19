@@ -1,8 +1,8 @@
 # Dependency Wiring and Reachability Report
 
-**Target:** Agentware v0.2.0 (`aa6c72ee`)  
-**Audit Scope:** Codebase-wide symbol reachability, dependency injection, and orphaned/dead paths  
-**Verification Method:** Static call graph analysis, source code grepping, linker configuration review  
+**Target:** Agentware v0.2.0 (`aa6c72ee`)
+**Audit Scope:** Codebase-wide symbol reachability, dependency injection, and orphaned/dead paths
+**Verification Method:** Static call graph analysis, source code grepping, linker configuration review
 
 ---
 

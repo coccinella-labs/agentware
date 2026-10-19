@@ -1,9 +1,9 @@
 # End-to-End User Journey Audit Results
 
-**Target:** Agentware v0.2.0 (`aa6c72ee`)  
-**Audit Model:** Vertical Slice End-to-End Journey Verification  
-**Verification Date:** 2026-10-11  
-**Operating System:** macOS 27.0.1 (Darwin 26.0.0 arm64)  
+**Target:** Agentware v0.2.0 (`aa6c72ee`)
+**Audit Model:** Vertical Slice End-to-End Journey Verification
+**Verification Date:** 2026-10-11
+**Operating System:** macOS 27.0.1 (Darwin 26.0.0 arm64)
 **Execution Context:** Hermetic temp directories, piped stdin, automated test runners (`ctest`, `main_test`, `remediation_probes.sh`)
 
 ---
