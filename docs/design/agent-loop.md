@@ -58,7 +58,9 @@ user prompt
   return is **treated as data, never as instructions**. This includes
   model-side: observations from these tools are fed back as quoted,
   non-executable context only (the assistant-output-only rule applies
-  to them symmetrically).
+  to them symmetrically). Fetched and search content is stored in
+  memory as quoted data with a clear untrusted-data marker; it is never
+  promoted to instructions, system context, or tool input.
 - **Bash defaults to sandbox.** Model-initiated `cmd:` dispatches
   through the sandbox first exactly like a user-initiated command;
   the existing host-with-consent fallback applies.
@@ -79,6 +81,14 @@ the native walk in `search_service.cpp`) is the first registry-native
 addition.
 
 ## Tool call protocol
+
+Recognition rule: a tool call is recognized only when the entire
+assistant message is a single JSON object, or when the message contains
+exactly one tagged fenced code block whose body is a single JSON
+object. JSON that appears inside prose, examples, or quoted snippets
+never executes. The parser validates the whole message shape first and
+rejects anything that is not one of those two forms before looking at
+fields.
 
 The assistant emits exactly one JSON object, either bare or in the
 first fenced code block of the reply:
@@ -131,6 +141,15 @@ or, when blocked on the user:
 - Validation failure (path, pattern, args): observation states the
   validator's message verbatim; the model may retry within the cap.
 - Cancelled consents: observation says so; no partial state.
+- Per-tool timeout: each tool call runs under a fixed timeout (default
+  30s, configurable). When it trips, the tool is terminated, the
+  partial output captured so far is returned as the observation, and the
+  model is told `tool timed out after Ns; partial output above`. The
+  model may retry or move on within the cap.
+- Total observation budget: the cumulative size of all observations in
+  one user request is capped (default 64 KiB). When the budget trips,
+  further tool calls are refused with `observation budget exhausted;
+  summarize what you have`, and the loop ends with a final summary.
 - The hard turn cap ends even healthy loops, with a final summary
   from the model; the UI renders the trace exactly like manual tool
   use (`Tool(args)` + result blocks), so engineering-loop output
@@ -157,6 +176,15 @@ though the user-facing command stays ungated as today.
 Resolved alongside: turn cap = 8 per user request, configurable;
 `fetch:` / `search:` auto-run as read-only with their results treated
 as untrusted data.
+
+Consent and TTY policy (approved): mutating tools on the model-call
+surface reuse the existing consent gate (`y/N`). When stdin is not a
+TTY, mutating tools are **denied** rather than prompted; the loop
+never reads consent answers from piped chat input, so a non-interactive
+run cannot be driven into a mutating action by crafted input. The
+denial is returned to the model as an observation
+(`consent denied: no TTY`) and counts as a turn. Read-only tools are
+unaffected and auto-run in non-interactive mode.
 
 ## Plan step
 
