@@ -1,7 +1,8 @@
 #include "ai_service.h"
 #include "agent_mode.h"
-#include "web_service.h"
 #include "config.h"
+#include "tool_registry.h"
+#include "web_service.h"
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -107,43 +108,21 @@ nlohmann::json AIService::create_standard_payload(const std::string &model,
 
 nlohmann::json AIService::create_payload(const std::string &user_input,
                                          const std::string &context) {
+  Core::register_all_tools();
+  const std::string tool_section =
+      Core::ToolRegistry::instance().render_prompt_section();
+
   std::string system_prompt =
       "You are an advanced AI agent with comprehensive codebase analysis and "
-      "development capabilities.\n\n"
-      "BASIC COMMANDS:\n"
-      "• search:query - Search the web for information\n"
-      "• cmd:command - Execute shell commands safely\n"
-      "• read:filename - Read file contents\n"
-      "• read:filename:start:count - Read specific line ranges from files\n"
-      "• write:filename content - Write content to files\n\n"
-      "ADVANCED FILE OPERATIONS:\n"
-      "• replace:filename:old_text:new_text[:expected_count] - Replace text in "
-      "files with precision\n"
-      "• grep:pattern[:directory[:file_filter]] - Search for patterns in files "
-      "and directories\n\n"
-      "CODEBASE ANALYSIS:\n"
-      "• analyze:path - Analyze codebase structure, file types, and project "
-      "configuration\n"
-      "• components:path - Find main components and their relationships\n"
-      "• todos:path - Find all task comments in codebase\n"
-      "• tree:path - Display directory tree structure\n\n"
-      "GIT INTEGRATION:\n"
-      "• git:log - Show recent git commit history\n"
-      "• git:status - Show git working directory status\n"
-      "• git:analyze - Comprehensive git repository analysis\n\n"
-      "MEMORY MANAGEMENT:\n"
-      "• remember:fact - Save important facts to persistent global memory\n"
-      "• memory - View stored global memories\n"
-      "• clear - Clear current session memory\n"
-      "• forget - Clear all global memories\n\n"
-      "CAPABILITIES:\n"
-      "- Understand codebase structure and relationships\n"
-      "- Analyze git history and track changes\n"
-      "- Find and prioritize task comments\n"
-      "- Advanced text search and replacement with context validation\n"
-      "- Structured memory system for facts and preferences\n"
-      "- File operations with safety checks and path validation\n"
-      "- Enhanced error handling and user feedback\n\n"
+      "development capabilities.\n\n" +
+      tool_section + "\n" + "CAPABILITIES:\n" +
+      "- Understand codebase structure and relationships\n" +
+      "- Analyze git history and track changes\n" +
+      "- Find and prioritize task comments\n" +
+      "- Advanced text search and replacement with context validation\n" +
+      "- Structured memory system for facts and preferences\n" +
+      "- File operations with safety checks and path validation\n" +
+      "- Enhanced error handling and user feedback\n\n" +
       "When users ask about codebase analysis, use analyze: or components: "
       "commands.\n"
       "For git-related questions, use git: commands.\n"

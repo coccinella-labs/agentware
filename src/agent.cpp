@@ -4,6 +4,7 @@
 #include "checkpoint_service.h"
 #include "codebase_service.h"
 #include "command_router.h"
+#include "search_service.h"
 #include "command_service.h"
 #include "config.h"
 #include "context_service.h"
@@ -607,6 +608,41 @@ void Agent::handle_direct_command(const std::string &input) {
       }
     }
     record_interaction(*memory_, "grep:" + pattern, result);
+  } else if (Core::has_prefix_ci(input, "list:")) {
+    // Format: list:path[:glob]  (read-only directory/file listing)
+    tool = "List";
+    std::string params = trim_copy(input.substr(5));
+    std::string dir = ".";
+    std::string glob_pat = "*";
+    size_t colon = params.find(':');
+    if (colon != std::string::npos) {
+      dir = trim_copy(params.substr(0, colon));
+      if (dir.empty())
+        dir = ".";
+      glob_pat = trim_copy(params.substr(colon + 1));
+      if (glob_pat.empty())
+        glob_pat = "*";
+    } else if (!params.empty()) {
+      dir = params;
+    }
+    tool_args = dir;
+    auto access = Utils::Validator::validate_file_access(dir);
+    if (!access.is_valid) {
+      result = "Error: " + access.error_message;
+    } else {
+      auto caps = Services::detect_search_capabilities();
+      auto files = Services::find_files(caps, dir, glob_pat, 200);
+      if (files.empty()) {
+        result = "No entries found in: " + dir;
+      } else {
+        result = "Entries in " + dir + " (" + glob_pat + "):\n";
+        for (const auto &f : files) {
+          result += f + "\n";
+        }
+        result += "(" + std::to_string(files.size()) + " entries)";
+      }
+    }
+    record_interaction(*memory_, "list:" + dir, result);
   } else if (Core::has_prefix_ci(input, "remember:")) {
     std::string fact = trim_copy(input.substr(9));
     record_global_fact(*memory_, fact);
@@ -852,7 +888,7 @@ void Agent::handle_direct_command(const std::string &input) {
              "'.\n"
              "Known commands: search:, cmd:, read:, write:, replace:, "
              "grep:, git:, github:, analyze:, components:, todos:, "
-             "tree:, remember: (plus bare 'memory', 'forget', 'clear')";
+             "tree:, list:, remember: (plus bare 'memory', 'forget', 'clear')";
   }
 
   if (!presented && !tool.empty()) {
