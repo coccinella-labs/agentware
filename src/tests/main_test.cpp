@@ -8,6 +8,7 @@
 #include "sandbox_service.h"
 #include "search_service.h"
 #include "theme_service.h"
+#include "tool_registry.h"
 #include "ui.h"
 #include "validation.h"
 #include "version.h"
@@ -2379,4 +2380,42 @@ TEST(LayoutTest, PromptBodyExcludesTrailingSpace) {
   const auto parts = Utils::UI::prompt_lines(80, "Mode (default 2): ");
   ASSERT_EQ(parts.size(), 1u);
   EXPECT_EQ(parts[0].back(), ':');
+}
+
+TEST(ToolRegistryTest, RegisterAndFind) {
+  Core::register_all_tools();
+  const Core::ToolSpec *spec = Core::ToolRegistry::instance().find("list:");
+  ASSERT_NE(spec, nullptr);
+  EXPECT_EQ(spec->name, "list:");
+}
+
+TEST(ToolRegistryTest, FindUnknownReturnsNull) {
+  Core::register_all_tools();
+  EXPECT_EQ(Core::ToolRegistry::instance().find("nope:"), nullptr);
+  EXPECT_EQ(Core::ToolRegistry::instance().find(""), nullptr);
+}
+
+TEST(ToolRegistryTest, MatchPrefixCaseInsensitive) {
+  Core::register_all_tools();
+  EXPECT_NE(Core::ToolRegistry::instance().match_prefix("LIST:."), nullptr);
+  EXPECT_NE(Core::ToolRegistry::instance().match_prefix("List:."), nullptr);
+  EXPECT_NE(Core::ToolRegistry::instance().match_prefix("list:."), nullptr);
+  EXPECT_EQ(Core::ToolRegistry::instance().match_prefix("nope:."), nullptr);
+}
+
+TEST(ToolRegistryTest, RenderPromptSectionContainsAllTools) {
+  Core::register_all_tools();
+  std::string section = Core::ToolRegistry::instance().render_prompt_section();
+  EXPECT_FALSE(section.empty());
+  for (const auto &t : Core::ToolRegistry::instance().tools()) {
+    EXPECT_NE(section.find(t.name), std::string::npos)
+        << "missing tool in prompt section: " << t.name;
+  }
+}
+
+TEST(ToolRegistryTest, KnownNamesContainsList) {
+  Core::register_all_tools();
+  std::string names = Core::ToolRegistry::instance().known_names();
+  EXPECT_NE(names.find("list:"), std::string::npos);
+  EXPECT_NE(names.find("read:"), std::string::npos);
 }
