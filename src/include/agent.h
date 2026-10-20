@@ -34,9 +34,6 @@ private:
   // Last result produced by handle_direct_command; read by the model tool-call
   // loop (PR-3) when running in silent mode.
   std::string last_command_result_;
-  // Set while a (possibly detached, timed-out) tool handler is still running.
-  // New tool calls are refused while this is true.
-  std::atomic<bool> tool_running_{false};
 
 public:
   // Move operations
@@ -56,7 +53,8 @@ public:
   // last_command_result_. Used by the model tool-call loop to avoid
   // data races when a tool times out and its thread is detached.
   void handle_direct_command(const std::string &input, bool silent = false,
-                            std::string *out_result = nullptr);
+                            std::string *out_result = nullptr,
+                            bool record = true);
   void handle_ai_chat(const std::string &input);
   // PR-3 tool-call seam helpers (flag-gated, default off).
   // Extracts a single JSON tool call from assistant text. Returns

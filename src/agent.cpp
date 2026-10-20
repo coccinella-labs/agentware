@@ -335,7 +335,8 @@ void Agent::process_user_input(const std::string &input) {
 }
 
 void Agent::handle_direct_command(const std::string &input, bool silent,
-                                 std::string *out_result) {
+                                 std::string *out_result,
+                                 bool record) {
   // Ensure the registry is populated before any metadata lookup (known_names,
   // match_prefix). Idempotent; safe to call on every command.
   Core::register_all_tools();
@@ -364,7 +365,7 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
         }
       }
       result = Services::WebService::search(query);
-      record_interaction(*memory_, "search:" + query, result);
+      if (record) record_interaction(*memory_, "search:" + query, result);
     }
   } else if (Core::has_prefix_ci(input, "cmd:")) {
     std::string command = trim_copy(input.substr(4));
@@ -380,14 +381,14 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
       std::getline(std::cin, confirm);
       if (confirm != "y" && confirm != "Y") {
         result = "Command cancelled by user";
-        record_interaction(*memory_, "cmd:" + command, result);
+        if (record) record_interaction(*memory_, "cmd:" + command, result);
         Utils::UI::print_tool_call(tool, tool_args);
         Utils::UI::print_tool_result(result);
         return;
       }
     }
     result = execute_routed_command(command);
-    record_interaction(*memory_, "cmd:" + command, result);
+    if (record) record_interaction(*memory_, "cmd:" + command, result);
   } else if (Core::has_prefix_ci(input, "read:")) {
     std::string params = trim_copy(input.substr(5));
     tool = "Read";
@@ -445,7 +446,7 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
         }
       }
     }
-    record_interaction(*memory_, "read:" + params, result);
+    if (record) record_interaction(*memory_, "read:" + params, result);
   } else if (Core::has_prefix_ci(input, "write:")) {
     // Format: write:filename content...
     tool = "Write";
@@ -474,10 +475,10 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
         } else {
           result = Services::FileService::write_file(filename, content);
         }
-        record_interaction(*memory_, "write:" + filename, result);
+        if (record) record_interaction(*memory_, "write:" + filename, result);
       } else {
         result = Services::FileService::write_file(filename, content);
-        record_interaction(*memory_, "write:" + filename, result);
+        if (record) record_interaction(*memory_, "write:" + filename, result);
       }
     } else {
       result = "Usage: write:filename content";
@@ -554,7 +555,7 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
           }
         }
       }
-      record_interaction(*memory_, "replace:" + filename, result);
+      if (record) record_interaction(*memory_, "replace:" + filename, result);
     } else {
       result = "Usage: replace:filename:old_text:new_text[:expected_count]";
     }
@@ -621,7 +622,7 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
         }
       }
     }
-    record_interaction(*memory_, "grep:" + pattern, result);
+    if (record) record_interaction(*memory_, "grep:" + pattern, result);
   } else if (Core::has_prefix_ci(input, "list:")) {
     // Format: list:path[:glob]  (read-only directory/file listing)
     tool = "List";
@@ -656,7 +657,7 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
         result += "(" + std::to_string(files.size()) + " entries)";
       }
     }
-    record_interaction(*memory_, "list:" + dir, result);
+    if (record) record_interaction(*memory_, "list:" + dir, result);
   } else if (Core::has_prefix_ci(input, "remember:")) {
     std::string fact = trim_copy(input.substr(9));
     record_global_fact(*memory_, fact);
@@ -682,7 +683,7 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
     } else {
       result = Services::CodebaseService::analyze_structure(path);
     }
-    record_interaction(*memory_, "analyze:" + path, result);
+    if (record) record_interaction(*memory_, "analyze:" + path, result);
   } else if (Core::has_prefix_ci(input, "components:")) {
     std::string path = trim_copy(input.substr(11));
     if (path.empty()) {
@@ -694,7 +695,7 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
     } else {
       result = Services::CodebaseService::find_main_components(path);
     }
-    record_interaction(*memory_, "components:" + path, result);
+    if (record) record_interaction(*memory_, "components:" + path, result);
   } else if (Core::has_prefix_ci(input, "todos:")) {
     std::string path = trim_copy(input.substr(6));
     if (path.empty()) {
@@ -714,7 +715,7 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
         }
       }
     }
-    record_interaction(*memory_, "todos:" + path, result);
+    if (record) record_interaction(*memory_, "todos:" + path, result);
   } else if (Core::has_prefix_ci(input, "git:")) {
     std::string params = trim_copy(input.substr(4));
     tool = "Git";
@@ -733,7 +734,7 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
     } else {
       result = "Usage: git:log, git:status, git:diff, git:analyze";
     }
-    record_interaction(*memory_, "git:" + params, result);
+    if (record) record_interaction(*memory_, "git:" + params, result);
   } else if (Core::has_prefix_ci(input, "tree:")) {
     std::string path = trim_copy(input.substr(5));
     if (path.empty()) {
@@ -745,7 +746,7 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
     } else {
       result = Services::CodebaseService::get_directory_tree(path, 3);
     }
-    record_interaction(*memory_, "tree:" + path, result);
+    if (record) record_interaction(*memory_, "tree:" + path, result);
   } else if (Core::has_prefix_ci(input, "github:")) {
     tool = "Github";
     tool_args = input.substr(7);
@@ -892,7 +893,7 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
       result = "Usage: github:repo:owner/repo, github:issues:owner/repo, "
                "github:health:owner/repo, github:threads:owner/repo:pr[:query]";
     }
-    record_interaction(*memory_, "github:" + params, result);
+    if (record) record_interaction(*memory_, "github:" + params, result);
   } else {
     // Recovery affordance: name what came in and what exists. The known
     // colon commands are listed so a near-miss prefix (case aside, which
@@ -1288,6 +1289,7 @@ void Agent::handle_ai_chat(const std::string &input) {
   int turns = 0;
   int retries = 0;
   constexpr int kRetryBudget = 3;
+  auto tool_running = std::make_shared<std::atomic<bool>>(false);
 
   while (true) {
     std::atomic<bool> done(false);
@@ -1448,7 +1450,7 @@ void Agent::handle_ai_chat(const std::string &input) {
     }
 
     // Refuse new tool calls while a timed-out handler is still running.
-    if (tool_running_.load()) {
+    if (tool_running->load()) {
       std::string obs = "previous tool still running; refusing new call";
       obs = truncate_observation(obs);
       current_input = quote_observation(obs);
@@ -1555,13 +1557,29 @@ void Agent::handle_ai_chat(const std::string &input) {
       }
     }
     auto result_ptr = std::make_shared<std::string>();
+    bool expected = false;
+    if (!tool_running->compare_exchange_strong(expected, true)) {
+      // Another handler is still running; refuse.
+      std::string obs = "previous tool still running; refusing new call";
+      obs = truncate_observation(obs);
+      current_input = quote_observation(obs);
+      ++turns;
+      Utils::UI::print_tool_call(spec->name, tool_name);
+      Utils::UI::print_tool_result(obs);
+      continue;
+    }
     bool timed_out = !Core::run_with_timeout(
         [&]() {
-          tool_running_.store(true);
           handle_direct_command(tool_input, /*silent=*/true, result_ptr.get());
-          tool_running_.store(false);
+          tool_running->store(false);
         },
         kToolTimeoutSec);
+    if (timed_out) {
+      // Thread is detached and may still be running; tool_running stays
+      // true until it finishes (see docs). New tool calls are refused.
+    } else {
+      tool_running->store(false);
+    }
     if (timed_out) {
       // Thread is detached and may still be running; tool_running_ stays
       // true until it finishes. New tool calls are refused meanwhile.
