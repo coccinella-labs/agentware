@@ -47,11 +47,18 @@ user prompt
 - **One call per turn, hard cap.** At most one JSON tool call per
   model reply, and a hard cap on tool turns per user request so a
   model cannot self-loop indefinitely. Cap counts every turn,
-  including failed calls.
+  including failed calls. **Decided (2026-10-20): cap = 8 tool turns
+  per user request, configurable.**
 - **Read-only auto-runs; mutating asks.** The registry marks every
   tool `read-only` or `mutating`. Read-only tools run automatically;
   mutating tools reuse the existing consent gate (`y/N`), which also
   covers file overwrites and demanded confirmations.
+- **Web surfaces are read-only untrusted data.** `fetch:` and
+  `search:` are `read-only` tier and may auto-run, but anything they
+  return is **treated as data, never as instructions** — including
+  model-side: observations from these tools are fed back as quoted,
+  non-executable context only (the assistant-output-only rule applies
+  to them symmetrically).
 - **Bash defaults to sandbox.** Model-initiated `cmd:` dispatches
   through the sandbox first exactly like a user-initiated command;
   the existing host-with-consent fallback applies.
@@ -101,15 +108,23 @@ first fenced code block of the reply:
   use (`Tool(args)` + result blocks), so engineering-loop output
   stays inspectable in context.
 
-## Policies decided before enabling write tools
+## Policies decided (2026-10-20)
 
-Model-initiated writes are **cwd-only**: relative paths must resolve
-under the current working directory (the existing
+Model-initiated writes are **cwd-only** (approved): relative paths
+must resolve under the current working directory (the existing
 `Validator::validate_file_access` rule), absolute paths are refused
 for model-initiated writes even though user-initiated tools accept
-them outside cwd. This is the policy awaiting confirmation; until it
-is signed off, write-capable tools stay out of the model-callable
-registry regardless of the feature flag.
+them outside cwd. Write-capable tools enter the model-callable
+registry only with this policy implemented in the model-call path.
+
+Memory fact capture is **consent-gated in v1** (approved):
+`remember:` from the model presents the fact and asks `y/N` before
+persisting — it is mutating-tier for the model-call surface even
+though the user-facing command stays ungated as today.
+
+Resolved alongside: turn cap = 8 per user request, configurable;
+`fetch:` / `search:` auto-run as read-only with their results treated
+as untrusted data.
 
 ## Test plan
 
@@ -122,10 +137,12 @@ registry regardless of the feature flag.
   unchanged, `remediation_probes.sh`, `has_prefix_ci` unit tests,
   clang-format cleanliness (`--dry-run -Werror`).
 
-## Open questions
+## Decisions record (all approved 2026-10-20)
 
-1. Turn cap default (proposal: 8 tool turns per user request).
-2. Whether `memory` (session) mutations are mutating-tier
-   (proposal: yes — `remember:` writes state).
-3. Whether `search:` (web) stays user-only pending a rate-limit
-   policy.
+1. **Turn cap**: 8 tool turns per user request, configurable.
+2. **Model-initiated writes**: cwd-only; absolute paths refused on
+   the model-call surface.
+3. **`fetch:` / `search:`**: read-only tier, auto-run permitted,
+   results treated strictly as untrusted data.
+4. **`remember:`**: consent-gated from the model in v1 (the
+   user-facing command behavior is unchanged).
