@@ -3,6 +3,7 @@
 
 # Build directories
 build/
+build-*/
 bin/
 lib/
 dist/
@@ -50,6 +51,8 @@ cmake-build-*/
 
 # Runtime data
 data/memory.txt
+data/checkpoints/
+data/conversations/
 data/*.log
 *.log
 src/tests/data/*.txt
