@@ -8,6 +8,12 @@ PORT="${PORT:-11499}"
 FAILURES=0
 CASES=0
 
+# Fixtures
+printf 'golden needle alpha\nsecond line\n' > hello.txt
+printf 'notes file with needle words\n' > notes.md
+printf 'API_KEY=supersecret\n' > .env
+git init -q . 2>/dev/null; git add -A 2>/dev/null; git -c user.email=t@t -c user.name=t commit -qm fixture 2>/dev/null || true
+
 run_case() {
   local name="$1" replies="$2" input="$3" expect="$4" extra="${5:-}"
   CASES=$((CASES + 1))
@@ -118,6 +124,12 @@ for t in '/auth' '/chat save' '/checkpoint' '/mcp' '/sandbox' '!echo'; do
   replies=$(printf '[{"tool":%s,"arguments":{}},"Done."]' "$(python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$t")")
   run_case "unknown-meta-$t" "$replies" "do it" "unknown tool $t"
 done
+
+# fetch: from the model is denied without a TTY (no consent read from pipe).
+run_case "fetch-no-tty"   '["{\"tool\":\"fetch\",\"arguments\":{\"url\":\"http://127.0.0.1:18093\"}}","Done."]'   "fetch page" "consent denied: no TTY"
+
+# grep must not leak secrets from .env even when it matches.
+run_case "grep-no-secret-leak"   '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"API_KEY\",\"directory\":\".\"}}","Done."]'   "grep api key" "No matches found"
 
 printf '\n%d/%d tool-loop golden cases passed\n'  "$((CASES - FAILURES))" "$CASES"
 if [ "$FAILURES" -ne 0 ]; then exit 1; fi
