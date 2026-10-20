@@ -249,11 +249,34 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Build architectures for macOS" FORCE)
     # Set deployment target based on environment
     if(DEFINED ENV{CI} OR DEFINED ENV{GITHUB_ACTIONS})
-        # Use compatible version for CI environments
+        # Use compatible version for CI environments; pinned so builds stay
+        # reproducible across runner image updates.
         set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum macOS version" FORCE)
     else()
-        # Use current system version to avoid linker warnings with Homebrew libraries
-        set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum macOS version" FORCE)
+        # Track the running system version (floored at 15.0) on dev machines:
+        # Homebrew rebuilds openssl@3 and zlib against each new macOS SDK, so
+        # a pinned target ends up below the dylibs' minimum and ld emits
+        # "building for macOS-15.0, but linking with dylib ... newer version"
+        # on every local link. (Comment and value previously disagreed; the
+        # comment's intent is what's implemented here.)
+        execute_process(
+            COMMAND sw_vers -productVersion
+            OUTPUT_VARIABLE _aw_macos_system_version
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        if(_aw_macos_system_version)
+            string(REGEX REPLACE "^([0-9]+\\.[0-9]+).*$" "\\1"
+                _aw_macos_system_version "${_aw_macos_system_version}")
+        endif()
+        if(_aw_macos_system_version MATCHES "^[0-9]+\\.[0-9]+$"
+            AND NOT _aw_macos_system_version VERSION_LESS 15.0)
+            set(CMAKE_OSX_DEPLOYMENT_TARGET "${_aw_macos_system_version}"
+                CACHE STRING "Minimum macOS version" FORCE)
+        else()
+            set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0"
+                CACHE STRING "Minimum macOS version" FORCE)
+        endif()
     endif()
 
     # Use Homebrew's OpenSSL on macOS/arm64
