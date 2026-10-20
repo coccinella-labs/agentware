@@ -3,9 +3,9 @@
 #include <string>
 
 #include "agent.h"
-#include "memory_manager.h"
 #include "ai_service.h"
 #include "config.h"
+#include "memory_manager.h"
 #include "ui.h"
 
 int main() {
@@ -24,7 +24,8 @@ int main() {
     // Run agent
     agent.run();
 
-    std::cout << "Agent run completed" << std::endl;
+    std::cout << Utils::Color::DIM << "Agent run completed"
+              << Utils::Color::RESET << std::endl;
 
   } catch (const std::exception &e) {
     std::cerr << Utils::Color::RED << "Fatal error: " << e.what()

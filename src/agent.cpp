@@ -1,26 +1,26 @@
 #include "agent.h"
-#include "memory_manager.h"
 #include "ai_service.h"
 #include "auth_service.h"
 #include "checkpoint_service.h"
 #include "codebase_service.h"
 #include "command_router.h"
 #include "command_service.h"
+#include "config.h"
 #include "context_service.h"
 #include "error_service.h"
 #include "file_service.h"
 #include "git_service.h"
 #include "github_service.h"
+#include "input_reader.h"
 #include "mcp_service.h"
+#include "memory_manager.h"
 #include "multi_file_service.h"
 #include "sandbox_service.h"
 #include "theme_service.h"
-#include "web_service.h"
-#include "config.h"
-#include "input_reader.h"
 #include "ui.h"
 #include "validation.h"
 #include "version.h"
+#include "web_service.h"
 
 // After the project headers: on Windows this pulls in <windows.h>, which
 // defines ERROR as 0 and would break enums in the headers above.
@@ -113,16 +113,31 @@ void Agent::run() {
       {Agent::Mode::MODE_LLAMA_LATEST, "llama3.2:latest"},
       {Agent::Mode::MODE_LLAMA_31, "llama3.1:latest"}};
 
-  // Show enhanced ready interface with system info and quick help
+  // Show the empty-state surface. Interactive terminals get the welcome
+  // card; pipes and logs keep the compact legacy banner.
   std::string mode_name = is_online_mode() ? "Online" : "Offline";
   std::string model_name =
       model_names.count(mode_) ? model_names[mode_] : "Unknown";
-  Utils::UI::print_ready_interface(mode_name, model_name);
+  if (Utils::UI::interactive_output()) {
+    Utils::UI::print_welcome_panel(mode_name, model_name,
+                                   std::filesystem::current_path().string());
+  } else {
+    Utils::UI::print_ready_interface(mode_name, model_name);
+  }
 
   while (true) {
     // Single input boundary: modal editing only when explicitly opted in
-    // on an interactive stdin; everything else is plain getline.
+    // on an interactive stdin; everything else is plain getline. The
+    // full-width frame dresses the bottom prompt on an interactive
+    // terminal only; pipes and logs get the prompt alone.
+    const bool framed = Utils::UI::interactive_output();
+    if (framed) {
+      Utils::UI::print_input_frame_top();
+    }
     Utils::Input::ReadResult read = Utils::Input::read_prompt_line("> ");
+    if (framed) {
+      Utils::UI::print_input_frame_bottom();
+    }
     if (read.status != Utils::Input::ReadStatus::Line) {
       break; // EOF or error, matching the historical getline behavior.
     }
@@ -131,6 +146,11 @@ void Agent::run() {
     user_input = trim_copy(user_input);
     if (user_input.empty())
       continue;
+
+    // Echo what was submitted as the transcript's request line (the
+    // input frame already gave it a home; this gives the session a
+    // readable chronology). Pipes skip the echo.
+    Utils::UI::print_user_line(user_input);
 
     if (user_input == "exit" || user_input == "quit")
       break;
@@ -146,7 +166,7 @@ void Agent::run() {
     process_user_input(user_input);
   }
 
-  std::cout << "Goodbye\n";
+  std::cout << Utils::Color::DIM << "Goodbye\n" << Utils::Color::RESET;
 }
 
 void Agent::initialize_mode() {
@@ -309,9 +329,20 @@ void Agent::process_user_input(const std::string &input) {
 
 void Agent::handle_direct_command(const std::string &input) {
   std::string result;
+  // Tool-call presentation: each branch that has a natural tool name
+  // records it here; the shared emit tail renders the call and the
+  // result in the activity format. Branches without one keep plain
+  // output. A branch that already presented its complete block (header,
+  // change rendering, and result) sets presented and the tail stays
+  // quiet.
+  std::string tool;
+  std::string tool_args;
+  bool presented = false;
 
   if (input.rfind("search:", 0) == 0) {
     std::string query = trim_copy(input.substr(7));
+    tool = "Search";
+    tool_args = query;
     auto validation = Utils::Validator::validate_search_query(query);
     if (!validation.is_valid) {
       result = "Error: " + validation.error_message;
@@ -326,6 +357,8 @@ void Agent::handle_direct_command(const std::string &input) {
     }
   } else if (input.rfind("cmd:", 0) == 0) {
     std::string command = trim_copy(input.substr(4));
+    tool = "Bash";
+    tool_args = command;
     auto validation = Utils::Validator::validate_command_safe(command);
     if (!validation.warnings.empty()) {
       for (const auto &warning : validation.warnings) {
@@ -337,7 +370,8 @@ void Agent::handle_direct_command(const std::string &input) {
       if (confirm != "y" && confirm != "Y") {
         result = "Command cancelled by user";
         record_interaction(*memory_, "cmd:" + command, result);
-        std::cout << result << std::endl;
+        Utils::UI::print_tool_call(tool, tool_args);
+        Utils::UI::print_tool_result(result);
         return;
       }
     }
@@ -345,6 +379,8 @@ void Agent::handle_direct_command(const std::string &input) {
     record_interaction(*memory_, "cmd:" + command, result);
   } else if (input.rfind("read:", 0) == 0) {
     std::string params = trim_copy(input.substr(5));
+    tool = "Read";
+    tool_args = params;
     // Check if it has range parameters: read:filename:start:count
     size_t first_colon = params.find(':');
     if (first_colon != std::string::npos) {
@@ -401,9 +437,11 @@ void Agent::handle_direct_command(const std::string &input) {
     record_interaction(*memory_, "read:" + params, result);
   } else if (input.rfind("write:", 0) == 0) {
     // Format: write:filename content...
+    tool = "Write";
     size_t space_pos = input.find(' ', 6); // index 6 is safe for "write:"
     if (space_pos != std::string::npos) {
       std::string filename = trim_copy(input.substr(6, space_pos - 6));
+      tool_args = filename;
       std::string content = input.substr(space_pos + 1);
 
       // Enforce the access policy before the writability check, which can
@@ -435,7 +473,9 @@ void Agent::handle_direct_command(const std::string &input) {
     }
   } else if (input.rfind("replace:", 0) == 0) {
     // Format: replace:filename:old_text:new_text[:expected_count]
+    tool = "Replace";
     std::string params = input.substr(8);
+    tool_args = params;
     std::vector<std::string> parts;
     size_t pos = 0;
     size_t colon_pos;
@@ -451,8 +491,8 @@ void Agent::handle_direct_command(const std::string &input) {
     if (parts.size() >= 3) {
       const std::string &filename = parts[0];
       const std::string &old_text = parts[1];
-      const std::string &new_text = parts[2];
-      // Enforce the access policy before parsing or mutating.
+      const std::string &new_text =
+          parts[2]; // Enforce the access policy before parsing or mutating.
       auto access = Utils::Validator::validate_file_access(filename);
       if (!access.is_valid) {
         result = "Error: " + access.error_message;
@@ -467,6 +507,38 @@ void Agent::handle_direct_command(const std::string &input) {
           auto edit_result = Services::FileService::replace_text_in_file(
               filename, old_text, new_text, expected);
           result = edit_result.message;
+          // A completed replacement renders its actual before/after as
+          // a compact diff, capped so a pathological pattern cannot
+          // flood the screen; failure paths render as the message only
+          // at the shared tail.
+          const bool replaced =
+              !result.empty() && result.rfind("Error", 0) != 0;
+          if (replaced) {
+            presented = true;
+            Utils::UI::print_tool_call(tool, tool_args);
+            std::istringstream old_in(old_text);
+            std::istringstream new_in(new_text);
+            std::string line;
+            constexpr size_t kDiffCap = 6;
+            size_t shown = 0;
+            while (shown < kDiffCap && std::getline(old_in, line)) {
+              Utils::UI::print_diff_removed(line);
+              ++shown;
+            }
+            if (std::getline(old_in, line)) {
+              std::cout << Utils::Color::DIM << "- ... (more removed lines)"
+                        << Utils::Color::RESET << "\n";
+            }
+            shown = 0;
+            while (shown < kDiffCap && std::getline(new_in, line)) {
+              Utils::UI::print_diff_added(line);
+              ++shown;
+            }
+            if (std::getline(new_in, line)) {
+              std::cout << Utils::Color::DIM << "+ ... (more added lines)"
+                        << Utils::Color::RESET << "\n";
+            }
+          }
         }
       }
       record_interaction(*memory_, "replace:" + filename, result);
@@ -475,6 +547,7 @@ void Agent::handle_direct_command(const std::string &input) {
     }
   } else if (input.rfind("grep:", 0) == 0) {
     // Format: grep:pattern[:directory[:file_filter]]
+    tool = "Grep";
     std::string params = input.substr(5);
     std::vector<std::string> parts;
     size_t pos = 0;
@@ -490,6 +563,7 @@ void Agent::handle_direct_command(const std::string &input) {
     std::string pattern = parts[0];
     std::string directory = (parts.size() > 1) ? parts[1] : ".";
     std::string filter = (parts.size() > 2) ? parts[2] : "*";
+    tool_args = pattern;
 
     auto access = Utils::Validator::validate_file_access(directory);
     if (!access.is_valid) {
@@ -577,6 +651,8 @@ void Agent::handle_direct_command(const std::string &input) {
     record_interaction(*memory_, "todos:" + path, result);
   } else if (input.rfind("git:", 0) == 0) {
     std::string params = trim_copy(input.substr(4));
+    tool = "Git";
+    tool_args = params;
     std::string path = "."; // Default to current directory
 
     if (params.find("log") == 0) {
@@ -602,6 +678,8 @@ void Agent::handle_direct_command(const std::string &input) {
     }
     record_interaction(*memory_, "tree:" + path, result);
   } else if (input.rfind("github:", 0) == 0) {
+    tool = "Github";
+    tool_args = input.substr(7);
     std::string params = trim_copy(input.substr(7));
     auto parse_repo_spec = [](const std::string &repo_spec, std::string &owner,
                               std::string &repo) -> bool {
@@ -750,8 +828,15 @@ void Agent::handle_direct_command(const std::string &input) {
     result = "Unknown command";
   }
 
-  if (!result.empty()) {
-    std::cout << result << std::endl;
+  if (!presented && !tool.empty()) {
+    Utils::UI::print_tool_call(tool, tool_args);
+  }
+  if (!presented && !result.empty()) {
+    if (!tool.empty()) {
+      Utils::UI::print_tool_result(result);
+    } else {
+      std::cout << result << std::endl;
+    }
   }
 }
 
@@ -761,12 +846,12 @@ void Agent::handle_ai_chat(const std::string &input) {
   }
 
   if (!ai_service_->is_available()) {
-    std::cout << "AI service unavailable\n";
+    Utils::UI::print_error("AI service unavailable");
     return;
   }
 
   std::atomic<bool> done(false);
-  std::thread spin([&done]() { Utils::UI::spinner(done); });
+  std::thread spin([&done]() { Utils::UI::spinner(done, "Contemplating..."); });
 
   // Build enhanced context with hierarchical context
   std::string memory_context = memory_->get_context_string();
@@ -781,6 +866,7 @@ void Agent::handle_ai_chat(const std::string &input) {
   // commands instead of inventing them.
   full_context += "\n\n" + Services::search_tool_prompt(search_caps_);
 
+  const auto chat_started = std::chrono::steady_clock::now();
   std::string response = ai_service_->chat(input, full_context);
 
   done = true;
@@ -788,10 +874,15 @@ void Agent::handle_ai_chat(const std::string &input) {
     spin.join();
 
   if (!response.empty()) {
-    std::cout << response << std::endl;
+    const int elapsed =
+        static_cast<int>(std::chrono::duration_cast<std::chrono::seconds>(
+                             std::chrono::steady_clock::now() - chat_started)
+                             .count());
+    Utils::UI::print_turn_status(elapsed);
+    Utils::UI::print_response(response);
     record_interaction(*memory_, input, response);
   } else {
-    std::cout << "No response\n";
+    Utils::UI::print_warning("No response");
   }
 }
 
@@ -867,8 +958,9 @@ void Agent::handle_shell_command(const std::string &input) {
     }
   }
 
+  Utils::UI::print_tool_call("Bash", command);
   std::string result = execute_routed_command(command);
-  std::cout << result << std::endl;
+  Utils::UI::print_tool_result(result);
   record_interaction(*memory_, "!" + command, result);
 }
 
@@ -928,7 +1020,7 @@ void Agent::handle_meta_command(const std::string &input) {
   } else if (command.rfind("error ", 0) == 0) {
     handle_error_command(command.substr(6));
   } else if (command == "quit" || command == "exit") {
-    std::cout << "Goodbye!" << std::endl;
+    Utils::UI::print_info("Goodbye!");
     exit(0);
   } else {
     std::cout << "Unknown meta command: /" << command << std::endl;
@@ -1471,6 +1563,7 @@ void Agent::handle_web_fetch_command(const std::string &command) {
   }
 
   std::cout << "Fetching: " << url << std::endl;
+  Utils::UI::print_tool_call("Fetch", url);
 
   std::string result;
   if (format == "json") {
@@ -1505,7 +1598,8 @@ void Agent::handle_web_fetch_command(const std::string &command) {
                 << std::endl;
     } else {
       std::atomic<bool> done(false);
-      std::thread spin([&done]() { Utils::UI::spinner(done); });
+      std::thread spin(
+          [&done]() { Utils::UI::spinner(done, "Summarizing..."); });
 
       std::string context = memory_->get_context_string();
       std::string ai_prompt = "Summarize the following content:\n\n" + result;
@@ -1522,12 +1616,11 @@ void Agent::handle_web_fetch_command(const std::string &command) {
     }
   }
 
-  std::cout << result << std::endl;
+  Utils::UI::print_tool_result(result);
 
   // Save to memory for AI context
   record_interaction(*memory_, "/fetch " + command, result);
 }
-
 void Agent::handle_checkpoint_command(const std::string &command) {
   if (command.empty() || command == "help") {
     std::cout << "Checkpoint commands:" << std::endl;
