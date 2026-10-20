@@ -93,18 +93,19 @@ done
 
 # ----- Routing table (tool + args asserted per case) ------------------------
 
-# 1-2. search routing, both cases hit the same tool; network content not
-# asserted, only that the search: tool was selected with full query.
-expect "search-lowercase-routes" "search:cmake" "" 'Tool Search("cmake")'
-expect "search-capitalized-routes" "Search:cmake" "" 'Tool Search("cmake")'
+# NOTE: search: routing itself is covered by the HasPrefixCi unit tests and
+# the routing probe; the golden suite deliberately contains no search: case
+# because every invocation would attempt an outbound request and the suite's
+# contract is zero outbound requests. The capitalized-prefix behavior
+# (Search:) is pinned by the case-insensitive unit tests in main_test.cpp.
 
-# 3-6. read routing: plain, ranged, missing, restricted absolute path.
+# 1-3. read routing: plain, ranged, missing, restricted absolute path.
 expect "read-plain" "read:hello.txt" "" "golden needle alpha"
 expect "read-ranged" "read:hello.txt:1:1" "" 'Tool Read("hello.txt:1:1")'
 expect "read-missing" "read:missing.txt" "" "Error: File does not exist"
 expect "read-restricted-absolute" "read:/etc/passwd" "" 'Tool Read("/etc/passwd")'
 
-# 7-8. write (new file, no prompt) and replace. The replace success path
+# 4-5. write (new file, no prompt) and replace. The replace success path
 # renders the diff instead of a status message, so the effect is asserted
 # with a follow-up read in the same session.
 rm -f hello2.txt
@@ -112,53 +113,53 @@ expect "write-new-file" "write:hello2.txt golden fresh content" "" "written succ
 expect "replace-applies-diff" "replace:hello2.txt:fresh:verified" "read:hello2.txt" "golden verified content"
 expect "replace-missing-file" "replace:no-such-file.txt:a:b" "" "does not exist"
 
-# 9-12. grep routing incl. the audit's wrong-domain defect.
+# 6-9. grep routing incl. the audit's wrong-domain defect.
 expect "grep-match" "grep:needle:." "" "(via"
 expect "grep-filtered" "grep:needle:.:*.md" "" "(via"
 expect "grep-no-match" "grep:noneedle-xyz9:." "" "No matches"
 expect "grep-empty-pattern" "grep::" "" "grep pattern cannot be empty"
 expect "grep-capitalized" "Grep:needle:." "" 'Tool Grep("needle")'
 
-# 13-14. git routing, known + unknown subcommand.
+# 10-11. git routing, known + unknown subcommand.
 expect "git-status" "git:status" "" 'Tool Git("status")'
 expect "git-diff" "git:diff" "" "goldendiff"
 expect "git-bogus" "git:bogus" "" "Usage: git:"
 
-# 15-17. analysis family.
+# 12-14. analysis family.
 expect "analyze" "analyze:" "" "Codebase Structure Analysis"
 expect "components" "components:" "" "Main Components Analysis"
 expect "todos" "todos:." "" "task comments"
 expect "tree-fixture" "tree:." "" "hello.txt"
 
-# 18-19. memory bare verbs and fact. Separate invocations, so the fact
+# 15-16. memory bare verbs and fact. Separate invocations, so the fact
 # echo is what can be asserted deterministically here.
 expect "remember-fact" "remember:golden-fact" "" "Remembered: golden-fact"
 expect "remember-echo-lists-fact" "remember:golden-fact2" "" "golden-fact2"
 expect "forget-guard" "forget" "" "Global memory cleared"
 expect "clear-guard" "clear" "" "Session memory cleared"
 
-# 20. audit regression: prose with a colon must NOT wipe memory.
+# 17. audit regression: prose with a colon must NOT wipe memory.
 expect "clear-prose-guard" "clear: the screen please" "" "Unknown command"
 
-# 21. unknown command names what exists (recovery affordance).
+# 18. unknown command names what exists (recovery affordance).
 expect "unknown-suggestions" "nonsense-verb:" "" "Known commands:"
 
-# 22-24. shell paths: ! direct, cmd: with consent, canceled consent.
+# 19-21. shell paths: ! direct, cmd: with consent, canceled consent.
 expect "bang-shell" "!echo golden-shell-marker" "" "golden-shell-marker"
 expect "cmd-confirmed" "cmd:echo golden-cmd-marker" "y" "golden-cmd-marker"
 expect "cmd-cancelled" "cmd:echo golden-cancelled-marker" "n" "Command cancelled by user"
 
-# 25-26. meta commands. Hermetic HOME starts with no saves; assert the
+# 22-23. meta commands. Hermetic HOME starts with no saves; assert the
 # list behavior, not its population.
 expect "chat-list" "/chat list" "" "saved conversations"
 expect "meta-unknown" "/tokens-nonsense" "" "Unknown meta command"
 
-# 27-28. fetch over the local fixture server; multi-file tool.
+# 24-25. fetch over the local fixture server; multi-file tool.
 sleep 1
 expect "fetch-local" "/fetch http://127.0.0.1:18093 text" "" "golden-fetch-marker"
 expect "multi-file" "/files hello.txt notes.md" "" "Multi-file content"
 
-# 29-30. chat-only routes reach the AI interface and surface its failure
+# 26-27. chat-only routes reach the AI interface and surface its failure
 # honestly when no provider is running (offline mode, fails fast).
 expect "email-not-file-injection" "email me@example.com" "" "AI service"
 expect "at-reference-routes-chat" "@hello.txt summarize this" "" "AI service"
