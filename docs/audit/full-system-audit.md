@@ -50,7 +50,7 @@ lazy `AIService`. Providers: 6 online + 3 Ollama (`src/agent.cpp:99-113,
 | `!cmd` daemon down | same | Works: daemon stderr + exit code, no fallback (Live) |
 | `/sandbox run/list/status` | `:2096` direct `execute_command` | Works; fails closed, no host opt-in (by design) |
 | `search:` | `:305` DuckDuckGo, no key | Works; failure/empty strings printed |
-| `remember:/forget/memory/clear` | `:499-512` prefix match | `remember:` works (empty accepted); bare `forget/memory/clear` **never dispatch** — no colon routes to AI chat (Live, §6 F-04) |
+| `remember:/forget/memory/clear` | `:499-512` prefix match | `remember:` works (empty accepted); bare `forget/memory/clear` **never dispatch**, no colon routes to AI chat (Live, §6 F-04) |
 | `/compress` short/long/no-chat | `:1181` + guard | Works; short → message; no-chat → guarded message |
 | Checkpoints create/list/restore | `:1438` | Works |
 | `/stats /context /mcp /theme /auth /error` | various | Work as displayed, with truth gaps (§4) |
@@ -66,11 +66,11 @@ entries that do not parse; `/tools` documents direct forms with
 renamed arguments. Full per-command table with evidence is retained
 from the trace; headline mismatches:
 
-- `UI::print_help:81-86` `/save /resume /sessions` — parser has only
+- `UI::print_help:81-86` `/save /resume /sessions`, parser has only
   `/chat save|resume|list`. `print_help:113-118` `/checkpoint <name>
-  /restore <name> /checkpoints` — parser needs `create|list|info|
+  /restore <name> /checkpoints`, parser needs `create|list|info|
   delete|cleanup|restore` and `/restore [id]`.
-- `/help` lists `/github repo:|issues:|health:` — no `/github` branch
+- `/help` lists `/github repo:|issues:|health:`, no `/github` branch
   exists; all yield `Unknown meta command`. Real form is `github:`.
 - `print_help:157` still says `!` = `Toggle shell` (executes; toggle
   was removed). `print_help:64-67` `@file/@directory` keywords do not
@@ -122,7 +122,7 @@ checked and do not qualify: git shell paths are hardcoded, sandbox
 escapes require config-file writes the threat model already grants,
 and unsandboxed execution requires explicit opt-in.
 
-**P1 — crashes, hangs, broken capabilities:**
+**P1, crashes, hangs, broken capabilities:**
 
 - **F-01 `components:` on bad path kills the session.** Uncaught
   `filesystem_error` from `directory_iterator` (`src/codebase_service.
@@ -145,7 +145,7 @@ and unsandboxed execution requires explicit opt-in.
   `threads:` catches). Not executed live (needs token/network
   failure); same unwind shape as F-01.
 
-**P2 — misleading or missing functionality:**
+**P2, misleading or missing functionality:**
 
 - F-06 `/stats` collapses 4 providers + all Ollama models into `Local
   Ollama` (`src/agent.cpp:1241-1244`); `Memory=Active`,
@@ -153,7 +153,7 @@ and unsandboxed execution requires explicit opt-in.
 - F-07 `print_enterprise_status` prints `16 features active` with zero
   runtime checks and zero callers (`src/ui.cpp:175-207`).
 - F-08 Dead UI: `prompt_user`, `print_info`, duration `spinner`
-  overload — no callers.
+  overload, no callers.
 - F-09 Help fiction batch (§3): `/save|/resume|/sessions`,
   `/checkpoint <name>`, `/checkpoints`, `/github …` in `/help`,
   `Toggle shell`, `@file/@directory`, missing subcommand coverage.
@@ -168,7 +168,7 @@ and unsandboxed execution requires explicit opt-in.
 - F-16 `DB_*`/SERPAPI dead config; `signed.json` is an allowlist, not
   signing; tripled release paths (known, deferred).
 
-**P3 — inconsistencies:** `Goodbye`/`Goodbye!`, leading-space success
+**P3, inconsistencies:** `Goodbye`/`Goodbye!`, leading-space success
 strings, `quit` vs `exit` help split, `an AGENTWARE.md` typo,
 `/error export` default vs usage, `cmd:` cancel recorded vs `!`
 cancel not, `Local Ollama` label drift, `Memory=Active` siblings above

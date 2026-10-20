@@ -32,13 +32,13 @@ unchanged.
 
 ## 1. Execution paths traced (all VERIFIED in code)
 
-### Path A: `!cmd` — host execution
+### Path A: `!cmd`, host execution
 
 `process_user_input` (`src/agent.cpp:280`) → `handle_shell_command`
 (`src/agent.cpp:774-805`): trim, usage on empty, `validate_command_safe`
 warnings + `y/N` confirmation, then `CommandService::execute` (`:802`).
 
-### Path B: `cmd:...` — host execution
+### Path B: `cmd:...`, host execution
 
 `handle_direct_command` (`src/agent.cpp:316-334`): identical
 validate/confirm shape, then `CommandService::execute` (`:333`).
@@ -58,7 +58,7 @@ of the flag. "Shell Mode: Active" promises behavior that does not exist.
 Recommend removing the display (and retargeting `!` alone to usage) as
 part of this change; it is the same honesty class as R-07/R-10.
 
-### Path C: `/sandbox run <cmd>` — the only sandboxed path
+### Path C: `/sandbox run <cmd>`, the only sandboxed path
 
 `handle_sandbox_command` (`src/agent.cpp:2107-2129`): no
 `validate_command_safe`, no confirmation → `SandboxService::
@@ -71,7 +71,7 @@ sandboxed path asks less than the host path. Confirmation must stay
 
 No `/sandbox create` handler exists; configs come only from
 `data/sandbox_config.json` on disk (inside the R-06 root, so the LLM's
-own `write:` can modify them — anyone who can write the config can
+own `write:` can modify them, anyone who can write the config can
 already write the agent's memory, but a hostile config must never be
 trusted blindly; see gaps).
 
@@ -96,8 +96,8 @@ Gaps, each cited:
    but never consulted by `execute_command`.
 4. **Denylist both over- and under-blocks.** Substring matching with a
    bare `"."` entry blocks nearly every realistic command containing a
-   dot (`cat README.md`, `python script.py`) — pushing users toward host
-   exec — while missing whole classes (`chmod -R`, `chown`, `apt-get`,
+   dot (`cat README.md`, `python script.py`), pushing users toward host
+   exec, while missing whole classes (`chmod -R`, `chown`, `apt-get`,
    compiler toolchains).
 5. **Timeout measured, not enforced.** `timeout_seconds` is compared
    after the fact into a flag; the `fgets` loop blocks until Docker
@@ -123,7 +123,7 @@ New pure function `select_execution_backend(docker_available, policy)`:
   string shape (stdout, exit code, timeout notice). Report backend and
   limits honestly, e.g. `Sandboxed (docker, default, no network)`.
 - **Docker unavailable.** Deny by default with a diagnostic pointing at
-  `/sandbox status` — but reuse the existing `y/N` moment as the
+  `/sandbox status`, but reuse the existing `y/N` moment as the
   explicit policy gate: on refusal, offer host execution with wording
   that states no isolation applies
   (`Docker unavailable - run on host without isolation? (y/N)`).
@@ -138,7 +138,7 @@ Hardening inside scope: `--user nobody`-style drop, `--cap-drop ALL`,
 fields (or exec without a host shell), validate volumes/image/workdir in
 `validate_sandbox_config` and call it on load, enforce don't just
 measure timeouts. `allowed_commands` stays unused unless a decision
-revives it — do not half-wire it.
+revives it, do not half-wire it.
 
 ## 4. Test plan (no live Docker daemon)
 
@@ -184,7 +184,7 @@ noting it, Windows/macOS backend parity beyond honest reporting.
   failure → distinct error, no silent fallback. Covered by
   `PATH`-controlled and fake-`docker` probes, including daemon-failure
   output. Live timeout enforcement has no daemon-free probe (default
-  300s floor); rendering plus review cover it — residual, stated.
+  300s floor); rendering plus review cover it, residual, stated.
 - Default configs mount the agent CWD at `/workspace:rw`; the loader
   skips built-ins, so the mount cannot be stripped via config file.
   Custom volumes/images/workdirs are structurally validated at the

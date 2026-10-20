@@ -38,16 +38,16 @@ relying on any citation here.
 |---|---|---|---|
 | `print_logo` | 31–55 | 8-line `string_view` art, `PINK`, name, welcome, divider | byte-exact in captures |
 | `print_help` | 57–~145 | full command reference | captured; content improved vs older audits |
-| `print_enterprise_status` | 147–~178 | hardcoded `4/4` capability grid | **zero callers** outside `ui.cpp` (grep) — dead |
-| `spinner(message, ms)` | 182–196 | blocking `\b`-frame spinner | **zero callers** — dead; only atomic version used (2 sites) |
+| `print_enterprise_status` | 147–~178 | hardcoded `4/4` capability grid | **zero callers** outside `ui.cpp` (grep), dead |
+| `spinner(message, ms)` | 182–196 | blocking `\b`-frame spinner | **zero callers**, dead; only atomic version used (2 sites) |
 | `spinner(atomic&)` | 199–209 | `\r`-frame thread spinner | frames leak into piped output (captured) |
 | `print_success/error/warning` | 212–222 | `[OK]/[ERROR]/[WARN]` prefixes | live in captures |
-| `print_info` | 224–226 | `[INFO]` prefix | **zero callers** — dead |
+| `print_info` | 224–226 | `[INFO]` prefix | **zero callers**, dead |
 | `print_divider` | 229–232 | 40-dash DIM rule | live, 5 call sites |
 | `print_quick_help` | 235–252 | two duplicated command lines | live; lines overlap (`quit` vs `exit` split) |
 | `print_system_info` | 255–261 | `Mode/Model/Memory/Commands` | live; latter two hardcoded |
 | `print_ready_interface` | 264–269 | composes the above | live; duplicate Ready line gone |
-| `prompt_user` | 272–280 | `[You] … >` + getline | **zero callers** — dead |
+| `prompt_user` | 272–280 | `[You] … >` + getline | **zero callers**, dead |
 
 ## Color, width, unicode, disable behavior
 
@@ -82,7 +82,7 @@ relying on any citation here.
 
 - Identical rendering: pty-vs-pipe diff shows echo artifacts only.
   Consequence: spinners assume a tty (`\r`/`\b` garbage in logs) and
-  colors cannot be disabled — the two P3 portability findings.
+  colors cannot be disabled, the two P3 portability findings.
 
 ## Dependencies and constraints
 

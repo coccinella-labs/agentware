@@ -26,7 +26,7 @@ The automated test suite verifies several core contracts:
 Despite 100% test pass rates on existing suites, the product-level audit identified critical integration and failure-path coverage gaps:
 
 ### Gap 1: Zero Automated E2E Verification of Help Menus vs Command Parser
-- **Defect Uncaught by Tests:** `UI::print_help()` advertises `/save`, `/resume`, `/sessions`, `/checkpoints`, `@file`, `@directory`, and `Toggle shell`—none of which work in the command parser.
+- **Defect Uncaught by Tests:** `UI::print_help()` advertises `/save`, `/resume`, `/sessions`, `/checkpoints`, `@file`, `@directory`, and `Toggle shell`,none of which work in the command parser.
 - **Root Cause:** No unit or integration test asserts that the strings output by `UI::print_help()` or `Agent::show_meta_help()` correspond to valid dispatch grammar in `Agent::process_user_input()`.
 - **Remediation Requirement:** A parser consistency test that iterates every command token mentioned in help text and verifies that passing it to `process_user_input` routes to a valid handler instead of `Unknown meta command` or syntax error.
 

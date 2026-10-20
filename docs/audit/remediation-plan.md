@@ -14,7 +14,7 @@ search backend is canonical, the release flow, `Core::Agent` structure,
 and new dependencies. The audit artifacts are unchanged; nothing found in
 this pass contradicts them.
 
-## R-01 `read:` with a non-numeric range crashes the session — High
+## R-01 `read:` with a non-numeric range crashes the session, High
 
 Evidence: `src/agent.cpp:317-322` calls `std::stoi` on user input with no
 guard, in a branch that only checks file existence (`src/agent.cpp:309`).
@@ -40,7 +40,7 @@ Regression tests: piped-REPL probes asserting exit 0 plus an `Error:`
 line for `read:README.md:abc`, `read:README.md:1:xyz`, and
 `read:README.md:-1`; valid-range cases must read unchanged.
 
-## R-02 `replace:` with a non-numeric count crashes the session — High
+## R-02 `replace:` with a non-numeric count crashes the session, High
 
 Evidence: `src/agent.cpp:372` calls `std::stoi(parts[3])` with no guard.
 Same unwind path as R-01.
@@ -57,7 +57,7 @@ non-numeric input yields an error string.
 Regression tests: piped-REPL probe for `replace:README.md:old:new:abc`
 asserting exit 0 and an `Error:` line; valid-count cases unchanged.
 
-## R-03 `/compress` segfaults when no chat has run — High
+## R-03 `/compress` segfaults when no chat has run, High
 
 Evidence: `compress_context()` dereferences `ai_service_`
 unconditionally (`src/agent.cpp:977`). The pointer is assigned only in
@@ -87,7 +87,7 @@ Regression tests: piped-REPL probe seeding five `read:` interactions then
 `/compress` probe asserting unchanged behavior (summary path, mocked or
 offline-graceful).
 
-## R-04 `/fetch` text format silently discards the result — High
+## R-04 `/fetch` text format silently discards the result, High
 
 Evidence: the default text branch assigns the fetched body and returns
 before printing or saving (`src/agent.cpp:1151-1153`).
@@ -110,7 +110,7 @@ Regression tests: piped-REPL probe against an unreachable URL asserting
 the `Error:` line appears; a probe against a local mock asserting fetched
 text is printed and saved (memory file grows).
 
-## R-05 `/fetch` large-content AI path has the same null deref — High
+## R-05 `/fetch` large-content AI path has the same null deref, High
 
 Evidence: `src/agent.cpp:1163` calls `ai_service_->chat()` with no guard,
 reachable via `/fetch <url> json` (or `raw`) returning over 1000 chars
@@ -127,11 +127,11 @@ Regression tests: piped-REPL probe fetching >1000 chars with no prior
 chat, asserting exit 0 and printed content; a chat-seeded probe asserting
 the summary path still runs.
 
-## R-06 File commands bypass the safe-path check — High
+## R-06 File commands bypass the safe-path check, High
 
 Evidence: `Validator::is_safe_path` rejects `..`, `/etc/`, `/sys/`,
 `/proc/`, `/dev/`, and `C:\Windows\` (`src/validation.cpp:243`), and
-`Validator::validate_file_path` exists (`src/validation.cpp:11`) — but a
+`Validator::validate_file_path` exists (`src/validation.cpp:11`), but a
 repo-wide grep finds zero call sites for either in `agent.cpp`. The
 `read:`/`write:`/`replace:` handlers call only `validate_file_exists`
 and `validate_file_writable`. The guard the codebase wrote for exactly
@@ -155,7 +155,7 @@ sensitive paths, and normal relative paths; piped-REPL probes asserting
 refused with exit 0 (exact refusal paths to be fixed at implementation
 time against the validator's rule list).
 
-## R-07 MCP lifecycle reports state it never creates — Medium
+## R-07 MCP lifecycle reports state it never creates, Medium
 
 Evidence: `/mcp start` prints `started (simulated)` without calling any
 service (`src/agent.cpp:1442-1453`); `/mcp stop` prints `stopped
@@ -171,14 +171,14 @@ call branches; `MCPService` lifecycle and request functions.
 
 User impact: operators believe tool servers run and return empty
 capabilities; any workflow built on MCP output is founded on fiction.
-The CLI `(simulated)` label discloses simulation at start/stop only —
+The CLI `(simulated)` label discloses simulation at start/stop only ,
 `status`, `tools`, and `call` carry no such label.
 
 Minimal fix (no transport work): make every MCP output honest. `start`
 and `stop` keep the simulated label and must not imply a live process;
 `status` reports `simulated` rather than `running`; list/call commands
 state that no transport exists instead of returning empty arrays shaped
-like real results. Do not invent a transport here — that is the Phase 3
+like real results. Do not invent a transport here, that is the Phase 3
 architectural decision.
 
 Regression tests: piped-REPL probes asserting `/mcp start`/`status`/
@@ -186,7 +186,7 @@ Regression tests: piped-REPL probes asserting `/mcp start`/`status`/
 a bare `running` claim; GTest cases on `send_mcp_request` error shape for
 unknown vs known-simulated servers if the honesty wording is centralized.
 
-## R-08 `/auth` reports trust it never verifies — Medium
+## R-08 `/auth` reports trust it never verifies, Medium
 
 Evidence: `validate_credentials` and `test_provider_connection` return
 key non-emptiness, never touching the network
@@ -212,7 +212,7 @@ Regression tests: GTest cases asserting status wording for empty vs
 non-empty keys; piped-REPL `/auth` probe asserting the word `Connected`
 no longer appears without verification.
 
-## R-09 `search:` demands a key its backend never uses — Medium
+## R-09 `search:` demands a key its backend never uses, Medium
 
 Evidence: `WebService::search` requires `SERPAPI_KEY`, then queries the
 DuckDuckGo Instant Answer endpoint with the key appended as a query
@@ -234,7 +234,7 @@ Regression tests: code-level assertion or logged-URL probe showing no
 `api_key` parameter leaves the process; probe of `search:` without the
 env var asserting the corrected message.
 
-## R-10 Dead telemetry and no-op recovery handlers — Low
+## R-10 Dead telemetry and no-op recovery handlers, Low
 
 Evidence: `token_usage_` is printed in `/stats` but never incremented
 (repo-wide grep: declaration `src/include/agent.h:30`, sole read
@@ -247,7 +247,7 @@ Affected paths: `/stats` output; `/error` recovery commands.
 User impact: operators read `Token Usage: 0` and recovery confirmations
 that measure nothing.
 
-Minimal fix: remove the `Token Usage` line (or wire the counter — removal
+Minimal fix: remove the `Token Usage` line (or wire the counter, removal
 is smaller and honest); make recovery commands print `not available`
 instead of implying action. One-line-class edits, no framework.
 
@@ -295,14 +295,14 @@ asserting the unavailable wording.
 
 ## Recommended implementation order
 
-1. R-03 and R-05 (null-service guards) — segfault first; smallest diff,
+1. R-03 and R-05 (null-service guards), segfault first; smallest diff,
    two probes.
-2. R-01 and R-02 (input validation) — same pattern, same tests, crash
+2. R-01 and R-02 (input validation), same pattern, same tests, crash
    class eliminated in one pass.
-3. R-04 (`/fetch` text output) — one early-return removal plus probes;
+3. R-04 (`/fetch` text output), one early-return removal plus probes;
    review with R-05.
-4. R-06 (path enforcement) — gate addition with GTest plus REPL probes.
-5. R-07, R-08, R-09, R-10 (honesty fixes) — wording plus tests, any
+4. R-06 (path enforcement), gate addition with GTest plus REPL probes.
+5. R-07, R-08, R-09, R-10 (honesty fixes), wording plus tests, any
    order, batchable.
 
 ## Review-gate additions (scope extensions with evidence)
@@ -351,7 +351,7 @@ the crashes in R-01/R-02.
    pattern this session), but GTest-level cases for R-01/R-02/R-06 are
    only possible if parsing/validation is factored into small free
    functions or `Validator` additions. That factoring is a minimal,
-   behavior-preserving extraction, not a redesign — confirm it is
+   behavior-preserving extraction, not a redesign, confirm it is
    acceptable before implementation, otherwise those items stay
    probe-tested only.
 2. R-06 rule strictness: the exact refusal set (validator rules vs
