@@ -163,7 +163,10 @@ sleep 1
 expect "fetch-local" "/fetch http://127.0.0.1:18093 text" "" "golden-fetch-marker"
 expect "multi-file" "/files hello.txt notes.md" "" "Multi-file content"
 
-# 26-27. chat-only routes reach the AI interface and surface its failure
+# 26. list: read-only directory listing (new registry-native tool).
+expect "list-current-dir" "list:." "" "hello.txt"
+
+# 27-28. chat-only routes reach the AI interface and surface its failure
 # honestly when no provider is running (offline mode, fails fast).
 expect "email-not-file-injection" "email me@example.com" "" "AI service"
 expect "at-reference-routes-chat" "@hello.txt summarize this" "" "AI service"
