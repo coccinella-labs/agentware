@@ -142,6 +142,11 @@ jobs:
               --output-on-failure -R basic_tests
           else
             make preflight
+            # Offline golden suites (Linux/macOS only; Windows excluded
+            # because the bash harness needs shebang support).
+            bash src/tests/run_routing_golden.sh build/bin/agentware-agent
+            AGENTWARE_TOOL_CALL_LOOP=1 bash src/tests/run_tool_loop_golden.sh \
+              build/bin/agentware-agent
           fi
 
       - name: note windows probe coverage

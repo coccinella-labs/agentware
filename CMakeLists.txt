@@ -664,6 +664,9 @@ add_test(NAME remediation_probes
 add_test(NAME routing_golden
   COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/run_routing_golden.sh"
     "$<TARGET_FILE:agentware-agent>")
+add_test(NAME tool_loop_golden
+  COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/run_tool_loop_golden.sh"
+    "$<TARGET_FILE:agentware-agent>")
 
 # Set target properties for test executable
 set_target_properties(agentware-tests PROPERTIES
