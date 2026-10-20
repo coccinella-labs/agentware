@@ -146,10 +146,10 @@ or, when blocked on the user:
   partial output captured so far is returned as the observation, and the
   model is told `tool timed out after Ns; partial output above`. The
   model may retry or move on within the cap.
-- Total observation budget: the cumulative size of all observations in
-  one user request is capped (default 64 KiB). When the budget trips,
-  further tool calls are refused with `observation budget exhausted;
-  summarize what you have`, and the loop ends with a final summary.
+- Per-run observation budget: removed. The turn cap (8) times the
+  per-turn truncation (4000 chars) bounds total observation size at
+  32 KiB, so a separate per-run budget was redundant and unreachable
+  under that product. (Removed from PR-2; see the PR body for rationale.)
 - The hard turn cap ends even healthy loops, with a final summary
   from the model; the UI renders the trace exactly like manual tool
   use (`Tool(args)` + result blocks), so engineering-loop output
