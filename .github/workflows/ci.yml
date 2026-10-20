@@ -149,7 +149,9 @@ jobs:
         shell: bash
         run: |
           echo "remediation_probes is deliberately excluded on Windows."
-          echo "It is not compatible today, and the gap is documented rather"
+          echo "routing_golden is excluded here as well: like"
+          echo "remediation_probes, it is a bash-driven harness and it is"
+          echo "not compatible today, and the gap is documented rather"
           echo "than hidden:"
           echo "  * the harness writes '#!/bin/bash' stub executables that the"
           echo "    agent then execs, to stand in for docker. Windows"
