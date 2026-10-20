@@ -4,13 +4,13 @@
 #include "git_service.h"
 #include "github_service.h"
 #include "input_reader.h"
+#include "memory_manager.h"
 #include "sandbox_service.h"
+#include "search_service.h"
 #include "theme_service.h"
 #include "ui.h"
 #include "validation.h"
 #include "version.h"
-#include "memory_manager.h"
-#include "search_service.h"
 
 // After the project headers: on Windows this pulls in <windows.h>, which
 // defines ERROR as 0 and would break the ERROR enum in theme_service.h.
@@ -32,16 +32,16 @@ void record_global_fact(Data::MemoryManager &memory, const std::string &fact);
 #include <csignal>
 #include <unistd.h>
 #endif
-#include <thread>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <numeric>
-#include <vector>
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <vector>
 
 // Subset forward declaration: including mcp_service.h here would pull
 // nlohmann/json.hpp onto the test include path, where it shadows the
@@ -1716,6 +1716,35 @@ TEST(DispatchRouting, PlainCommandsRouteAsExpected) {
   EXPECT_EQ(Core::classify_input("forget"), Route::DirectCommand);
   EXPECT_EQ(Core::classify_input("memory"), Route::DirectCommand);
   EXPECT_EQ(Core::classify_input("hello there"), Route::Chat);
+}
+
+TEST(HasPrefixCi, CaseInsensitiveColonPrefixes) {
+  // Regression: "Search:cmake" used to fall through every tool branch to
+  // "Unknown command" because matching was case-sensitive.
+  EXPECT_TRUE(Core::has_prefix_ci("Search:cmake", "search:"));
+  EXPECT_TRUE(Core::has_prefix_ci("SEARCH:x", "search:"));
+  EXPECT_TRUE(Core::has_prefix_ci("Read:notes.txt", "read:"));
+  EXPECT_TRUE(Core::has_prefix_ci("Git:status", "git:"));
+}
+
+TEST(HasPrefixCi, RequiresTheFullPrefixAndLowerCaseStillMatches) {
+  EXPECT_TRUE(Core::has_prefix_ci("search:cmake", "search:"));
+  EXPECT_FALSE(Core::has_prefix_ci("search", "search:"));
+  EXPECT_FALSE(Core::has_prefix_ci("xsearch:cmake", "search:"));
+  EXPECT_FALSE(Core::has_prefix_ci("searchXcmake", "search:"));
+  EXPECT_FALSE(Core::has_prefix_ci("", "search:"));
+}
+
+TEST(HasPrefixCi, ArgumentsKeepTheirCasingViaSlice) {
+  // The documented contract: callers match the prefix case-insensitively
+  // but slice arguments from the original string, since write and replace
+  // payloads are case-sensitive.
+  const std::string input = "Write:/tmp/a.txt Hello World";
+  if (Core::has_prefix_ci(input, "write:")) {
+    EXPECT_EQ(input.substr(6), "/tmp/a.txt Hello World");
+  } else {
+    FAIL() << "prefix must match";
+  }
 }
 
 TEST(DispatchRouting, ProseWithAColonIsNotADestructiveVerb) {

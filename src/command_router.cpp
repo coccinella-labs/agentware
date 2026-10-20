@@ -1,11 +1,25 @@
 #include "command_router.h"
 
+#include <cctype>
 #include <sstream>
 
 namespace Core {
 
 bool matches_bare_verb(const std::string &input, const std::string &verb) {
   return input == verb;
+}
+
+bool has_prefix_ci(const std::string &input, const std::string &prefix) {
+  if (input.size() < prefix.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < prefix.size(); ++i) {
+    if (std::tolower(static_cast<unsigned char>(input[i])) !=
+        static_cast<unsigned char>(prefix[i])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool is_file_reference_at(const std::string &input, size_t pos) {

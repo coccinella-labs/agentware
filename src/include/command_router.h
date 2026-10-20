@@ -43,6 +43,14 @@ classify_input(const std::string &trimmed);
 [[nodiscard]] AGENTWARE_API bool matches_bare_verb(const std::string &input,
                                                    const std::string &verb);
 
+// Case-insensitive prefix test for colon tool prefixes. "Search:cmake" must
+// reach the search tool exactly like "search:cmake", but tool arguments keep
+// their original casing: the caller slices `input` at prefix.size() rather
+// than matching against a lowercased copy, because replacing text or writing
+// content is case-sensitive.
+[[nodiscard]] AGENTWARE_API bool has_prefix_ci(const std::string &input,
+                                               const std::string &prefix);
+
 // True when the '@' at `pos` opens a file reference, meaning it starts the
 // input or follows whitespace or an opening quote. Keeping this boundary
 // explicit is what stops an email address from being read as a file name.
