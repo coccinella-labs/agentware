@@ -55,7 +55,14 @@ set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 if(MSVC)
-    add_compile_options(/W4 /WX /MP /EHsc)
+    # /utf-8 sets both the source and execution charsets: the terminal UI
+    # composes box-drawing glyphs and tty symbols in narrow string
+    # literals, and under /W4 /WX every \uXXXX escape that cp1252 cannot
+    # represent is an error (C4566 -> C2220). With /utf-8 the literals
+    # are byte-exact UTF-8 and the warnings disappear for the whole
+    # project. Existing raw non-ASCII literals ("██" ASCII art) also
+    # become byte-exact instead of ACP-mangled.
+    add_compile_options(/utf-8 /W4 /WX /MP /EHsc)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL$<$<CONFIG:Debug>:DebugDLL>")
 else()
@@ -566,7 +573,10 @@ set_target_properties(agentware_lib PROPERTIES
 
 # Set platform-specific compiler flags
 if(MSVC)
-    target_compile_options(agentware_lib PRIVATE /W4 /WX /EHsc)
+    # See the /utf-8 note at the global add_compile_options block: the UI
+    # strings carry box-drawing and symbol glyphs; without /utf-8 the
+    # \uXXXX escapes break the build under /W4 /WX.
+    target_compile_options(agentware_lib PRIVATE /utf-8 /W4 /WX /EHsc)
     target_compile_definitions(agentware_lib PRIVATE _CRT_SECURE_NO_WARNINGS)
     set_target_properties(agentware_lib PROPERTIES
         WINDOWS_EXPORT_ALL_SYMBOLS ON

@@ -3,15 +3,26 @@
 #include <string>
 
 #include "agent.h"
-#include "memory_manager.h"
 #include "ai_service.h"
 #include "config.h"
+#include "memory_manager.h"
+#include "terminal_setup.h"
 #include "ui.h"
 
 int main() {
   try {
     // Initialize configuration (reads env vars, .env, etc.)
     Utils::Config::load_environment();
+
+    // Windows-only console bring-up: UTF-8 output code page + VT
+    // processing on stdout/stderr; original state saved and restored
+    // at exit and on Ctrl-C. A false return means the console cannot
+    // do VT (legacy conhost): switch to the ASCII, colors-off glyph
+    // table instead of printing mojibake boxes.
+    if (!Utils::Terminal::setup()) {
+      Utils::UI::enable_ascii_fallback();
+    }
+    Utils::Terminal::install_ctrl_c_restore();
 
     // Check for test mode is handled in Agent::initialize_mode()
 
@@ -24,7 +35,8 @@ int main() {
     // Run agent
     agent.run();
 
-    std::cout << "Agent run completed" << std::endl;
+    std::cout << Utils::Color::DIM << "Agent run completed"
+              << Utils::Color::RESET << std::endl;
 
   } catch (const std::exception &e) {
     std::cerr << Utils::Color::RED << "Fatal error: " << e.what()

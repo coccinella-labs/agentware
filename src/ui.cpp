@@ -3,10 +3,11 @@
 // Windows. platform.h includes <windows.h>, and without NOMINMAX already
 // defined, windef.h defines min/max as macros and std::max stops parsing.
 #include "platform.h"
+#include "version.h"
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
@@ -34,50 +35,85 @@ bool stdout_is_tty() {
 std::string code(const char *seq) { return UI::colors_enabled() ? seq : ""; }
 } // namespace
 
+namespace {
+// Set by enable_ascii_fallback: flips colors_enabled() to false so the
+// branch fallbacks (e.g. "[INFO]") and glyph swaps all go ASCII.
+bool g_ascii_fallback = false;
+} // namespace
+
 bool UI::interactive_output() { return stdout_is_tty(); }
 
 // NO_COLOR disables color without disabling any other output. This is the
 // single source of truth for the whole process; ThemeService defers to it so
 // the two color policies cannot drift apart.
 bool UI::colors_enabled() {
-  if (std::getenv("NO_COLOR") != nullptr) {
+  if (g_ascii_fallback || std::getenv("NO_COLOR") != nullptr) {
     return false;
   }
   return stdout_is_tty();
 }
 
+void UI::enable_ascii_fallback() {
+  g_ascii_fallback = true;
+  Color::RESET.clear();
+  Color::GREEN.clear();
+  Color::YELLOW.clear();
+  Color::RED.clear();
+  Color::CYAN.clear();
+  Color::BOLD.clear();
+  Color::DIM.clear();
+  Color::PINK.clear();
+  Color::ACCENT.clear();
+  Glyph::HLINE = "-";
+  Glyph::VLINE = "|";
+  Glyph::CORNER_TL = "+";
+  Glyph::CORNER_TR = "+";
+  Glyph::CORNER_BL = "+";
+  Glyph::CORNER_BR = "+";
+  Glyph::ARROW = ">";
+  Glyph::SPARK = "*";
+  Glyph::BULLET = "o";
+  Glyph::MIDDOT = ".";
+}
+
 // ===== Color Codes =====
 namespace Color {
-// Exported color constants
-AGENTWARE_API const std::string RESET = code("\033[0m");
-AGENTWARE_API const std::string GREEN = code("\033[32m");
-AGENTWARE_API const std::string YELLOW = code("\033[33m");
-AGENTWARE_API const std::string RED = code("\033[31m");
-AGENTWARE_API const std::string CYAN = code("\033[36m");
-AGENTWARE_API const std::string BOLD = code("\033[1m");
-AGENTWARE_API const std::string DIM = code("\033[2m");
+// Exported color constants (mutable: enable_ascii_fallback clears them
+// when the console cannot do VT processing; see the header comment).
+AGENTWARE_API std::string RESET = code("\033[0m");
+AGENTWARE_API std::string GREEN = code("\033[32m");
+AGENTWARE_API std::string YELLOW = code("\033[33m");
+AGENTWARE_API std::string RED = code("\033[31m");
+AGENTWARE_API std::string CYAN = code("\033[36m");
+AGENTWARE_API std::string BOLD = code("\033[1m");
+AGENTWARE_API std::string DIM = code("\033[2m");
 // Logo color (matches Coccinella Labs pink #F34B7D)
-AGENTWARE_API const std::string PINK = code("\033[38;2;243;75;125m");
+AGENTWARE_API std::string PINK = code("\033[38;2;243;75;125m");
+// Subdued orange for active work.
+AGENTWARE_API std::string ACCENT = code("\033[38;2;214;141;84m");
 } // namespace Color
 
+// ===== Glyphs =====
+namespace Glyph {
+AGENTWARE_API std::string HLINE = "\u2500";
+AGENTWARE_API std::string VLINE = "\u2502";
+AGENTWARE_API std::string CORNER_TL = "\u256d";
+AGENTWARE_API std::string CORNER_TR = "\u256e";
+AGENTWARE_API std::string CORNER_BL = "\u2570";
+AGENTWARE_API std::string CORNER_BR = "\u256f";
+AGENTWARE_API std::string ARROW = "\u276f";
+AGENTWARE_API std::string SPARK = "\u2733";
+AGENTWARE_API std::string BULLET = "\u25cf";
+AGENTWARE_API std::string MIDDOT = "\u00b7";
+} // namespace Glyph
+
 // ===== Logo =====
+// A restrained header: one brand line and a divider. The oversized block
+// banner is gone; the width-aware layout keeps small terminals usable.
 void UI::print_logo() {
-  static const std::array<std::string_view, 8> kLogo = {
-      "██         █",     "██  █  ██  ██",    "██ ██  ██  ███",
-      "██ ██  ██   ██",   "██ ██  ██   ███",  "██ ██  ██    ██",
-      "██ ██  ██    ███", "██ ██  ██     ██",
-  };
-
-  std::cout << Color::PINK;
-  for (const auto &line : kLogo) {
-    std::cout << line << "\n";
-  }
-  std::cout << Color::RESET;
-
-  std::cout << Color::DIM << "Agentware\n" << Color::RESET;
-
-  std::cout << Color::DIM << "Welcome to Coccinella Labs\n" << Color::RESET;
-
+  std::cout << Color::PINK << Color::BOLD << "Agentware" << Color::RESET
+            << Color::DIM << "  " << Glyph::MIDDOT << "  Coccinella Labs"
+            << Color::RESET << "\n";
   print_divider();
 }
 
@@ -356,7 +392,7 @@ void UI::spinner(const std::string &message, int duration_ms) {
   size_t frame = 0;
   auto start = std::chrono::steady_clock::now();
 
-  std::cout << Color::CYAN << message << " " << Color::RESET;
+  std::cout << Color::ACCENT << message << " " << Color::RESET;
   while (std::chrono::steady_clock::now() - start <
          std::chrono::milliseconds(duration_ms)) {
     std::cout << "\b" << frames[frame] << std::flush;
@@ -383,21 +419,241 @@ void UI::spinner(std::atomic<bool> &done) {
   std::cout << "\r \r" << std::flush;
 }
 
+// Threaded spinner with a label. The label carries the meaning (which
+// operation is waiting); the frame says it is still alive. The frame count
+// and cadence match the unlabeled spinner, so both sizes feel the same.
+void UI::spinner(std::atomic<bool> &done, const std::string &label) {
+  if (!stdout_is_tty()) {
+    // Pipes and logs: one plain line, no animation, no control sequences.
+    std::cout << label << "\n";
+    return;
+  }
+  const char frames[] = {'|', '/', '-', '\\'};
+  int frame = 0;
+
+  while (!done) {
+    std::cout << "\r" << Color::ACCENT << frames[frame % 4] << Color::RESET
+              << " " << Color::DIM << label << Color::RESET << "   "
+              << std::flush;
+    frame++;
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+  std::cout << "\r\033[K" << std::flush;
+}
+
 // ===== Status Messages =====
+// Interactive terminals get marker glyphs; pipes and logs keep the plain
+// bracket prefixes. The message text is identical either way.
 void UI::print_success(const std::string &message) {
-  std::cout << Color::GREEN << "[OK] " << Color::RESET << message << "\n";
+  if (colors_enabled()) {
+    std::cout << Color::GREEN << "✓ " << Color::RESET << message << "\n";
+  } else {
+    std::cout << "[OK] " << message << "\n";
+  }
 }
 
 void UI::print_error(const std::string &message) {
-  std::cout << Color::RED << "[ERROR] " << Color::RESET << message << "\n";
+  if (colors_enabled()) {
+    std::cout << Color::RED << "✗ " << Color::RESET << message << "\n";
+  } else {
+    std::cout << "[ERROR] " << message << "\n";
+  }
 }
 
 void UI::print_warning(const std::string &message) {
-  std::cout << Color::YELLOW << "[WARN] " << Color::RESET << message << "\n";
+  if (colors_enabled()) {
+    std::cout << Color::YELLOW << "! " << Color::RESET << message << "\n";
+  } else {
+    std::cout << "[WARN] " << message << "\n";
+  }
 }
 
 void UI::print_info(const std::string &message) {
-  std::cout << Color::CYAN << "[INFO] " << Color::RESET << message << "\n";
+  if (colors_enabled()) {
+    std::cout << Color::CYAN << "· " << Color::RESET << message << "\n";
+  } else {
+    std::cout << "[INFO] " << message << "\n";
+  }
+}
+
+// ===== Session renderers =====
+void UI::print_tool_call(const std::string &tool, const std::string &args) {
+  if (!interactive_output()) {
+    // Pipes and logs: keep the plain header form so grep finds commands.
+    std::cout << "Tool " << tool << "(\"" << args << "\")\n";
+    return;
+  }
+  std::cout << Glyph::BULLET << " " << Color::BOLD << tool << Color::RESET
+            << Color::DIM << "(" << Color::RESET << args << Color::DIM << ")"
+            << Color::RESET << "\n";
+}
+
+void UI::print_tool_result(const std::string &result) {
+  if (!interactive_output()) {
+    std::cout << result << "\n";
+    return;
+  }
+  if (result.empty()) {
+    std::cout << "└ " << Color::DIM << "(no output)" << Color::RESET << "\n";
+    return;
+  }
+  // Count the lines so long output carries an honest scale note. The
+  // body itself is never hidden; the terminal scrollback is the log.
+  size_t line_count = 1;
+  for (const char c : result) {
+    if (c == '\n') {
+      ++line_count;
+    }
+  }
+  if (line_count > 60) {
+    std::cout << "└ " << Color::DIM << "[" << line_count
+              << " lines of output; scroll to review]" << Color::RESET << "\n";
+  }
+  std::istringstream in(result);
+  std::string line;
+  bool first = true;
+  while (std::getline(in, line)) {
+    // An error line is colored exactly when the payload itself says so;
+    // results are otherwise rendered plain, never pre-judged.
+    const bool is_error = line.rfind("Error", 0) == 0;
+    const bool is_cancel = line.find("cancel") != std::string::npos;
+    const std::string marker = first ? "└ " : "  ";
+    if (is_error) {
+      std::cout << marker << Color::RED << line << Color::RESET << "\n";
+    } else if (is_cancel) {
+      std::cout << marker << Color::YELLOW << line << Color::RESET << "\n";
+    } else {
+      std::cout << marker << line << "\n";
+    }
+    first = false;
+  }
+}
+
+void UI::print_response(const std::string &response) {
+  if (!interactive_output()) {
+    std::cout << response << "\n";
+    return;
+  }
+  std::istringstream in(response);
+  std::string line;
+  bool first = true;
+  while (std::getline(in, line)) {
+    std::cout << (first ? Glyph::BULLET + " " : std::string("  ")) << line
+              << "\n";
+    first = false;
+  }
+}
+
+// ===== Input frame =====
+namespace {
+std::string repeat_h(const size_t count) {
+  std::string out;
+  out.reserve(count * 3);
+  for (size_t i = 0; i < count; ++i) {
+    out += Glyph::HLINE;
+  }
+  return out;
+}
+} // namespace
+
+// ===== Welcome card =====
+// The empty-state panel modeled on the reference: a bordered card whose
+// title carries the app identity and version, with the session context
+// and honest hints inside. Only state the runtime has: version, mode,
+// model, cwd, and commands that actually exist.
+void UI::print_welcome_panel(const std::string &mode, const std::string &model,
+                             const std::string &cwd) {
+  if (!interactive_output()) {
+    // Pipes and logs: the caller renders the compact legacy banner.
+    return;
+  }
+  const size_t w = static_cast<size_t>(effective_width(layout_width()));
+  const size_t box_w =
+      std::min<size_t>(w, 88) < 46 ? 46 : std::min<size_t>(w, 88);
+  const std::string title = std::string("Agentware v") + Version::get_version();
+
+  auto inner = [&](const std::string &text) {
+    std::cout << Color::DIM << Glyph::VLINE << " " << Color::RESET << text
+              << "\n";
+  };
+
+  const std::string context_line =
+      "Ready. Mode: " + mode + " | Model: " + model + " | Cwd: " + cwd;
+  std::cout << Color::ACCENT << Glyph::CORNER_TL << Glyph::HLINE << " " << title
+            << " " << Color::RESET << Color::DIM
+            << repeat_h(box_w > title.size() + 6 ? box_w - title.size() - 6 : 1)
+            << Glyph::CORNER_TR << Color::RESET << "\n";
+  for (const auto &part : wrap_words(context_line, box_w - 4)) {
+    inner(part);
+  }
+  inner("help: all commands | !<cmd>: run a shell command");
+  inner("/chat save|resume <tag>: keep or resume a session");
+  std::cout << Color::DIM << Glyph::CORNER_BL
+            << repeat_h(box_w > 2 ? box_w - 2 : 1) << Glyph::CORNER_BR
+            << Color::RESET << "\n";
+}
+
+void UI::print_user_line(const std::string &user_input) {
+  if (!interactive_output()) {
+    // Scripts already saw their own input echoed in the log.
+    return;
+  }
+  // Full-width subtle bar behind the request line, like the reference.
+  std::cout << "\033[2m" << Glyph::ARROW << "\033[0m "
+            << "\033[48;5;236m" << user_input << "\033[K\033[0m"
+            << "\n";
+}
+
+void UI::print_turn_status(int seconds) {
+  const std::string text = "Responded in " + std::to_string(seconds) + "s";
+  if (!interactive_output()) {
+    std::cout << text << "\n";
+    return;
+  }
+  std::cout << Color::ACCENT << Glyph::SPARK << Color::RESET << Color::DIM
+            << " " << text << Color::RESET << "\n";
+}
+
+void UI::print_diff_removed(const std::string &text) {
+  if (!interactive_output()) {
+    std::cout << text << "\n";
+    return;
+  }
+  std::istringstream in(text);
+  std::string line;
+  while (std::getline(in, line)) {
+    std::cout << Color::RED << "- " << line << Color::RESET << "\n";
+  }
+}
+
+void UI::print_diff_added(const std::string &text) {
+  if (!interactive_output()) {
+    std::cout << text << "\n";
+    return;
+  }
+  std::istringstream in(text);
+  std::string line;
+  while (std::getline(in, line)) {
+    std::cout << Color::GREEN << "+ " << line << Color::RESET << "\n";
+  }
+}
+
+void UI::print_input_frame_top() {
+  if (!interactive_output()) {
+    return;
+  }
+  const size_t w = static_cast<size_t>(effective_width(layout_width()));
+  std::cout << Color::DIM << "\u256d" << repeat_h(w > 2 ? w - 2 : 1) << "\u256e"
+            << Color::RESET << "\n";
+}
+
+void UI::print_input_frame_bottom() {
+  if (!interactive_output()) {
+    return;
+  }
+  const size_t w = static_cast<size_t>(effective_width(layout_width()));
+  std::cout << Color::DIM << "\u2570" << repeat_h(w > 2 ? w - 2 : 1) << "\u256f"
+            << Color::RESET << "\n";
 }
 
 // ===== Divider =====
