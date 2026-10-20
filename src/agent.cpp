@@ -339,7 +339,7 @@ void Agent::handle_direct_command(const std::string &input) {
   std::string tool_args;
   bool presented = false;
 
-  if (input.rfind("search:", 0) == 0) {
+  if (Core::has_prefix_ci(input, "search:")) {
     std::string query = trim_copy(input.substr(7));
     tool = "Search";
     tool_args = query;
@@ -355,7 +355,7 @@ void Agent::handle_direct_command(const std::string &input) {
       result = Services::WebService::search(query);
       record_interaction(*memory_, "search:" + query, result);
     }
-  } else if (input.rfind("cmd:", 0) == 0) {
+  } else if (Core::has_prefix_ci(input, "cmd:")) {
     std::string command = trim_copy(input.substr(4));
     tool = "Bash";
     tool_args = command;
@@ -377,7 +377,7 @@ void Agent::handle_direct_command(const std::string &input) {
     }
     result = execute_routed_command(command);
     record_interaction(*memory_, "cmd:" + command, result);
-  } else if (input.rfind("read:", 0) == 0) {
+  } else if (Core::has_prefix_ci(input, "read:")) {
     std::string params = trim_copy(input.substr(5));
     tool = "Read";
     tool_args = params;
@@ -435,7 +435,7 @@ void Agent::handle_direct_command(const std::string &input) {
       }
     }
     record_interaction(*memory_, "read:" + params, result);
-  } else if (input.rfind("write:", 0) == 0) {
+  } else if (Core::has_prefix_ci(input, "write:")) {
     // Format: write:filename content...
     tool = "Write";
     size_t space_pos = input.find(' ', 6); // index 6 is safe for "write:"
@@ -471,7 +471,7 @@ void Agent::handle_direct_command(const std::string &input) {
     } else {
       result = "Usage: write:filename content";
     }
-  } else if (input.rfind("replace:", 0) == 0) {
+  } else if (Core::has_prefix_ci(input, "replace:")) {
     // Format: replace:filename:old_text:new_text[:expected_count]
     tool = "Replace";
     std::string params = input.substr(8);
@@ -545,7 +545,7 @@ void Agent::handle_direct_command(const std::string &input) {
     } else {
       result = "Usage: replace:filename:old_text:new_text[:expected_count]";
     }
-  } else if (input.rfind("grep:", 0) == 0) {
+  } else if (Core::has_prefix_ci(input, "grep:")) {
     // Format: grep:pattern[:directory[:file_filter]]
     tool = "Grep";
     std::string params = input.substr(5);
@@ -561,37 +561,53 @@ void Agent::handle_direct_command(const std::string &input) {
     parts.push_back(params.substr(pos));
 
     std::string pattern = parts[0];
-    std::string directory = (parts.size() > 1) ? parts[1] : ".";
-    std::string filter = (parts.size() > 2) ? parts[2] : "*";
+    // An empty pattern is a wrong-domain failure waiting to happen: the
+    // directory access check below would reject "" with "File path cannot
+    // be empty", which misdescribes the problem. Refuse here with the
+    // actual cause. An explicitly empty directory ("grep:x:") still means
+    // the current directory.
+    if (pattern.empty()) {
+      result = "Error: grep pattern cannot be empty. "
+               "Use grep:pattern[:directory[:file_filter]]";
+    }
+    std::string directory =
+        (parts.size() > 1 && !parts[1].empty()) ? parts[1] : ".";
+    std::string filter =
+        (parts.size() > 2 && !parts[2].empty()) ? parts[2] : "*";
     tool_args = pattern;
 
-    auto access = Utils::Validator::validate_file_access(directory);
-    if (!access.is_valid) {
-      result = "Error: " + access.error_message;
-    } else {
-      Services::SearchOptions search_options;
-      search_options.directory = directory;
-      search_options.pattern = pattern;
-      search_options.file_filter = filter;
-      auto search_result = Services::search_code(search_caps_, search_options);
-
-      if (search_result.matches.empty()) {
-        result = "No matches found for pattern: " + pattern;
+    if (!pattern.empty()) {
+      auto access = Utils::Validator::validate_file_access(directory);
+      if (!access.is_valid) {
+        result = "Error: " + access.error_message;
       } else {
-        result = "Found " + std::to_string(search_result.matches.size()) +
-                 " matches (via " + search_result.backend_used + "):\n";
-        for (const auto &match : search_result.matches) {
-          result += match.file_path + ":" + std::to_string(match.line_number) +
-                    ": " + match.line_content + "\n";
-        }
-        if (search_result.truncated) {
-          result += "(output truncated at the search limit; narrow the pattern "
-                    "or directory for the rest)\n";
+        Services::SearchOptions search_options;
+        search_options.directory = directory;
+        search_options.pattern = pattern;
+        search_options.file_filter = filter;
+        auto search_result =
+            Services::search_code(search_caps_, search_options);
+
+        if (search_result.matches.empty()) {
+          result = "No matches found for pattern: " + pattern;
+        } else {
+          result = "Found " + std::to_string(search_result.matches.size()) +
+                   " matches (via " + search_result.backend_used + "):\n";
+          for (const auto &match : search_result.matches) {
+            result += match.file_path + ":" +
+                      std::to_string(match.line_number) + ": " +
+                      match.line_content + "\n";
+          }
+          if (search_result.truncated) {
+            result +=
+                "(output truncated at the search limit; narrow the pattern "
+                "or directory for the rest)\n";
+          }
         }
       }
     }
     record_interaction(*memory_, "grep:" + pattern, result);
-  } else if (input.rfind("remember:", 0) == 0) {
+  } else if (Core::has_prefix_ci(input, "remember:")) {
     std::string fact = trim_copy(input.substr(9));
     record_global_fact(*memory_, fact);
     result = "Remembered: " + fact;
@@ -605,7 +621,7 @@ void Agent::handle_direct_command(const std::string &input) {
   } else if (Core::matches_bare_verb(input, "clear")) {
     memory_->clear_memory();
     result = "Session memory cleared";
-  } else if (input.rfind("analyze:", 0) == 0) {
+  } else if (Core::has_prefix_ci(input, "analyze:")) {
     std::string path = trim_copy(input.substr(8));
     if (path.empty()) {
       path = "."; // Current directory
@@ -617,7 +633,7 @@ void Agent::handle_direct_command(const std::string &input) {
       result = Services::CodebaseService::analyze_structure(path);
     }
     record_interaction(*memory_, "analyze:" + path, result);
-  } else if (input.rfind("components:", 0) == 0) {
+  } else if (Core::has_prefix_ci(input, "components:")) {
     std::string path = trim_copy(input.substr(11));
     if (path.empty()) {
       path = "."; // Current directory
@@ -629,7 +645,7 @@ void Agent::handle_direct_command(const std::string &input) {
       result = Services::CodebaseService::find_main_components(path);
     }
     record_interaction(*memory_, "components:" + path, result);
-  } else if (input.rfind("todos:", 0) == 0) {
+  } else if (Core::has_prefix_ci(input, "todos:")) {
     std::string path = trim_copy(input.substr(6));
     if (path.empty()) {
       path = "."; // Current directory
@@ -649,7 +665,7 @@ void Agent::handle_direct_command(const std::string &input) {
       }
     }
     record_interaction(*memory_, "todos:" + path, result);
-  } else if (input.rfind("git:", 0) == 0) {
+  } else if (Core::has_prefix_ci(input, "git:")) {
     std::string params = trim_copy(input.substr(4));
     tool = "Git";
     tool_args = params;
@@ -659,13 +675,16 @@ void Agent::handle_direct_command(const std::string &input) {
       result = Services::GitService::get_git_log(path, 7);
     } else if (params.find("status") == 0) {
       result = Services::GitService::get_git_status(path);
+    } else if (params.find("diff") == 0) {
+      // Read-only inspection of unstaged tracked changes.
+      result = Services::GitService::get_git_diff(path);
     } else if (params.find("analyze") == 0) {
       result = Services::GitService::analyze_repository(path);
     } else {
-      result = "Usage: git:log, git:status, git:analyze";
+      result = "Usage: git:log, git:status, git:diff, git:analyze";
     }
     record_interaction(*memory_, "git:" + params, result);
-  } else if (input.rfind("tree:", 0) == 0) {
+  } else if (Core::has_prefix_ci(input, "tree:")) {
     std::string path = trim_copy(input.substr(5));
     if (path.empty()) {
       path = "."; // Current directory
@@ -677,7 +696,7 @@ void Agent::handle_direct_command(const std::string &input) {
       result = Services::CodebaseService::get_directory_tree(path, 3);
     }
     record_interaction(*memory_, "tree:" + path, result);
-  } else if (input.rfind("github:", 0) == 0) {
+  } else if (Core::has_prefix_ci(input, "github:")) {
     tool = "Github";
     tool_args = input.substr(7);
     std::string params = trim_copy(input.substr(7));
@@ -825,7 +844,15 @@ void Agent::handle_direct_command(const std::string &input) {
     }
     record_interaction(*memory_, "github:" + params, result);
   } else {
-    result = "Unknown command";
+    // Recovery affordance: name what came in and what exists. The known
+    // colon commands are listed so a near-miss prefix (case aside, which
+    // has_prefix_ci now handles) or a wrung subcommand can be corrected
+    // on the next line instead of failing silently.
+    result = "Unknown command: '" + input +
+             "'.\n"
+             "Known commands: search:, cmd:, read:, write:, replace:, "
+             "grep:, git:, github:, analyze:, components:, todos:, "
+             "tree:, remember: (plus bare 'memory', 'forget', 'clear')";
   }
 
   if (!presented && !tool.empty()) {

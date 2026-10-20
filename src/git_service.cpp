@@ -81,6 +81,33 @@ std::string GitService::get_git_status(const std::string &path) {
   return result.empty() ? "Working directory clean" : result;
 }
 
+std::string GitService::get_git_diff(const std::string &path) {
+  if (!is_git_repository(path)) {
+    return "Error: Not a git repository";
+  }
+
+  std::string command = "cd \"" + path + "\" && git diff";
+
+  if (!is_safe_shell_path(path)) {
+    return "Error: Unsafe repository path";
+  }
+
+  FILE *pipe = Utils::Platform::open_process(command, "r");
+  if (!pipe) {
+    return "Error: Failed to execute git diff";
+  }
+
+  std::string result;
+  char buffer[128];
+  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+    result += buffer;
+  }
+  Utils::Platform::close_process(pipe);
+
+  // A clean tree prints nothing; say so instead of an empty block.
+  return result.empty() ? "No unstaged changes to tracked files" : result;
+}
+
 std::vector<std::string> GitService::get_changed_files(const std::string &path,
                                                        int days) {
   std::vector<std::string> files;
