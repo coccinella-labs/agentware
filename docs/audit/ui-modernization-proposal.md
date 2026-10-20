@@ -1,6 +1,6 @@
 # UI modernization proposal
 
-Prioritized, proportionate changes only — no redesign, no framework.
+Prioritized, proportionate changes only, no redesign, no framework.
 Each item states current vs proposed behavior plus regression cover.
 Severity follows the repo's P0–P3 scale. No P0 found; nothing here
 blocks safe use.
@@ -54,7 +54,7 @@ Items are preserved as originally proposed. Status against the current tree
 
 - Current: `/tools` omits `!`, `help`, `quit`, `write:`, `/files`;
   `ext` vs `filter` naming differs between the two lists.
-- Proposed: single source of truth — generate both listings from one
+- Proposed: single source of truth, generate both listings from one
   table, or add the missing entries and unify the arg name.
 - Regression: extend the consistency-matrix probes (already in-tree).
 
@@ -62,9 +62,9 @@ Items are preserved as originally proposed. Status against the current tree
 
 - Current: `print_enterprise_status` (hardcoded `16 features active`),
   `prompt_user`, `print_info`, blocking `spinner` overload, unused
-  `<unistd.h>` include — all zero-caller, verified by grep.
+  `<unistd.h>` include, all zero-caller, verified by grep.
 - Proposed: delete them (or wire `print_info` somewhere real).
-  `print_enterprise_status` must not be wired up as-is — its counts
+  `print_enterprise_status` must not be wired up as-is, its counts
   are fictional.
 - Regression: build + existing suite; add a dead-code grep probe if
   desired.

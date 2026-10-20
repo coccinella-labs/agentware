@@ -28,7 +28,7 @@ Selective redesign: stabilize foundations, then decide MCP and database on
 evidence, not suspicion. Nothing here assumes a rewrite; the architecture
 in `docs/audit/architecture.md` stays.
 
-## Phase 0 — Safety net (first, blocks everything else)
+## Phase 0, Safety net (first, blocks everything else)
 
 Deliverables: compiled tests for `FileService`, `Validator`,
 `CommandService` denylist/timeout, `MemoryManager` round-trip, AI payload
@@ -41,7 +41,7 @@ Acceptance: `ctest` covers every `Services::*` used by the REPL; a
 deliberately reintroduced G-02/G-03 bug fails CI. Verification: `cmake
 --build build && ctest --output-on-failure` plus the E2E compose run.
 
-## Phase 1 — Crash and trust fixes
+## Phase 1, Crash and trust fixes
 
 Deliverables: guard `stoi` parsing, null-check `ai_service_` on
 `/compress` and `/fetch`, print and save `/fetch` text results, route
@@ -53,7 +53,7 @@ Acceptance: scripted probes for each G-01/G-02/G-03/G-04/G-06 case exit
 cleanly with an error message instead of crashing or leaking. Depends on
 Phase 0 for regression proof.
 
-## Phase 2 — One release path
+## Phase 2, One release path
 
 Deliverables: single canonical flow (recommend label-driven bump,
 tag, build, sign, publish), one install path, corrected CPack deps,
@@ -64,7 +64,7 @@ Acceptance: tagging `v0.x.y` produces exactly one GH release with
 matching notes, one GHCR image that reports healthy, and `agentware-agent
 --version` printing the tag. Depends on Phase 0 for the build matrix.
 
-## Phase 3 — Decide MCP and database
+## Phase 3, Decide MCP and database
 
 Deliverables: either a real MCP transport with a passing tool-call test
 and documented servers, or removal of the simulated surface and
@@ -76,7 +76,7 @@ Acceptance: no simulated success messages remain, and no shipped code
 path returns hardcoded success. Depends on Phases 0-1 so the decision is
 observed, not guessed.
 
-## Phase 4 — Docs and hygiene (optional, cheap)
+## Phase 4, Docs and hygiene (optional, cheap)
 
 Deliverables: README usage and command reference, restored setup and
 architecture notes (this audit's `architecture.md` is the seed),

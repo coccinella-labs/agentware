@@ -230,7 +230,7 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
         result.truncated = true;
         break;
       }
-      // path:line:col:text — split the first three fields, the rest is text
+      // path:line:col:text: split the first three fields, the rest is text
       // (filenames containing ':' are a known accepted limitation).
       size_t first = line.find(':');
       size_t second =

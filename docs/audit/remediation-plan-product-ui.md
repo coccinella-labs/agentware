@@ -18,7 +18,7 @@ The UI work is committed: P1-1 in `f908f2bf`, P1-2 and P1-3 in `bdf33b2b`.
 - **Units 1-4** (MCP, registry, and the behavioral items): **still open**, and
   out of scope for the presentation work.
 
-## P0 — truth and safety contracts
+## P0, truth and safety contracts
 
 1. **Choose MCP: implement transport or remove the operational surface.** Do
    not report list/call/lifecycle results as live until a real stdio lifecycle,
@@ -34,7 +34,7 @@ The UI work is committed: P1-1 in `f908f2bf`, P1-2 and P1-3 in `bdf33b2b`.
    avoid fixed-port collisions, repair the swallowed `threads` probe, and make
    the suite fail if a declared probe was not run.
 
-## P1 — presentation foundation and state consistency
+## P1, presentation foundation and state consistency
 
 5. Add terminal profile/plain-output support (`NO_COLOR`, non-TTY, width,
    Unicode fallback), then migrate `UI` and handler output through a few
@@ -48,7 +48,7 @@ The UI work is committed: P1-1 in `f908f2bf`, P1-2 and P1-3 in `bdf33b2b`.
    directory or explicitly documented project state; add migration and
    checkpoint restore round-trip coverage.
 
-## P2 — integration completeness
+## P2, integration completeness
 
 9. Add hermetic adapters/fakes for every external boundary: all LLM response
    formats, Ollama, GitHub pagination/errors, HTTP fetch, Docker results and
@@ -60,7 +60,7 @@ The UI work is committed: P1-1 in `f908f2bf`, P1-2 and P1-3 in `bdf33b2b`.
     read/write workspace and network posture. Test validator, host fallback,
     and sandbox behavior against the same acceptance rules.
 
-## P3 — progressive interaction improvements
+## P3, progressive interaction improvements
 
 12. Add contextual usage/suggestions, operation-labelled progress, and
     recovery text. Add cancellation only after defining safe process/network

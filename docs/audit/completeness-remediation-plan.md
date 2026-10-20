@@ -6,7 +6,7 @@ committable change with its regression test. Evidence in
 pushes; pushed history (`github:threads`, shell routing) is baseline,
 not permission to rewrite.
 
-## Phase A — session survival (P1 crashes/hangs)
+## Phase A, session survival (P1 crashes/hangs)
 
 - **A1 F-02 `replace:` empty-pattern hang.** Guard empty `old_text`
   (validator + service-level, both: caller checks, service returns
@@ -21,7 +21,7 @@ not permission to rewrite.
   probe (needs a seam: extract URL builder or accept endpoint override
   in test builds). Depends on nothing; do with A1/A2.
 
-## Phase B — restore broken capabilities (P1)
+## Phase B, restore broken capabilities (P1)
 
 - **B1 F-03 `git:log` self-block.** Exempt the service's own `&&`
   construction from the warning gate (validate the path portion only,
@@ -33,7 +33,7 @@ not permission to rewrite.
   is one commit. Regression: probe asserting the chosen behavior.
   Independent.
 
-## Phase C — UI truth pass (P2)
+## Phase C, UI truth pass (P2)
 
 - **C1 Help rewrite.** Fix fictional entries (`/save`, `/checkpoints`,
   `/github` in `/help`, `Toggle shell`, `@file`), document all live
@@ -42,7 +42,7 @@ not permission to rewrite.
   prefixes against help strings (cheap, high-value). Independent.
 - **C2 Status displays.** Reuse the 9-entry provider map in `/stats`;
   drop or wire `Memory=Active`/`Commands=Available`; delete
-  `print_enterprise_status` (or gate it behind real checks —
+  `print_enterprise_status` (or gate it behind real checks ,
   recommend delete); remove `prompt_user`/`print_info`/unused spinner.
   Regression: `/stats` probe asserting provider names. Independent.
 - **C3 Small honesties.** `remember:`/empty validation, invalid-regex
@@ -52,7 +52,7 @@ not permission to rewrite.
   `--version` (deferred to release phase per prior plan), double
   Ready line. Each one commit or batched; independent.
 
-## Phase D — dead code and config (P2/P3, careful)
+## Phase D, dead code and config (P2/P3, careful)
 
 - **D1 Dead config.** Remove `DB_*` from `.env.example` or decide the
   database; clarify SERPAPI line already done. One commit.

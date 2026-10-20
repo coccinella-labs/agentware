@@ -195,7 +195,7 @@ probe "R-05 fetch large content without chat survives" 0 "AI service unavailable
 probe "R-05 fetch large json without chat survives" 0 "AI service unavailable" \
   "2" "1" "/fetch http://127.0.0.1:$SERVE_PORT/big.json json" "exit"
 
-# R-06: path policy — traversal and symlink escapes refused, valid reads kept.
+# R-06: path policy: traversal and symlink escapes refused, valid reads kept.
 echo "outside secret" > ../probe_secret.txt
 # ln -s needs privileges on some platforms (e.g. Windows without
 # Developer Mode): only run symlink probes when the link is created.
