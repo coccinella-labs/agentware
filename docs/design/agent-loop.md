@@ -114,8 +114,12 @@ Model-initiated writes are **cwd-only** (approved): relative paths
 must resolve under the current working directory (the existing
 `Validator::validate_file_access` rule), absolute paths are refused
 for model-initiated writes even though user-initiated tools accept
-them outside cwd. Write-capable tools enter the model-callable
-registry only with this policy implemented in the model-call path.
+them outside cwd. The check operates on **canonical paths**: symlinks
+are resolved and `..` segments are collapsed before the containment
+comparison, so `../sibling`, `/tmp/link -> /usr/bin`, and other
+aliases cannot launder a write outside cwd. Write-capable tools enter
+the model-callable registry only with this policy implemented in the
+model-call path.
 
 Memory fact capture is **consent-gated in v1** (approved):
 `remember:` from the model presents the fact and asks `y/N` before
@@ -132,7 +136,10 @@ as untrusted data.
   run through the real binary today (`run_routing_golden.sh`, 36
   cases); the three model-side cases (malformed JSON, unknown tool,
   multi-call) activate with canned mock-provider outputs once the
-  seam exists.
+  seam exists. A **symlink-escape case** (a symlink inside cwd
+  resolving outside it, whose write must be refused) is added to the
+  golden suite alongside the model-side cases when the canonical-path
+  check lands.
 - Existing guarantees pinned: layout-contract gtests, pipe-mode output
   unchanged, `remediation_probes.sh`, `has_prefix_ci` unit tests,
   clang-format cleanliness (`--dry-run -Werror`).
@@ -146,3 +153,6 @@ as untrusted data.
    results treated strictly as untrusted data.
 4. **`remember:`**: consent-gated from the model in v1 (the
    user-facing command behavior is unchanged).
+5. **cwd-only enforcement detail**: the containment check compares
+   canonical paths (symlinks resolved, `..` collapsed); a
+   symlink-escape refusal is on the golden-test list.
