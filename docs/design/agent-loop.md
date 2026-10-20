@@ -133,7 +133,7 @@ as untrusted data.
 ## Test plan
 
 - The 28-case routing audit becomes golden coverage: user-side cases
-  run through the real binary today (`run_routing_golden.sh`, 36
+  run through the real binary today (`run_routing_golden.sh`, 34
   cases); the three model-side cases (malformed JSON, unknown tool,
   multi-call) activate with canned mock-provider outputs once the
   seam exists. A **symlink-escape case** (a symlink inside cwd
