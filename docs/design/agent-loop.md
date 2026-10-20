@@ -1,4 +1,4 @@
-# The agent tool-call loop — design
+# The agent tool-call loop: design
 
 Status: draft for review. Docs only; no runtime code lands under this
 document. Nothing described here is implemented yet unless a separate
@@ -9,7 +9,7 @@ PR does it.
 Today Agentware is a user-driven tool system: the user types tool
 commands (`search:`, `read:`, `write:`, `replace:`, `grep:`, `git:`,
 `github:`, `cmd:`, `!`, `/fetch`, ...) and the agent executes them. The
-model summarizes what already happened — see the system prompt in
+model summarizes what already happened. See the system prompt in
 `src/ai_service.cpp:110-157`, which lists commands the model may *talk
 about* but cannot *invoke*: nothing in the reply path parses model
 output for tool calls (`Agent::handle_ai_chat`, `src/agent.cpp`).
@@ -42,7 +42,7 @@ user prompt
 - **Assistant output only.** Tool calls are parsed from assistant
   replies, never from fetched pages, injected files, tool results, or
   memory context. Tool output is treated as data, never as
-  instructions — the same boundary `classify_input` already enforces
+  instructions. The same boundary `classify_input` already enforces
   for user input ("clear: the screen please" regression).
 - **One call per turn, hard cap.** At most one JSON tool call per
   model reply, and a hard cap on tool turns per user request so a
@@ -55,7 +55,7 @@ user prompt
   covers file overwrites and demanded confirmations.
 - **Web surfaces are read-only untrusted data.** `fetch:` and
   `search:` are `read-only` tier and may auto-run, but anything they
-  return is **treated as data, never as instructions** — including
+  return is **treated as data, never as instructions**. This includes
   model-side: observations from these tools are fed back as quoted,
   non-executable context only (the assistant-output-only rule applies
   to them symmetrically).
@@ -65,7 +65,7 @@ user prompt
 
 ## The tool registry (preceded PR-3 by design)
 
-A single source of truth — name, description, parameter schema, risk
+A single source of truth: name, description, parameter schema, risk
 tier (`read-only` | `mutating`), handler. Two artifacts are generated
 from it so they cannot drift:
 
@@ -90,7 +90,7 @@ first fenced code block of the reply:
 - `tool` must match a registry name; unknown or malformed calls return
   a recoverable system message: `unknown tool X; available: ...`.
 - Malformed JSON, missing fields, or extra calls in one reply are
-  rejected with the same recoverable framing — the observation names
+  rejected with the same recoverable framing. The observation names
   the problem and lists valid shapes.
 - Cases the user asked to gate on (from the routing audit): malformed
   JSON, unknown tool, and multi-call replies become known-input golden
@@ -123,7 +123,7 @@ model-call path.
 
 Memory fact capture is **consent-gated in v1** (approved):
 `remember:` from the model presents the fact and asks `y/N` before
-persisting — it is mutating-tier for the model-call surface even
+persisting. It is mutating-tier for the model-call surface even
 though the user-facing command stays ungated as today.
 
 Resolved alongside: turn cap = 8 per user request, configurable;
