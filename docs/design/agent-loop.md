@@ -97,6 +97,34 @@ first fenced code block of the reply:
   tests in `src/tests/run_routing_golden.sh` with canned mock-provider
   outputs once the seam exists.
 
+### Completion signal
+
+A reply that contains no tool call is treated as completion only if it
+also carries no pending work. To make completion explicit (and to let
+the UI distinguish "done" from "waiting on the user"), the assistant may
+emit a completion signal instead of a tool call:
+
+```json
+{"done": true, "summary": "Found 3 callers of handle_ in src/."}
+```
+
+or, when blocked on the user:
+
+```json
+{"needs_user_input": "Which of the two matching files should I edit?"}
+```
+
+- `done` ends the loop and records the summary; the model may still
+  narrate in the same reply.
+- `needs_user_input` ends the loop and surfaces the question in the UI
+  (and in pipe mode on stdout); the next user prompt resumes a fresh
+  loop with the prior trace available as context.
+- A bare reply with neither a tool call nor a signal is treated as
+  `done` with an empty summary (current behavior, preserved for
+  backwards compatibility).
+- Signals are parsed from assistant output only, under the same
+  assistant-output-only rule as tool calls.
+
 ## Error and recovery budget
 
 - Unknown tool: reply with available names; do not execute anything.
@@ -130,26 +158,66 @@ Resolved alongside: turn cap = 8 per user request, configurable;
 `fetch:` / `search:` auto-run as read-only with their results treated
 as untrusted data.
 
+## Plan step
+
+Before issuing tool calls, the model states a short plan. The plan is
+rendered in the UI as a distinct block so the engineering loop stays
+inspectable in context, exactly like manual tool use.
+
+Protocol: on the first turn of a loop (or whenever the model revises
+its approach), the assistant may include a `plan` field:
+
+```json
+{"plan": ["grep handle_ in src", "read the top caller", "propose the edit"]}
+```
+
+- The plan is optional but encouraged for multi-step tasks; a single
+  tool call with no plan is allowed.
+- The UI renders the plan as a numbered list above the tool calls of
+  that turn; pipe mode emits it as a `Plan:` block on stdout.
+- A revised plan replaces the previous one in the trace (no stale
+  plans accumulate).
+- The plan is data for the user, not instructions to the runtime: it
+  never triggers tool execution on its own.
+- This is the last piece of the loop (PR 4 in the breakdown below) and
+  ships behind the same flag.
+
 ## Test plan
 
-- The 28-case routing audit becomes golden coverage (expanded to 34
-  cases in `run_routing_golden.sh`): user-side cases run through the
-  real binary today; the three model-side cases (malformed JSON,
-  unknown tool, multi-call) activate with canned mock-provider outputs
-  once the seam exists. A **symlink-escape case** (a symlink inside cwd
-  resolving outside it, whose write must be refused) is added to the
-  golden suite alongside the model-side cases when the canonical-path
-  check lands.
-  run through the real binary today (`run_routing_golden.sh`, 34
-  cases); the three model-side cases (malformed JSON, unknown tool,
-  multi-call) activate with canned mock-provider outputs once the
-  seam exists. A **symlink-escape case** (a symlink inside cwd
-  resolving outside it, whose write must be refused) is added to the
-  golden suite alongside the model-side cases when the canonical-path
-  check lands.
+- The routing audit is golden coverage (`run_routing_golden.sh`, 35
+  cases): user-side cases run through the real binary today; the three
+  model-side cases (malformed JSON, unknown tool, multi-call) activate
+  with canned mock-provider outputs once the seam exists. A
+  **symlink-escape case** (a symlink inside cwd resolving outside it,
+  whose write must be refused) is added to the golden suite alongside
+  the model-side cases when the canonical-path check lands.
 - Existing guarantees pinned: layout-contract gtests, pipe-mode output
   unchanged, `remediation_probes.sh`, `has_prefix_ci` unit tests,
   clang-format cleanliness (`--dry-run -Werror`).
+
+## PR breakdown
+
+Each step ships behind the flag `AGENTWARE_TOOL_CALL_LOOP` (default
+off). With the flag off, no reply is parsed and behavior is exactly
+today's. Merge order is (1) -> (2) -> (3) -> (4).
+
+1. **Registry + `list:`** (merged). `Core::ToolRegistry` / `ToolSpec`,
+   the generated system-prompt tool section in `ai_service.cpp`,
+   `known_names()` recovery, the `list:path[:glob]` dispatch branch,
+   and the golden suite at 35 cases. No loop yet.
+2. **Loop with read-only tools.** Parse one JSON call per reply, run
+   read-only tools automatically, feed truncated observations back,
+   enforce the turn cap, handle unknown tool / malformed JSON /
+   multi-call with the `unknown tool X; available: ...` framing. No
+   mutating tools callable by the model.
+3. **Mutating tools.** Mutating-tier tools enter the model-callable
+   registry behind the existing consent gate (`y/N`), with cwd-only
+   writes (canonical paths, symlinks resolved, `..` collapsed) and the
+   symlink-escape refusal. `remember:` is consent-gated in v1.
+4. **Plan step.** Plan rendering in the UI and pipe mode, plus the
+   `done` / `needs-user-input` completion signals, and the deferred
+   model-side golden tests (malformed JSON, unknown tool, multi-call,
+   symlink escape) activated with canned mock-provider outputs.
 
 ## Decisions record (all approved 2026-10-20)
 
