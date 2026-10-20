@@ -1269,9 +1269,7 @@ void Agent::handle_ai_chat(const std::string &input) {
 
   std::string current_input = input;
   int turns = 0;
-  size_t obs_budget_used = 0;
   int retries = 0;
-  constexpr size_t kObsBudget = 64 * 1024;
   constexpr int kRetryBudget = 3;
 
   while (true) {
@@ -1354,14 +1352,6 @@ void Agent::handle_ai_chat(const std::string &input) {
                         "Available tools: " +
                         Core::ToolRegistry::instance().known_names();
       obs = truncate_observation(obs);
-      if (obs_budget_used + obs.size() > kObsBudget) {
-        obs = "observation budget exhausted; summarize what you have";
-        obs = truncate_observation(obs);
-        current_input = quote_observation(obs);
-        Utils::UI::print_warning("Observation budget exhausted; stopping.");
-        break;
-      }
-      obs_budget_used += obs.size();
       current_input = quote_observation(obs);
       ++turns;
       ++retries;
@@ -1388,14 +1378,6 @@ void Agent::handle_ai_chat(const std::string &input) {
       std::string obs = "unknown tool " + tool_name + "; available: " +
                         Core::ToolRegistry::instance().known_names();
       obs = truncate_observation(obs);
-      if (obs_budget_used + obs.size() > kObsBudget) {
-        obs = "observation budget exhausted; summarize what you have";
-        obs = truncate_observation(obs);
-        current_input = quote_observation(obs);
-        Utils::UI::print_warning("Observation budget exhausted; stopping.");
-        break;
-      }
-      obs_budget_used += obs.size();
       current_input = quote_observation(obs);
       ++turns;
       ++retries;
@@ -1422,12 +1404,6 @@ void Agent::handle_ai_chat(const std::string &input) {
       if (confirm != "y" && confirm != "Y") {
         std::string obs = "Command cancelled by user";
         obs = truncate_observation(obs);
-        if (obs_budget_used + obs.size() > kObsBudget) {
-          obs = "observation budget exhausted; summarize what you have";
-          obs = truncate_observation(obs);
-        } else {
-          obs_budget_used += obs.size();
-        }
         current_input = quote_observation(obs);
         ++turns;
         Utils::UI::print_tool_result(obs);
@@ -1443,14 +1419,6 @@ void Agent::handle_ai_chat(const std::string &input) {
                         " is not available in read-only mode; only read-only "
                         "tools may run from the model loop.";
       obs = truncate_observation(obs);
-      if (obs_budget_used + obs.size() > kObsBudget) {
-        obs = "observation budget exhausted; summarize what you have";
-        obs = truncate_observation(obs);
-        current_input = quote_observation(obs);
-        Utils::UI::print_warning("Observation budget exhausted; stopping.");
-        break;
-      }
-      obs_budget_used += obs.size();
       current_input = quote_observation(obs);
       ++turns;
       if (turns >= cap) {
@@ -1501,12 +1469,6 @@ void Agent::handle_ai_chat(const std::string &input) {
         if (!err.empty()) {
           std::string obs = err;
           obs = truncate_observation(obs);
-          if (obs_budget_used + obs.size() > kObsBudget) {
-            obs = "observation budget exhausted; summarize what you have";
-            obs = truncate_observation(obs);
-          } else {
-            obs_budget_used += obs.size();
-          }
           current_input = quote_observation(obs);
           ++turns;
           Utils::UI::print_tool_call(spec->name, tool_input);
@@ -1537,14 +1499,6 @@ void Agent::handle_ai_chat(const std::string &input) {
       obs = "Tool " + tool_name + " completed with no output.";
     obs = truncate_observation(obs);
 
-    if (obs_budget_used + obs.size() > kObsBudget) {
-      obs = "observation budget exhausted; summarize what you have";
-      obs = truncate_observation(obs);
-      current_input = quote_observation(obs);
-      Utils::UI::print_warning("Observation budget exhausted; stopping.");
-      break;
-    }
-    obs_budget_used += obs.size();
 
     // Print the tool call/result in the activity format.
     Utils::UI::print_tool_call(spec->name, tool_input);

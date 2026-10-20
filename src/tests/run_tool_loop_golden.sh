@@ -108,7 +108,12 @@ run_case "turn-cap-trip"   '["{\"tool\":\"list\",\"arguments\":{\"path\":\".\"}}
 # truncation; per-tool timeout needs a slow command). They are tracked as
 # follow-ups.
 
-printf '\n%d/%d tool-loop golden cases passed\n' "$((CASES - FAILURES))" "$CASES"
+# 13b. Per-turn truncation: reading a ~10 KB file yields the truncation marker.
+run_case "per-turn-truncation" \
+  '["{\"tool\":\"read\",\"arguments\":{\"filename\":\"big.txt\"}}","Done."]' \
+  "read big file" "observation truncated at 4000 chars"
+
+printf '\n%d/%d tool-loop golden cases passed\n'  "$((CASES - FAILURES))" "$CASES"
 if [ "$FAILURES" -ne 0 ]; then exit 1; fi
 EOF
 chmod +x src/tests/run_tool_loop_golden.sh
