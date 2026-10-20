@@ -97,15 +97,17 @@ the Actions tab.
 cmake --build build --target test
 ```
 
-`ctest` runs two targets. `basic_tests` is the unit suite, currently 85 cases
-across 31 suites, covering command dispatch and redaction, file-access policy,
+`ctest` runs three targets. `basic_tests` is the unit suite, currently 120 cases
+across 38 suites, covering command dispatch and redaction, file-access policy,
 project-root discovery, MCP and GitHub availability, review threads, sandbox
 construction, spawn, bounded execution, the Docker availability probe, safety,
 configuration, results, and Docker behavior, empty replace-pattern rejection,
 issue parsing, git log handling, memory persistence, input validation, and both
 search backends. `remediation_probes` is a shell harness that drives the built
 binary against known-bad input and asserts it refuses. It is POSIX-only and is
-not run on the Windows CI job.
+not run on the Windows CI job. `routing_golden` is a 35-case shell harness that
+pins the dispatch routing contract through the real binary in a hermetic
+workspace; it makes zero outbound requests.
 
 ### Sandbox Tests
 
