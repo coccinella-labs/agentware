@@ -329,7 +329,8 @@ void Agent::process_user_input(const std::string &input) {
   handle_ai_chat(trimmed_input);
 }
 
-void Agent::handle_direct_command(const std::string &input, bool silent) {
+void Agent::handle_direct_command(const std::string &input, bool silent,
+                                 std::string *out_result) {
   // Ensure the registry is populated before any metadata lookup (known_names,
   // match_prefix). Idempotent; safe to call on every command.
   Core::register_all_tools();
@@ -907,7 +908,10 @@ void Agent::handle_direct_command(const std::string &input, bool silent) {
       std::cout << result << std::endl;
     }
   }
-  last_command_result_ = result;
+  if (out_result)
+    *out_result = result;
+  else
+    last_command_result_ = result;
 }
 
 std::string Agent::extract_tool_call(const std::string &text,
@@ -1487,13 +1491,19 @@ void Agent::handle_ai_chat(const std::string &input) {
         if (kToolTimeoutSec > 300) kToolTimeoutSec = 300;
       }
     }
+    auto result_ptr = std::make_shared<std::string>();
     bool timed_out = !Core::run_with_timeout(
-        [&]() { handle_direct_command(tool_input, /*silent=*/true); },
+        [&]() { handle_direct_command(tool_input, /*silent=*/true, result_ptr.get()); },
         kToolTimeoutSec);
-    std::string obs = last_command_result_;
+    std::string obs;
     if (timed_out) {
       obs = "tool timed out after " + std::to_string(kToolTimeoutSec) +
-            "s; partial output above\n" + obs;
+            "s; partial output above";
+      // result_ptr may be partially written by the detached thread; do not
+      // read it to avoid a data race.
+    } else {
+      obs = result_ptr->empty() ? "Tool " + tool_name + " completed with no output."
+                                : *result_ptr;
     }
     if (obs.empty())
       obs = "Tool " + tool_name + " completed with no output.";

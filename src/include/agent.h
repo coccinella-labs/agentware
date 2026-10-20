@@ -48,7 +48,11 @@ public:
                       const std::vector<int> &valid_choices,
                       int default_choice);
   void process_user_input(const std::string &input);
-  void handle_direct_command(const std::string &input, bool silent = false);
+  // out_result, when non-null, receives the tool result instead of
+  // last_command_result_. Used by the model tool-call loop to avoid
+  // data races when a tool times out and its thread is detached.
+  void handle_direct_command(const std::string &input, bool silent = false,
+                            std::string *out_result = nullptr);
   void handle_ai_chat(const std::string &input);
   // PR-3 tool-call seam helpers (flag-gated, default off).
   // Extracts a single JSON tool call from assistant text. Returns
