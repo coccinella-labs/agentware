@@ -5,6 +5,7 @@
 #include "codebase_service.h"
 #include "command_router.h"
 #include "search_service.h"
+#include "tool_registry.h"
 #include "command_service.h"
 #include "config.h"
 #include "context_service.h"
@@ -329,6 +330,9 @@ void Agent::process_user_input(const std::string &input) {
 }
 
 void Agent::handle_direct_command(const std::string &input) {
+  // Ensure the registry is populated before any metadata lookup (known_names,
+  // match_prefix). Idempotent; safe to call on every command.
+  Core::register_all_tools();
   std::string result;
   // Tool-call presentation: each branch that has a natural tool name
   // records it here; the shared emit tail renders the call and the

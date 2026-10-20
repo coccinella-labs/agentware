@@ -50,12 +50,6 @@ std::string ToolRegistry::known_names() const {
 }
 
 std::string ToolRegistry::render_prompt_section() const {
-  // Group tools by their category prefix in `name`? No: category is a
-  // separate concept. We store it implicitly by ordering: register_all_tools
-  // pushes in display order, and we insert blank-line group separators by
-  // checking a parallel category list. Simpler: keep a category field.
-  // (ToolSpec has no category field by design to stay minimal; instead we
-  // group here by a small lookup.)
   auto category_of = [](const std::string &n) -> const char * {
     if (n == "search:" || n == "cmd:" || n == "read:" || n == "write:" ||
         n == "list:")
@@ -132,8 +126,6 @@ void register_all_tools() {
                    ToolRiskTier::ReadOnly,
                    nullptr,
                    {"• list:path[:glob] - List files and directories"}});
-  // search: guard removal marker (already registered above)
-  // ADVANCED FILE OPERATIONS
   R.register_tool({"replace:",
                    "Replace text in files with precision",
                    "filename:old_text:new_text[:expected_count]",
