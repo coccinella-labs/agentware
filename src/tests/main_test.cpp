@@ -2380,3 +2380,11 @@ TEST(LayoutTest, PromptBodyExcludesTrailingSpace) {
   ASSERT_EQ(parts.size(), 1u);
   EXPECT_EQ(parts[0].back(), ':');
 }
+
+TEST(TimeoutUtilTest, FastCompletes) {
+  EXPECT_TRUE(Core::run_with_timeout([]() {}, 1));
+}
+
+TEST(TimeoutUtilTest, SlowTimesOut) {
+  EXPECT_FALSE(Core::run_with_timeout([]() { std::this_thread::sleep_for(std::chrono::seconds(2)); }, 1));
+}

@@ -1516,13 +1516,20 @@ void Agent::handle_ai_chat(const std::string &input) {
       }
     }
 
-    constexpr int kToolTimeoutSec = 30;
-    const auto tool_started = std::chrono::steady_clock::now();
-    handle_direct_command(tool_input, /*silent=*/true);
-    const auto tool_elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-        std::chrono::steady_clock::now() - tool_started);
+    int kToolTimeoutSec = 30;
+    {
+      std::string ts = Utils::Config::get_env_var("AGENTWARE_TOOL_TIMEOUT_SEC", "");
+      if (!ts.empty()) {
+        try { kToolTimeoutSec = std::stoi(ts); } catch (...) {}
+        if (kToolTimeoutSec < 1) kToolTimeoutSec = 30;
+        if (kToolTimeoutSec > 300) kToolTimeoutSec = 300;
+      }
+    }
+    bool timed_out = !Core::run_with_timeout(
+        [&]() { handle_direct_command(tool_input, /*silent=*/true); },
+        kToolTimeoutSec);
     std::string obs = last_command_result_;
-    if (tool_elapsed.count() > kToolTimeoutSec) {
+    if (timed_out) {
       obs = "tool timed out after " + std::to_string(kToolTimeoutSec) +
             "s; partial output above\n" + obs;
     }
