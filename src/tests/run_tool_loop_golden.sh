@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic golden tests for the model tool-call loop (PR 2).
 # Requires AGENTWARE_TOOL_CALL_LOOP=1 and a running mock tool provider.
-# Each case writes a canned reply list, starts the provider, runs the
-# binary, and checks the output for an expected marker.
 set -euo pipefail
 
 BIN="${1:-./bin/agentware-agent}"
@@ -11,22 +9,23 @@ FAILURES=0
 CASES=0
 
 run_case() {
-  local name="$1" replies="$2" input="$3" expect="$4"
+  local name="$1" replies="$2" input="$3" expect="$4" extra="${5:-}"
   CASES=$((CASES + 1))
   printf '%s' "$replies" > /tmp/tl_replies.json
   MOCK_RESPONSES=/tmp/tl_replies.json python3 src/tests/mock_tool_provider.py "$PORT" >/tmp/tl_prov.log 2>&1 &
   local ppid=$!
   sleep 1
-  local out
-  out=$(AGENTWARE_TOOL_CALL_LOOP=1 TEST_MODE=1 TEST_OLLAMA_URL="http://127.0.0.1:${PORT}/api/chat" \
-        "$BIN" --pipe <<< "$input" 2>&1 || true)
+  local stdin_lines actual
+  stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
+  actual=$(printf '%b' "$stdin_lines" | "$BIN" 2>&1 |
+    perl -pe 's/\e\[[0-9;]*[mK]//g')
   kill $ppid 2>/dev/null || true
   wait $ppid 2>/dev/null || true
-  if echo "$out" | grep -qF "$expect"; then
+  if echo "$actual" | grep -qF "$expect"; then
     echo "PASS  $name"
   else
     echo "FAIL  $name (expected '$expect')"
-    echo "$out" | head -20
+    echo "$actual" | sed 's/^/      | /' | head -12
     FAILURES=$((FAILURES + 1))
   fi
 }
@@ -70,6 +69,26 @@ run_case "done-signal" \
 run_case "needs-input" \
   '["{\"needs_user_input\":\"which file?\"}"]' \
   "edit something" "which file?"
+
+# 9. Trailing comma is malformed JSON, recoverable.
+run_case "trailing-comma" \
+  '["{\"tool\":\"list\",\"arguments\":{\"path\":\".\"},}","Done."]' \
+  "list the dir" "malformed tool call: invalid JSON"
+
+# 10. Absolute path outside cwd is refused (model surface).
+run_case "abs-path-outside-cwd" \
+  '["{\"tool\":\"read\",\"arguments\":{\"filename\":\"/etc/passwd\"}}","Done."]' \
+  "read passwd" "Path escapes the permitted root"
+
+# 11. Secrets file inside cwd is refused.
+run_case "secrets-env" \
+  '["{\"tool\":\"read\",\"arguments\":{\"filename\":\".env\"}}","Done."]' \
+  "read env" "Refused: secrets path"
+
+# 12. fetch: from the model requires consent (exfiltration channel).
+run_case "fetch-needs-consent" \
+  '["{\"tool\":\"fetch\",\"arguments\":{\"url\":\"http://127.0.0.1:18093\"}}","Done."]' \
+  "fetch page" "Command cancelled by user" "n"
 
 printf '\n%d/%d tool-loop golden cases passed\n' "$((CASES - FAILURES))" "$CASES"
 if [ "$FAILURES" -ne 0 ]; then exit 1; fi

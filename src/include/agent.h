@@ -64,6 +64,9 @@ public:
   static std::string truncate_observation(const std::string &obs);
   // Wraps an observation as quoted, untrusted data for the model.
   static std::string quote_observation(const std::string &obs);
+  // Model-call surface path guard: cwd-only on canonical paths plus
+  // refusal of secrets paths. Returns empty string when allowed.
+  static std::string model_path_check(const std::string &path);
   void handle_file_injection_command(const std::string &input);
   void handle_shell_command(const std::string &input);
   void handle_meta_command(const std::string &input);

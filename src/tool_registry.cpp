@@ -1,6 +1,7 @@
 #include "tool_registry.h"
 
 #include "command_router.h"
+#include "web_service.h"
 
 #include <algorithm>
 #include <sstream>
@@ -126,6 +127,18 @@ void register_all_tools() {
                    ToolRiskTier::ReadOnly,
                    nullptr,
                    {"• list:path[:glob] - List files and directories"}});
+  R.register_tool({"fetch:",
+                   "Fetch web content (consent-gated from the model)",
+                   "url",
+                   ToolRiskTier::ReadOnly,
+                   [](const std::string &input) {
+                     std::string url = input.substr(6);
+                     size_t s = url.find_first_not_of(" \t");
+                     if (s != std::string::npos)
+                       url = url.substr(s);
+                     return Services::WebService::fetch_text(url);
+                   },
+                   {"• fetch:url - Fetch web content"}});
   R.register_tool({"replace:",
                    "Replace text in files with precision",
                    "filename:old_text:new_text[:expected_count]",
