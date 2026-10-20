@@ -2,6 +2,7 @@
 #include "agent_mode.h"
 #include "config.h" // For AGENTWARE_API
 #include "search_service.h"
+#include <atomic>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -48,7 +49,12 @@ public:
                       const std::vector<int> &valid_choices,
                       int default_choice);
   void process_user_input(const std::string &input);
-  void handle_direct_command(const std::string &input, bool silent = false);
+  // out_result, when non-null, receives the tool result instead of
+  // last_command_result_. Used by the model tool-call loop to avoid
+  // data races when a tool times out and its thread is detached.
+  void handle_direct_command(const std::string &input, bool silent = false,
+                            std::string *out_result = nullptr,
+                            bool record = true);
   void handle_ai_chat(const std::string &input);
   // PR-3 tool-call seam helpers (flag-gated, default off).
   // Extracts a single JSON tool call from assistant text. Returns
@@ -62,6 +68,13 @@ public:
                                         const nlohmann::json &args);
   // Truncates an observation to the configured limit with a marker.
   static std::string truncate_observation(const std::string &obs);
+  // Wraps an observation as quoted, untrusted data for the model.
+  static std::string quote_observation(const std::string &obs);
+  // Model-call surface path guard: cwd-only on canonical paths plus
+  // refusal of secrets paths. Returns empty string when allowed.
+  static std::string model_path_check(const std::string &path);
+  // Heuristic: true if the path looks like a secrets file.
+  static bool is_secrets_path(const std::string &path);
   void handle_file_injection_command(const std::string &input);
   void handle_shell_command(const std::string &input);
   void handle_meta_command(const std::string &input);

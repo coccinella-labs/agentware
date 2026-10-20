@@ -1,8 +1,12 @@
 #pragma once
 #include "config.h" // For AGENTWARE_API
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
+#include <functional>
 #include <string>
+#include <thread>
 
 // Command dispatch boundary.
 //
@@ -56,6 +60,28 @@ classify_input(const std::string &trimmed);
 // explicit is what stops an email address from being read as a file name.
 [[nodiscard]] AGENTWARE_API bool is_file_reference_at(const std::string &input,
                                                       size_t pos);
+
+// Runs fn with a timeout. Returns true if fn completed within timeout_sec,
+// false if it timed out (fn may still be running in a detached thread).
+// Used by the model tool-call loop for per-tool timeouts.
+inline bool run_with_timeout(std::function<void()> fn, int timeout_sec) {
+  std::atomic<bool> done{false};
+  std::thread t([&]() {
+    fn();
+    done = true;
+  });
+  auto deadline = std::chrono::steady_clock::now() +
+                  std::chrono::seconds(timeout_sec);
+  while (!done.load() && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  if (done.load()) {
+    t.join();
+    return true;
+  }
+  t.detach();
+  return false;
+}
 
 // Removes secrets from a command line before it reaches memory, logs, or the
 // checkpoint copies of memory. Currently redacts the value passed to

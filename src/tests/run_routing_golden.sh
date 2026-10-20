@@ -18,6 +18,13 @@
 set -u
 
 BIN="${1:?usage: run_routing_golden.sh <agentware-agent binary>}"
+PORT="${PORT:-0}"
+if [ "$PORT" = "0" ]; then
+  for p in 18093 18094 18095 18096 18097; do
+    if ! (exec 3<>/dev/tcp/127.0.0.1/$p) 2>/dev/null; then PORT=$p; break; fi
+  done
+fi
+: "${PORT:=18093}"
 BIN="$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -83,11 +90,11 @@ printf 'goldendiff uncommitted tracked change\n' >> hello.txt
 
 # Local HTTP fixture for /fetch (deterministic, no external network).
 printf '<html><body><h1>golden-fetch-marker</h1></body></html>' > index.html
-python3 -m http.server 18093 >/dev/null 2>&1 &
+python3 -m http.server "$PORT" >/dev/null 2>&1 &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null; rm -rf "$WORK"' EXIT
 for _ in $(seq 1 20); do
-  timeout 1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/18093' 2>/dev/null && break
+  (exec 3<>/dev/tcp/127.0.0.1/"$PORT") 2>/dev/null && break
   sleep 0.2
 done
 
@@ -160,7 +167,7 @@ expect "meta-unknown" "/tokens-nonsense" "" "Unknown meta command"
 
 # 24-25. fetch over the local fixture server; multi-file tool.
 sleep 1
-expect "fetch-local" "/fetch http://127.0.0.1:18093 text" "" "golden-fetch-marker"
+expect "fetch-local" "/fetch http://127.0.0.1:$PORT text" "" "golden-fetch-marker"
 expect "multi-file" "/files hello.txt notes.md" "" "Multi-file content"
 
 # 26. list: read-only directory listing (new registry-native tool).

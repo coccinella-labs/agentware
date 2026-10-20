@@ -8,7 +8,6 @@
 #include <sstream>
 #include <vector>
 
-const long kDefaultTimeoutSeconds = 30;
 const size_t kMaxContentLength = 8000;
 
 // Callback function for writing response data
@@ -34,6 +33,20 @@ static size_t HeaderCallback(char *buffer, size_t size, size_t nitems,
 }
 
 namespace Services {
+
+long WebService::default_network_timeout() {
+  const char *v = std::getenv("AGENTWARE_NET_TIMEOUT_SEC");
+  if (v && *v) {
+    try {
+      long t = std::stol(v);
+      if (t >= 1 && t <= 120)
+        return t;
+    } catch (...) {
+    }
+  }
+  return 30; // default; user-typed behavior unchanged
+}
+
 std::string WebService::get_api_key() {
   return Utils::Config::get_env_var("SERPAPI_KEY");
 }
@@ -418,7 +431,7 @@ WebResponse WebService::fetch_with_headers(const std::string &url,
   curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, HeaderCallback);
   curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response_headers);
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-  curl_easy_setopt(curl, CURLOPT_TIMEOUT, kDefaultTimeoutSeconds);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, default_network_timeout());
 
   // Perform the request
   CURLcode res = curl_easy_perform(curl);
@@ -490,7 +503,7 @@ WebResponse WebService::post_json(const std::string &url,
     // Make POST request
     cpr::Response cpr_response =
         cpr::Post(cpr::Url{url}, cpr_headers, cpr::Body{json_body},
-                  cpr::Timeout{std::chrono::seconds{kDefaultTimeoutSeconds}});
+                  cpr::Timeout{std::chrono::seconds{default_network_timeout()}});
 
     // Fill response
     response.status_code = static_cast<int>(cpr_response.status_code);
