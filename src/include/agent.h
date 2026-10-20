@@ -62,6 +62,8 @@ public:
                                         const nlohmann::json &args);
   // Truncates an observation to the configured limit with a marker.
   static std::string truncate_observation(const std::string &obs);
+  // Wraps an observation as quoted, untrusted data for the model.
+  static std::string quote_observation(const std::string &obs);
   void handle_file_injection_command(const std::string &input);
   void handle_shell_command(const std::string &input);
   void handle_meta_command(const std::string &input);
