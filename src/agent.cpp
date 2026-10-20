@@ -602,6 +602,8 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
           result = "Found " + std::to_string(search_result.matches.size()) +
                    " matches (via " + search_result.backend_used + "):\n";
           for (const auto &match : search_result.matches) {
+            if (Core::Agent::is_secrets_path(match.file_path))
+              continue;
             result += match.file_path + ":" +
                       std::to_string(match.line_number) + ": " +
                       match.line_content + "\n";
@@ -1189,10 +1191,17 @@ std::string Agent::model_path_check(const std::string &path) {
     return "Path escapes the permitted root (cwd): " + path;
 
   // Secrets paths (heuristic list, single source).
-  std::string lower = canon.generic_string();
+  if (is_secrets_path(canon.generic_string()))
+    return "Refused: secrets path: " + path;
+  return "";
+}
+
+bool Agent::is_secrets_path(const std::string &path) {
+  std::string lower = path;
   std::transform(lower.begin(), lower.end(), lower.begin(),
                  [](unsigned char c) { return std::tolower(c); });
-  std::string lname = canon.filename().string();
+  std::filesystem::path p(path);
+  std::string lname = p.filename().string();
   std::string lnamel = lname;
   std::transform(lnamel.begin(), lnamel.end(), lnamel.begin(),
                  [](unsigned char c) { return std::tolower(c); });
@@ -1205,24 +1214,23 @@ std::string Agent::model_path_check(const std::string &path) {
 
   for (const auto &n : secret_names) {
     if (lnamel == n || lnamel.rfind(n + ".", 0) == 0)
-      return "Refused: secrets path: " + path;
+      return true;
   }
   if (lnamel.rfind(".env.", 0) == 0)
-    return "Refused: secrets path: " + path;
+    return true;
   for (const auto &suf : secret_suffixes) {
     if (lnamel.size() > suf.size() &&
         lnamel.rfind(suf) == lnamel.size() - suf.size())
-      return "Refused: secrets path: " + path;
+      return true;
   }
   for (const auto &seg : secret_segments) {
     if (lower.find(seg) != std::string::npos)
-      return "Refused: secrets path: " + path;
+      return true;
   }
   if (lnamel.find("secret") != std::string::npos ||
       lnamel.find("credential") != std::string::npos)
-    return "Refused: secrets path: " + path;
-
-  return "";
+    return true;
+  return false;
 }
 
 void Agent::handle_ai_chat(const std::string &input) {
