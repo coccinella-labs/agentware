@@ -734,7 +734,7 @@ void SandboxService::cleanup_old_containers() {
 
 bool SandboxService::is_command_safe(const std::string &command) {
   // Substring denylist: defense in depth only, never a substitute for
-  // container isolation. NOTE: a bare "." entry was removed here — it
+  // container isolation. NOTE: a bare "." entry was removed here: it
   // blocked nearly every realistic command containing a dot (e.g.
   // "cat README.md") while missing whole dangerous classes. Keep entries
   // structural; prove each one with a test before adding.
