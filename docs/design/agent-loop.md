@@ -72,7 +72,7 @@ from it so they cannot drift:
 1. the dispatch surface (user prefix routing stays as-is, so
    user-facing syntax and pipe-mode output are preserved), and
 2. the tool section of the system prompt in `src/ai_service.cpp`,
-   replacing the hand-maintained for-list.
+   replacing the hand-maintained for list.
 
 `list:` (read-only directory/file listing with glob support, built on
 the native walk in `search_service.cpp`) is the first registry-native
