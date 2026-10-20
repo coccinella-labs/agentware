@@ -1503,6 +1503,39 @@ void Agent::handle_ai_chat(const std::string &input) {
     // result is captured without double-printing.
     std::string tool_input = json_args_to_input(tool_name, args);
 
+    // Scope a shorter network timeout to the model path for fetch:/github:
+    // (does not change user-typed behavior).
+    const bool net_scoped = (tool_name == "fetch" || tool_name == "github");
+    // RAII guard: shorter network timeout only for the model path; restored
+    // on scope exit so user-typed behavior is unchanged.
+    struct NetTimeoutGuard {
+      bool active;
+      std::string prev;
+      NetTimeoutGuard(bool a) : active(a) {
+        if (!active)
+          return;
+        const char *v = std::getenv("AGENTWARE_NET_TIMEOUT_SEC");
+        prev = v ? v : "";
+#ifdef _WIN32
+        _putenv_s("AGENTWARE_NET_TIMEOUT_SEC", "10");
+#else
+        setenv("AGENTWARE_NET_TIMEOUT_SEC", "10", 1);
+#endif
+      }
+      ~NetTimeoutGuard() {
+        if (!active)
+          return;
+#ifdef _WIN32
+        _putenv_s("AGENTWARE_NET_TIMEOUT_SEC", prev.empty() ? "30" : prev.c_str());
+#else
+        if (prev.empty())
+          unsetenv("AGENTWARE_NET_TIMEOUT_SEC");
+        else
+          setenv("AGENTWARE_NET_TIMEOUT_SEC", prev.c_str(), 1);
+#endif
+      }
+    } net_guard(net_scoped);
+
     // Model-call surface: contain read-only file tools to cwd on canonical
     // paths and refuse secrets paths. User-typed commands are unaffected.
     {
