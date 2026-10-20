@@ -18,6 +18,11 @@ public:
   // Get git status
   static std::string get_git_status(const std::string &path);
 
+  // Get the unstaged working-tree diff. Read-only: runs `git diff`, which
+  // never mutates the repository, so it needs no consent gate beyond the
+  // usual path guards.
+  static std::string get_git_diff(const std::string &path);
+
   // Get list of files changed in last N days
   static std::vector<std::string> get_changed_files(const std::string &path,
                                                     int days = 7);

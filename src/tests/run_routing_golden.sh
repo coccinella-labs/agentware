@@ -77,6 +77,10 @@ git init -q . && git add hello.txt notes.md
 git -c user.email=golden@local -c user.name=golden commit -qm "fixture"
 if [ "$?" -ne 0 ]; then echo "FATAL: fixture git commit failed"; exit 1; fi
 
+# Make the tree dirty for the git:diff case: an uncommitted tracked change
+# whose marker line must appear verbatim in the routed diff output.
+printf 'goldendiff uncommitted tracked change\n' >> hello.txt
+
 # Local HTTP fixture for /fetch (deterministic, no external network).
 printf '<html><body><h1>golden-fetch-marker</h1></body></html>' > index.html
 python3 -m http.server 18093 >/dev/null 2>&1 &
@@ -117,6 +121,7 @@ expect "grep-capitalized" "Grep:needle:." "" 'Tool Grep("needle")'
 
 # 13-14. git routing, known + unknown subcommand.
 expect "git-status" "git:status" "" 'Tool Git("status")'
+expect "git-diff" "git:diff" "" "goldendiff"
 expect "git-bogus" "git:bogus" "" "Usage: git:"
 
 # 15-17. analysis family.

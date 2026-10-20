@@ -675,10 +675,13 @@ void Agent::handle_direct_command(const std::string &input) {
       result = Services::GitService::get_git_log(path, 7);
     } else if (params.find("status") == 0) {
       result = Services::GitService::get_git_status(path);
+    } else if (params.find("diff") == 0) {
+      // Read-only inspection of unstaged tracked changes.
+      result = Services::GitService::get_git_diff(path);
     } else if (params.find("analyze") == 0) {
       result = Services::GitService::analyze_repository(path);
     } else {
-      result = "Usage: git:log, git:status, git:analyze";
+      result = "Usage: git:log, git:status, git:diff, git:analyze";
     }
     record_interaction(*memory_, "git:" + params, result);
   } else if (Core::has_prefix_ci(input, "tree:")) {
