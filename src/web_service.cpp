@@ -61,7 +61,8 @@ std::string WebService::search(const std::string &query) {
       encoded_query = query; // Fallback to unencoded query if curl init fails
     }
 
-    std::string search_url = "https://api.duckduckgo.com/?q=" + encoded_query;
+    std::string search_url = "https://api.duckduckgo.com/?q=" + encoded_query +
+                             "&format=json&no_redirect=1&no_html=1";
 
     std::string response_str;
     std::string response_headers;
@@ -75,6 +76,11 @@ std::string WebService::search(const std::string &query) {
       curl_easy_setopt(search_curl, CURLOPT_HEADERDATA, &response_headers);
       curl_easy_setopt(search_curl, CURLOPT_TIMEOUT, 5L); // 5s timeout
       curl_easy_setopt(search_curl, CURLOPT_USERAGENT, "Agentware-Agent/1.0");
+      // api.duckduckgo.com answers some requests with a redirect (HTTP
+      // 301 to an https/plain variant). The fetch paths already follow
+      // redirects; a search that dies on one is a functional defect,
+      // so mirror the same treatment.
+      curl_easy_setopt(search_curl, CURLOPT_FOLLOWLOCATION, 1L);
 
       CURLcode res = curl_easy_perform(search_curl);
       if (res != CURLE_OK) {
