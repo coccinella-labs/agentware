@@ -1406,9 +1406,14 @@ void Agent::handle_ai_chat(const std::string &input) {
       continue;
     }
 
-    // fetch: from the model requires consent in v1 (possible exfiltration
-    // channel). It is read-only for execution but consent-gated.
-    if (tool_name == "fetch") {
+    // fetch: and github: from the model require consent in v1 (possible
+    // exfiltration of private data to the model). Read-only for execution
+    // but consent-gated.
+    if (tool_name == "fetch" || tool_name == "github") {
+      std::string label = (tool_name == "fetch") ? "fetch: may exfiltrate data"
+                                                  : "github: reads private repo data";
+      std::cout << "Tool " << tool_name << ": " << label
+                << ". Continue? (y/N): " << std::flush;
       std::cout << "Tool fetch: may exfiltrate data. Continue? (y/N): "
                 << std::flush;
       std::string confirm;
