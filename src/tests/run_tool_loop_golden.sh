@@ -113,6 +113,12 @@ run_case "per-turn-truncation" \
   '["{\"tool\":\"read\",\"arguments\":{\"filename\":\"big.txt\"}}","Done."]' \
   "read big file" "observation truncated at 4000 chars"
 
+# 14-19. Meta/slash/bang commands are not tools: unknown tool + available list.
+for t in '/auth' '/chat save' '/checkpoint' '/mcp' '/sandbox' '!echo'; do
+  replies=$(printf '[{"tool":%s,"arguments":{}},"Done."]' "$(python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$t")")
+  run_case "unknown-meta-$t" "$replies" "do it" "unknown tool $t"
+done
+
 printf '\n%d/%d tool-loop golden cases passed\n'  "$((CASES - FAILURES))" "$CASES"
 if [ "$FAILURES" -ne 0 ]; then exit 1; fi
 EOF
