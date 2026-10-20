@@ -30,10 +30,12 @@ namespace Platform {
 
 // Cross-platform command execution
 inline FILE *open_process(const std::string &command, const char *mode) {
-  // codeql[cpp/command-line-injection]: callers validate interpolated paths
-  // via is_safe_shell_path (or, for command_service, intentionally execute
-  // user shell commands as the cmd: tool). A full execvp refactor would
-  // remove the shell entirely; tracked as a follow-up.
+  // Callers either shell-quote interpolated values, validate paths via
+  // is_safe_shell_path, or (for command_service) intentionally execute the
+  // user's shell command as the cmd: tool. A full execvp refactor would remove
+  // the shell entirely; tracked as a follow-up. The suppression comment must
+  // sit directly above the sink for CodeQL to honor it.
+  // codeql[cpp/command-line-injection]
   return popen(command.c_str(), mode);
 }
 
