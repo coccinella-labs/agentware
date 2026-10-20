@@ -5,19 +5,37 @@
 #include <vector>
 
 namespace Utils {
-// Color namespace
+// Color namespace. The constants are mutable std::strings on purpose:
+// terminal_setup flips them on Windows consoles that refuse VT
+// processing (colors-off fallback); reading sites stay untouched.
 namespace Color {
-extern AGENTWARE_API const std::string RESET;
-extern AGENTWARE_API const std::string GREEN;
-extern AGENTWARE_API const std::string YELLOW;
-extern AGENTWARE_API const std::string RED;
-extern AGENTWARE_API const std::string CYAN;
-extern AGENTWARE_API const std::string BOLD;
-extern AGENTWARE_API const std::string DIM;
-extern AGENTWARE_API const std::string PINK;
+extern AGENTWARE_API std::string RESET;
+extern AGENTWARE_API std::string GREEN;
+extern AGENTWARE_API std::string YELLOW;
+extern AGENTWARE_API std::string RED;
+extern AGENTWARE_API std::string CYAN;
+extern AGENTWARE_API std::string BOLD;
+extern AGENTWARE_API std::string DIM;
+extern AGENTWARE_API std::string PINK;
 // Subdued orange for active work (a running tool call, a waiting model).
-extern AGENTWARE_API const std::string ACCENT;
+extern AGENTWARE_API std::string ACCENT;
 } // namespace Color
+
+// Glyph namespace: the UI's own box-drawing and symbol chrome, mutable
+// for the same console-fallback reason as Color. Tool data output (the
+// codebase tree, fetched pages) is not routed through these.
+namespace Glyph {
+extern AGENTWARE_API std::string HLINE;     // box horizontal ─
+extern AGENTWARE_API std::string VLINE;     // box vertical │
+extern AGENTWARE_API std::string CORNER_TL; // ╭
+extern AGENTWARE_API std::string CORNER_TR; // ╮
+extern AGENTWARE_API std::string CORNER_BL; // ╰
+extern AGENTWARE_API std::string CORNER_BR; // ╯
+extern AGENTWARE_API std::string ARROW;     // prompt marker ❯
+extern AGENTWARE_API std::string SPARK;     // turn-complete marker ✳
+extern AGENTWARE_API std::string BULLET;    // tool/response bullet ●
+extern AGENTWARE_API std::string MIDDOT;    // brand separator ·
+} // namespace Glyph
 
 // UI namespace
 namespace UI {
@@ -31,6 +49,12 @@ AGENTWARE_API void spinner(std::atomic<bool> &done); // For threaded spinner
 // the frame cycles, so a waiting model reads as active work. No-op on
 // non-interactive output, like the unlabeled threaded spinner.
 AGENTWARE_API void spinner(std::atomic<bool> &done, const std::string &label);
+// Terminal-console fallback: colors off and glyphs swapped for ASCII
+// (>, +-|, *, o, .). Called when the console cannot do VT processing
+// (legacy Windows conhost). After this, colors_enabled() also reports
+// false, so every existing colors_enabled() branch takes its ASCII
+// path.
+AGENTWARE_API void enable_ascii_fallback();
 
 // Status messages
 AGENTWARE_API void print_success(const std::string &message);

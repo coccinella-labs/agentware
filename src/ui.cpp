@@ -35,40 +35,85 @@ bool stdout_is_tty() {
 std::string code(const char *seq) { return UI::colors_enabled() ? seq : ""; }
 } // namespace
 
+namespace {
+// Set by enable_ascii_fallback: flips colors_enabled() to false so the
+// branch fallbacks (e.g. "[INFO]") and glyph swaps all go ASCII.
+bool g_ascii_fallback = false;
+} // namespace
+
 bool UI::interactive_output() { return stdout_is_tty(); }
 
 // NO_COLOR disables color without disabling any other output. This is the
 // single source of truth for the whole process; ThemeService defers to it so
 // the two color policies cannot drift apart.
 bool UI::colors_enabled() {
-  if (std::getenv("NO_COLOR") != nullptr) {
+  if (g_ascii_fallback || std::getenv("NO_COLOR") != nullptr) {
     return false;
   }
   return stdout_is_tty();
 }
 
+void UI::enable_ascii_fallback() {
+  g_ascii_fallback = true;
+  Color::RESET.clear();
+  Color::GREEN.clear();
+  Color::YELLOW.clear();
+  Color::RED.clear();
+  Color::CYAN.clear();
+  Color::BOLD.clear();
+  Color::DIM.clear();
+  Color::PINK.clear();
+  Color::ACCENT.clear();
+  Glyph::HLINE = "-";
+  Glyph::VLINE = "|";
+  Glyph::CORNER_TL = "+";
+  Glyph::CORNER_TR = "+";
+  Glyph::CORNER_BL = "+";
+  Glyph::CORNER_BR = "+";
+  Glyph::ARROW = ">";
+  Glyph::SPARK = "*";
+  Glyph::BULLET = "o";
+  Glyph::MIDDOT = ".";
+}
+
 // ===== Color Codes =====
 namespace Color {
-// Exported color constants
-AGENTWARE_API const std::string RESET = code("\033[0m");
-AGENTWARE_API const std::string GREEN = code("\033[32m");
-AGENTWARE_API const std::string YELLOW = code("\033[33m");
-AGENTWARE_API const std::string RED = code("\033[31m");
-AGENTWARE_API const std::string CYAN = code("\033[36m");
-AGENTWARE_API const std::string BOLD = code("\033[1m");
-AGENTWARE_API const std::string DIM = code("\033[2m");
+// Exported color constants (mutable: enable_ascii_fallback clears them
+// when the console cannot do VT processing; see the header comment).
+AGENTWARE_API std::string RESET = code("\033[0m");
+AGENTWARE_API std::string GREEN = code("\033[32m");
+AGENTWARE_API std::string YELLOW = code("\033[33m");
+AGENTWARE_API std::string RED = code("\033[31m");
+AGENTWARE_API std::string CYAN = code("\033[36m");
+AGENTWARE_API std::string BOLD = code("\033[1m");
+AGENTWARE_API std::string DIM = code("\033[2m");
 // Logo color (matches Coccinella Labs pink #F34B7D)
-AGENTWARE_API const std::string PINK = code("\033[38;2;243;75;125m");
+AGENTWARE_API std::string PINK = code("\033[38;2;243;75;125m");
 // Subdued orange for active work.
-AGENTWARE_API const std::string ACCENT = code("\033[38;2;214;141;84m");
+AGENTWARE_API std::string ACCENT = code("\033[38;2;214;141;84m");
 } // namespace Color
+
+// ===== Glyphs =====
+namespace Glyph {
+AGENTWARE_API std::string HLINE = "\u2500";
+AGENTWARE_API std::string VLINE = "\u2502";
+AGENTWARE_API std::string CORNER_TL = "\u256d";
+AGENTWARE_API std::string CORNER_TR = "\u256e";
+AGENTWARE_API std::string CORNER_BL = "\u2570";
+AGENTWARE_API std::string CORNER_BR = "\u256f";
+AGENTWARE_API std::string ARROW = "\u276f";
+AGENTWARE_API std::string SPARK = "\u2733";
+AGENTWARE_API std::string BULLET = "\u25cf";
+AGENTWARE_API std::string MIDDOT = "\u00b7";
+} // namespace Glyph
 
 // ===== Logo =====
 // A restrained header: one brand line and a divider. The oversized block
 // banner is gone; the width-aware layout keeps small terminals usable.
 void UI::print_logo() {
   std::cout << Color::PINK << Color::BOLD << "Agentware" << Color::RESET
-            << Color::DIM << "  ·  Coccinella Labs" << Color::RESET << "\n";
+            << Color::DIM << "  " << Glyph::MIDDOT << "  Coccinella Labs"
+            << Color::RESET << "\n";
   print_divider();
 }
 
@@ -438,9 +483,9 @@ void UI::print_tool_call(const std::string &tool, const std::string &args) {
     std::cout << "Tool " << tool << "(\"" << args << "\")\n";
     return;
   }
-  std::cout << "● " << Color::BOLD << tool << Color::RESET << Color::DIM << "("
-            << Color::RESET << args << Color::DIM << ")" << Color::RESET
-            << "\n";
+  std::cout << Glyph::BULLET << " " << Color::BOLD << tool << Color::RESET
+            << Color::DIM << "(" << Color::RESET << args << Color::DIM << ")"
+            << Color::RESET << "\n";
 }
 
 void UI::print_tool_result(const std::string &result) {
@@ -493,7 +538,7 @@ void UI::print_response(const std::string &response) {
   std::string line;
   bool first = true;
   while (std::getline(in, line)) {
-    std::cout << (first ? std::string("● ") : std::string("  ")) << line
+    std::cout << (first ? Glyph::BULLET + " " : std::string("  ")) << line
               << "\n";
     first = false;
   }
@@ -505,7 +550,7 @@ std::string repeat_h(const size_t count) {
   std::string out;
   out.reserve(count * 3);
   for (size_t i = 0; i < count; ++i) {
-    out += "\u2500"; // ─
+    out += Glyph::HLINE;
   }
   return out;
 }
@@ -528,22 +573,24 @@ void UI::print_welcome_panel(const std::string &mode, const std::string &model,
   const std::string title = std::string("Agentware v") + Version::get_version();
 
   auto inner = [&](const std::string &text) {
-    std::cout << Color::DIM << "\u2502 " << Color::RESET << text << "\n";
+    std::cout << Color::DIM << Glyph::VLINE << " " << Color::RESET << text
+              << "\n";
   };
 
   const std::string context_line =
       "Ready. Mode: " + mode + " | Model: " + model + " | Cwd: " + cwd;
-  std::cout << Color::ACCENT << "\u256d\u2500 " << title << " " << Color::RESET
-            << Color::DIM
+  std::cout << Color::ACCENT << Glyph::CORNER_TL << Glyph::HLINE << " " << title
+            << " " << Color::RESET << Color::DIM
             << repeat_h(box_w > title.size() + 6 ? box_w - title.size() - 6 : 1)
-            << "\u256e" << Color::RESET << "\n";
+            << Glyph::CORNER_TR << Color::RESET << "\n";
   for (const auto &part : wrap_words(context_line, box_w - 4)) {
     inner(part);
   }
   inner("help: all commands | !<cmd>: run a shell command");
   inner("/chat save|resume <tag>: keep or resume a session");
-  std::cout << Color::DIM << "\u2570" << repeat_h(box_w > 2 ? box_w - 2 : 1)
-            << "\u256f" << Color::RESET << "\n";
+  std::cout << Color::DIM << Glyph::CORNER_BL
+            << repeat_h(box_w > 2 ? box_w - 2 : 1) << Glyph::CORNER_BR
+            << Color::RESET << "\n";
 }
 
 void UI::print_user_line(const std::string &user_input) {
@@ -552,7 +599,7 @@ void UI::print_user_line(const std::string &user_input) {
     return;
   }
   // Full-width subtle bar behind the request line, like the reference.
-  std::cout << "\033[2m\u276f\033[0m "
+  std::cout << "\033[2m" << Glyph::ARROW << "\033[0m "
             << "\033[48;5;236m" << user_input << "\033[K\033[0m"
             << "\n";
 }
@@ -563,8 +610,8 @@ void UI::print_turn_status(int seconds) {
     std::cout << text << "\n";
     return;
   }
-  std::cout << Color::ACCENT << "\u2733" << Color::RESET << Color::DIM << " "
-            << text << Color::RESET << "\n";
+  std::cout << Color::ACCENT << Glyph::SPARK << Color::RESET << Color::DIM
+            << " " << text << Color::RESET << "\n";
 }
 
 void UI::print_diff_removed(const std::string &text) {
