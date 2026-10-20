@@ -81,5 +81,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-PYEOF
-chmod +x src/tests/mock_tool_provider.py
+EOF
+python3 -c "import ast; ast.parse(open('src/tests/mock_tool_provider.py').read()); print('syntax OK')"
