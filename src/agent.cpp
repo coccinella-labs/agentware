@@ -920,19 +920,15 @@ std::string Agent::extract_tool_call(const std::string &text,
   std::string candidate = text;
   size_t fence = candidate.find("```");
   if (fence != std::string::npos) {
-  size_t open_nl = candidate.find('\n', fence);
-  size_t close = candidate.find("```", (open_nl == std::string::npos) ? fence + 3 : open_nl);
-  if (close != std::string::npos) {
-    size_t content_start = (open_nl == std::string::npos) ? fence + 3 : open_nl + 1;
-    if (close > content_start) {
-      candidate = candidate.substr(content_start, close - content_start);
-    }
-  }
+    size_t open_nl = candidate.find('\n', fence);
     size_t close = candidate.find(
-        "```", open_nl == std::string::npos ? fence + 3 : open_nl);
-    if (open_nl != std::string::npos && close != std::string::npos &&
-        close > open_nl) {
-      candidate = candidate.substr(open_nl + 1, close - open_nl - 1);
+        "```", (open_nl == std::string::npos) ? fence + 3 : open_nl);
+    if (close != std::string::npos) {
+      size_t content_start =
+          (open_nl == std::string::npos) ? fence + 3 : open_nl + 1;
+      if (close > content_start) {
+        candidate = candidate.substr(content_start, close - content_start);
+      }
     }
   }
 
@@ -961,16 +957,13 @@ std::string Agent::extract_tool_call(const std::string &text,
     return "error: malformed tool call: 'arguments' must be an object";
   }
 
-  // Check for extra calls: if the original text had more than one JSON
-  // object, that's a multi-call violation. Heuristic: count fenced blocks
-  // or top-level objects. For simplicity, check if there's a second
-  // ``` fence after the first close.
-  // Heuristic: a second top-level JSON object or fenced block means a
-  // multi-call violation.
+  // Check for extra calls: a second fenced block or a second top-level JSON
+  // object after the first parsed call is a multi-call violation.
   size_t second_fence =
       text.find("```", fence == std::string::npos ? 0 : fence + 3);
   if (fence != std::string::npos && second_fence != std::string::npos) {
-    return "error: multiple tool calls in one reply; only one call per turn is allowed";
+    return "error: multiple tool calls in one reply; only one call per turn is "
+           "allowed";
   }
   // Also reject a second bare JSON object after the first.
   size_t first_end = text.find('}', fence == std::string::npos ? 0 : fence);
@@ -978,13 +971,9 @@ std::string Agent::extract_tool_call(const std::string &text,
     std::string tail = text.substr(first_end + 1);
     size_t ns = tail.find_first_not_of(" \t\n\r");
     if (ns != std::string::npos && tail[ns] == '{') {
-      return "error: multiple tool calls in one reply; only one call per turn is allowed";
+      return "error: multiple tool calls in one reply; only one call per turn "
+             "is allowed";
     }
-  }
-      text.find("```", fence == std::string::npos ? 0 : fence + 3);
-  if (fence != std::string::npos && second_fence != std::string::npos) {
-    return "error: multiple tool calls in one reply; only one call per turn is "
-           "allowed";
   }
 
   return "";
