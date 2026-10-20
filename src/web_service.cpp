@@ -8,7 +8,7 @@
 #include <sstream>
 #include <vector>
 
-const long kDefaultTimeoutSeconds = 30;
+const long kDefaultTimeoutSeconds = 10;
 const size_t kMaxContentLength = 8000;
 
 // Callback function for writing response data
