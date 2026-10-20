@@ -1141,6 +1141,22 @@ std::string Agent::quote_observation(const std::string &obs) {
 std::string Agent::model_path_check(const std::string &path) {
   if (path.empty())
     return "";
+  // Expand ~ and $HOME before the containment check.
+  std::string expanded = path;
+  const char *home = std::getenv("HOME");
+  if (!home)
+    home = std::getenv("USERPROFILE");
+  if (home) {
+    if (expanded == "~")
+      expanded = home;
+    else if (expanded.rfind("~/", 0) == 0)
+      expanded = std::string(home) + expanded.substr(1);
+    const std::string token = "$HOME";
+    size_t pos = expanded.find(token);
+    if (pos != std::string::npos)
+      expanded.replace(pos, token.size(), home);
+  }
+
   std::error_code ec;
   std::filesystem::path base = std::filesystem::current_path(ec);
   if (ec)
@@ -1149,7 +1165,7 @@ std::string Agent::model_path_check(const std::string &path) {
   if (ec)
     return "Cannot resolve working directory";
 
-  std::filesystem::path candidate(path);
+  std::filesystem::path candidate(expanded);
   if (candidate.is_relative())
     candidate = base / candidate;
   std::filesystem::path canon = std::filesystem::weakly_canonical(candidate, ec);
@@ -1168,7 +1184,7 @@ std::string Agent::model_path_check(const std::string &path) {
   if (pit != pend)
     return "Path escapes the permitted root (cwd): " + path;
 
-  // Secrets paths.
+  // Secrets paths (heuristic list, single source).
   std::string lower = canon.generic_string();
   std::transform(lower.begin(), lower.end(), lower.begin(),
                  [](unsigned char c) { return std::tolower(c); });
@@ -1176,18 +1192,28 @@ std::string Agent::model_path_check(const std::string &path) {
   std::string lnamel = lname;
   std::transform(lnamel.begin(), lnamel.end(), lnamel.begin(),
                  [](unsigned char c) { return std::tolower(c); });
-  if (lnamel == ".env" || lnamel.rfind(".env.", 0) == 0)
+
+  static const std::vector<std::string> secret_names = {
+      ".env", ".npmrc", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"};
+  static const std::vector<std::string> secret_suffixes = {".pem", ".key"};
+  static const std::vector<std::string> secret_segments = {
+      "/.ssh/", "/.aws/", "/.git/config"};
+
+  for (const auto &n : secret_names) {
+    if (lnamel == n || lnamel.rfind(n + ".", 0) == 0)
+      return "Refused: secrets path: " + path;
+  }
+  if (lnamel.rfind(".env.", 0) == 0)
     return "Refused: secrets path: " + path;
-  if (lower.find("/.ssh/") != std::string::npos)
-    return "Refused: secrets path: " + path;
-  if (lower.find("/.git/config") != std::string::npos)
-    return "Refused: secrets path: " + path;
-  if (lnamel.size() > 4 && lnamel.rfind(".pem") == lnamel.size() - 4)
-    return "Refused: secrets path: " + path;
-  if (lnamel.size() > 4 && lnamel.rfind(".key") == lnamel.size() - 4)
-    return "Refused: secrets path: " + path;
-  if (lnamel.find("id_rsa") == 0 || lnamel.find("id_ed25519") == 0)
-    return "Refused: secrets path: " + path;
+  for (const auto &suf : secret_suffixes) {
+    if (lnamel.size() > suf.size() &&
+        lnamel.rfind(suf) == lnamel.size() - suf.size())
+      return "Refused: secrets path: " + path;
+  }
+  for (const auto &seg : secret_segments) {
+    if (lower.find(seg) != std::string::npos)
+      return "Refused: secrets path: " + path;
+  }
   if (lnamel.find("secret") != std::string::npos ||
       lnamel.find("credential") != std::string::npos)
     return "Refused: secrets path: " + path;

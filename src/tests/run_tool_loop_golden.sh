@@ -90,6 +90,24 @@ run_case "fetch-needs-consent" \
   '["{\"tool\":\"fetch\",\"arguments\":{\"url\":\"http://127.0.0.1:18093\"}}","Done."]' \
   "fetch page" "Command cancelled by user" "n"
 
+# 13. Symlink inside cwd pointing outside is refused (canonical containment).
+#     Create the symlink fixture (idempotent).
+ln -sfn /tmp /tmp/tl_escape_link 2>/dev/null || true
+mkdir -p /tmp/tl_outside && echo secret > /tmp/tl_outside/secret.txt
+rm -f tl_escape_link
+ln -s /tmp/tl_outside tl_escape_link
+run_case "symlink-escape"   '["{\"tool\":\"read\",\"arguments\":{\"filename\":\"tl_escape_link/secret.txt\"}}","Done."]'   "read escaped" "Path escapes the permitted root"
+rm -f tl_escape_link
+
+# 14. Per-turn cap (8) trips on the 9th consecutive tool call.
+run_case "turn-cap-trip"   '["{\"tool\":\"list\",\"arguments\":{\"path\":\".\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\".\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\".\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\".\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\".\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\".\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\".\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\".\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\".\"}}","Done."]'   "list many" "Tool turn cap (8) reached"
+
+# Note: per-run budget trip, per-tool timeout, and ~/.aws/* / .npmrc secrets
+# paths are covered by unit-level reasoning but not by deterministic golden
+# cases here (per-run budget is unreachable under the 4000-char per-turn
+# truncation; per-tool timeout needs a slow command). They are tracked as
+# follow-ups.
+
 printf '\n%d/%d tool-loop golden cases passed\n' "$((CASES - FAILURES))" "$CASES"
 if [ "$FAILURES" -ne 0 ]; then exit 1; fi
 EOF
