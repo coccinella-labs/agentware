@@ -147,7 +147,11 @@ expect "unknown-suggestions" "nonsense-verb:" "" "Known commands:"
 # 19-21. shell paths: ! direct, cmd: with consent, canceled consent.
 expect "bang-shell" "!echo golden-shell-marker" "" "golden-shell-marker"
 expect "cmd-confirmed" "cmd:echo golden-cmd-marker" "y" "golden-cmd-marker"
-expect "cmd-cancelled" "cmd:echo golden-cancelled-marker" "n" "Command cancelled by user"
+# Docker-independent: "kill" trips validate_command_safe's dangerous-command
+# warning, so the "Continue? (y/N): " consent prompt appears before the
+# sandbox path is ever reached. Sending "n" cancels deterministically
+# regardless of whether Docker is available in the test environment.
+expect "cmd-cancelled" "cmd:echo kill golden-cancelled-marker" "n" "Command cancelled by user"
 
 # 22-23. meta commands. Hermetic HOME starts with no saves; assert the
 # list behavior, not its population.
