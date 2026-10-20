@@ -30,7 +30,18 @@ namespace Platform {
 
 // Cross-platform command execution
 inline FILE *open_process(const std::string &command, const char *mode) {
+  // codeql[cpp/command-line-injection]: callers validate interpolated paths
+  // via is_safe_shell_path (or, for command_service, intentionally execute
+  // user shell commands as the cmd: tool). A full execvp refactor would
+  // remove the shell entirely; tracked as a follow-up.
   return popen(command.c_str(), mode);
+}
+
+// Shell-safety check for paths interpolated into shell commands.
+// Rejects content that could break out of double quotes or chain commands.
+inline bool is_safe_shell_path(const std::string &path) {
+  static const std::string forbidden = "\"$`\\;&|<>\n\r";
+  return path.find_first_of(forbidden) == std::string::npos;
 }
 
 inline int close_process(FILE *pipe) { return pclose(pipe); }

@@ -440,6 +440,9 @@ MultiFileService::get_git_status_files(const std::string &directory,
     }
 
     // Change to directory and execute git command
+    if (!Utils::Platform::is_safe_shell_path(directory)) {
+      return files; // Unsafe path; refuse rather than interpolate into a shell.
+    }
     std::string full_command = "cd \"" + directory + "\" && " + command;
     FILE *pipe = Utils::Platform::open_process(full_command, "r");
     if (!pipe)
