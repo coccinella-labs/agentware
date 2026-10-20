@@ -4,7 +4,13 @@
 set -euo pipefail
 
 BIN="${1:-./bin/agentware-agent}"
-PORT="${PORT:-11499}"
+PORT="${PORT:-0}"
+if [ "$PORT" = "0" ]; then
+  for p in 11499 11500 11501 11502 11503; do
+    if ! (exec 3<>/dev/tcp/127.0.0.1/$p) 2>/dev/null; then PORT=$p; break; fi
+  done
+fi
+: "${PORT:=11499}"
 FAILURES=0
 CASES=0
 
