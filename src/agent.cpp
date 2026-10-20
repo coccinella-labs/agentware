@@ -329,7 +329,7 @@ void Agent::process_user_input(const std::string &input) {
   handle_ai_chat(trimmed_input);
 }
 
-void Agent::handle_direct_command(const std::string &input) {
+void Agent::handle_direct_command(const std::string &input, bool silent) {
   // Ensure the registry is populated before any metadata lookup (known_names,
   // match_prefix). Idempotent; safe to call on every command.
   Core::register_all_tools();
@@ -520,28 +520,30 @@ void Agent::handle_direct_command(const std::string &input) {
               !result.empty() && result.rfind("Error", 0) != 0;
           if (replaced) {
             presented = true;
-            Utils::UI::print_tool_call(tool, tool_args);
-            std::istringstream old_in(old_text);
-            std::istringstream new_in(new_text);
-            std::string line;
-            constexpr size_t kDiffCap = 6;
-            size_t shown = 0;
-            while (shown < kDiffCap && std::getline(old_in, line)) {
-              Utils::UI::print_diff_removed(line);
-              ++shown;
-            }
-            if (std::getline(old_in, line)) {
-              std::cout << Utils::Color::DIM << "- ... (more removed lines)"
-                        << Utils::Color::RESET << "\n";
-            }
-            shown = 0;
-            while (shown < kDiffCap && std::getline(new_in, line)) {
-              Utils::UI::print_diff_added(line);
-              ++shown;
-            }
-            if (std::getline(new_in, line)) {
-              std::cout << Utils::Color::DIM << "+ ... (more added lines)"
-                        << Utils::Color::RESET << "\n";
+            if (!silent) {
+              Utils::UI::print_tool_call(tool, tool_args);
+              std::istringstream old_in(old_text);
+              std::istringstream new_in(new_text);
+              std::string line;
+              constexpr size_t kDiffCap = 6;
+              size_t shown = 0;
+              while (shown < kDiffCap && std::getline(old_in, line)) {
+                Utils::UI::print_diff_removed(line);
+                ++shown;
+              }
+              if (std::getline(old_in, line)) {
+                std::cout << Utils::Color::DIM << "- ... (more removed lines)"
+                          << Utils::Color::RESET << "\n";
+              }
+              shown = 0;
+              while (shown < kDiffCap && std::getline(new_in, line)) {
+                Utils::UI::print_diff_added(line);
+                ++shown;
+              }
+              if (std::getline(new_in, line)) {
+                std::cout << Utils::Color::DIM << "+ ... (more added lines)"
+                          << Utils::Color::RESET << "\n";
+              }
             }
           }
         }
@@ -895,16 +897,185 @@ void Agent::handle_direct_command(const std::string &input) {
              "tree:, list:, remember: (plus bare 'memory', 'forget', 'clear')";
   }
 
-  if (!presented && !tool.empty()) {
+  if (!silent && !presented && !tool.empty()) {
     Utils::UI::print_tool_call(tool, tool_args);
   }
-  if (!presented && !result.empty()) {
+  if (!silent && !presented && !result.empty()) {
     if (!tool.empty()) {
       Utils::UI::print_tool_result(result);
     } else {
       std::cout << result << std::endl;
     }
   }
+  last_command_result_ = result;
+}
+
+std::string Agent::extract_tool_call(const std::string &text,
+                                     std::string &out_tool,
+                                     nlohmann::json &out_args) {
+  out_tool.clear();
+  out_args = nlohmann::json::object();
+
+  // Strip a fenced code block if present (```json ... ``` or ``` ... ```).
+  std::string candidate = text;
+  size_t fence = candidate.find("```");
+  if (fence != std::string::npos) {
+    size_t open_nl = candidate.find('\n', fence);
+    size_t close = candidate.find(
+        "```", open_nl == std::string::npos ? fence + 3 : open_nl);
+    if (open_nl != std::string::npos && close != std::string::npos &&
+        close > open_nl) {
+      candidate = candidate.substr(open_nl + 1, close - open_nl - 1);
+    }
+  }
+
+  // Try to parse the candidate as JSON.
+  nlohmann::json j;
+  try {
+    j = nlohmann::json::parse(candidate, nullptr, true);
+  } catch (...) {
+    // Not JSON — treat as a normal (no tool call) response.
+    return "none";
+  }
+
+  if (!j.is_object() || !j.contains("tool") || !j["tool"].is_string()) {
+    // JSON but not a tool call — could be malformed. Check if it looks
+    // like an attempted call (has "tool" key but wrong type).
+    if (j.is_object() && j.contains("tool")) {
+      return "error: malformed tool call: 'tool' must be a string";
+    }
+    return "none";
+  }
+
+  out_tool = j["tool"].get<std::string>();
+  if (j.contains("arguments") && j["arguments"].is_object()) {
+    out_args = j["arguments"];
+  } else if (j.contains("arguments")) {
+    return "error: malformed tool call: 'arguments' must be an object";
+  }
+
+  // Check for extra calls: if the original text had more than one JSON
+  // object, that's a multi-call violation. Heuristic: count fenced blocks
+  // or top-level objects. For simplicity, check if there's a second
+  // ``` fence after the first close.
+  size_t second_fence =
+      text.find("```", fence == std::string::npos ? 0 : fence + 3);
+  if (fence != std::string::npos && second_fence != std::string::npos) {
+    return "error: multiple tool calls in one reply; only one call per turn is "
+           "allowed";
+  }
+
+  return "";
+}
+
+std::string Agent::json_args_to_input(const std::string &tool,
+                                      const nlohmann::json &args) {
+  if (tool == "search") {
+    return "search:" + args.value("query", args.value("q", std::string("")));
+  }
+  if (tool == "cmd" || tool == "bash") {
+    return "cmd:" + args.value("command", args.value("cmd", std::string("")));
+  }
+  if (tool == "read") {
+    std::string path = args.value(
+        "path", args.value("filename", args.value("file", std::string(""))));
+    if (args.contains("start") || args.contains("count") ||
+        args.contains("lines")) {
+      int start = args.value("start", args.value("start_line", 1));
+      int count = args.value("count", args.value("line_count", 0));
+      if (count > 0) {
+        return "read:" + path + ":" + std::to_string(start) + ":" +
+               std::to_string(count);
+      }
+      if (start > 1) {
+        return "read:" + path + ":" + std::to_string(start);
+      }
+    }
+    return "read:" + path;
+  }
+  if (tool == "write") {
+    std::string path = args.value(
+        "path", args.value("filename", args.value("file", std::string(""))));
+    std::string content =
+        args.value("content", args.value("text", std::string("")));
+    return "write:" + path + " " + content;
+  }
+  if (tool == "replace") {
+    std::string path = args.value(
+        "path", args.value("filename", args.value("file", std::string(""))));
+    std::string old_text = args.value(
+        "old", args.value("old_text", args.value("search", std::string(""))));
+    std::string new_text = args.value(
+        "new",
+        args.value("new_text", args.value("replacement", std::string(""))));
+    int count = args.value("count", args.value("expected_count", 0));
+    std::string input = "replace:" + path + ":" + old_text + ":" + new_text;
+    if (count > 0)
+      input += ":" + std::to_string(count);
+    return input;
+  }
+  if (tool == "grep") {
+    std::string pattern =
+        args.value("pattern", args.value("query", std::string("")));
+    std::string dir = args.value(
+        "directory", args.value("dir", args.value("path", std::string("."))));
+    std::string filter =
+        args.value("filter", args.value("file_filter", std::string("*")));
+    std::string input = "grep:" + pattern + ":" + dir;
+    if (filter != "*")
+      input += ":" + filter;
+    return input;
+  }
+  if (tool == "remember") {
+    return "remember:" +
+           args.value("fact", args.value("text", args.value("content",
+                                                            std::string(""))));
+  }
+  if (tool == "analyze") {
+    return "analyze:" +
+           args.value("path", args.value("directory", std::string(".")));
+  }
+  if (tool == "components") {
+    return "components:" +
+           args.value("path", args.value("directory", std::string(".")));
+  }
+  if (tool == "todos") {
+    return "todos:" +
+           args.value("path", args.value("directory", std::string(".")));
+  }
+  if (tool == "tree") {
+    return "tree:" +
+           args.value("path", args.value("directory", std::string(".")));
+  }
+  if (tool == "git") {
+    std::string sub = args.value(
+        "subcommand",
+        args.value("action", args.value("command", std::string("status"))));
+    std::string path =
+        args.value("path", args.value("directory", std::string(".")));
+    return "git:" + sub + (path != "." ? " " + path : "");
+  }
+  if (tool == "github") {
+    return "github:" +
+           args.value("params", args.value("query", std::string("")));
+  }
+  if (tool == "list") {
+    std::string path =
+        args.value("path", args.value("directory", std::string(".")));
+    std::string glob =
+        args.value("glob", args.value("pattern", std::string("*")));
+    return "list:" + path + ":" + glob;
+  }
+  // Unknown: pass through as-is (will be caught by dispatch)
+  return tool + ":" + args.dump();
+}
+
+std::string Agent::truncate_observation(const std::string &obs) {
+  constexpr size_t kMax = 4000;
+  if (obs.size() <= kMax)
+    return obs;
+  return obs.substr(0, kMax) + "\n... (observation truncated at " +
+         std::to_string(kMax) + " chars)";
 }
 
 void Agent::handle_ai_chat(const std::string &input) {
@@ -917,39 +1088,169 @@ void Agent::handle_ai_chat(const std::string &input) {
     return;
   }
 
-  std::atomic<bool> done(false);
-  std::thread spin([&done]() { Utils::UI::spinner(done, "Contemplating..."); });
+  // Flag-gated tool-call loop (default off).
+  const bool loop_enabled =
+      Utils::Config::get_env_var("AGENTWARE_TOOL_CALL_LOOP", "0") == "1" ||
+      Utils::Config::get_env_var("AGENTWARE_TOOL_CALL_LOOP", "0") == "true";
 
-  // Build enhanced context with hierarchical context
-  std::string memory_context = memory_->get_context_string();
-  std::string hierarchical_context =
-      Services::ContextService::load_hierarchical_context(".");
-
-  std::string full_context = memory_context;
-  if (!hierarchical_context.empty()) {
-    full_context = hierarchical_context + "\n\n" + memory_context;
+  std::string full_context;
+  {
+    std::string memory_context = memory_->get_context_string();
+    std::string hierarchical_context =
+        Services::ContextService::load_hierarchical_context(".");
+    full_context = memory_context;
+    if (!hierarchical_context.empty()) {
+      full_context = hierarchical_context + "\n\n" + memory_context;
+    }
+    full_context += "\n\n" + Services::search_tool_prompt(search_caps_);
   }
-  // Tell the model which search tools actually exist, so it asks for real
-  // commands instead of inventing them.
-  full_context += "\n\n" + Services::search_tool_prompt(search_caps_);
 
-  const auto chat_started = std::chrono::steady_clock::now();
-  std::string response = ai_service_->chat(input, full_context);
+  const int turn_cap = 8; // configurable via AGENTWARE_TOOL_TURN_CAP
+  // Allow env override for the cap.
+  int cap = turn_cap;
+  {
+    std::string cap_str =
+        Utils::Config::get_env_var("AGENTWARE_TOOL_TURN_CAP", "");
+    if (!cap_str.empty()) {
+      try {
+        cap = std::stoi(cap_str);
+      } catch (...) {
+        cap = turn_cap;
+      }
+      if (cap < 1)
+        cap = turn_cap;
+      if (cap > 64)
+        cap = 64;
+    }
+  }
 
-  done = true;
-  if (spin.joinable())
-    spin.join();
+  std::string current_input = input;
+  int turns = 0;
 
-  if (!response.empty()) {
-    const int elapsed =
-        static_cast<int>(std::chrono::duration_cast<std::chrono::seconds>(
-                             std::chrono::steady_clock::now() - chat_started)
-                             .count());
-    Utils::UI::print_turn_status(elapsed);
-    Utils::UI::print_response(response);
-    record_interaction(*memory_, input, response);
-  } else {
-    Utils::UI::print_warning("No response");
+  while (true) {
+    std::atomic<bool> done(false);
+    std::thread spin(
+        [&done]() { Utils::UI::spinner(done, "Contemplating..."); });
+
+    const auto chat_started = std::chrono::steady_clock::now();
+    std::string response = ai_service_->chat(current_input, full_context);
+
+    done = true;
+    if (spin.joinable())
+      spin.join();
+
+    if (response.empty()) {
+      Utils::UI::print_warning("No response");
+      break;
+    }
+
+    // If the loop is disabled, behave exactly as before: print and record.
+    if (!loop_enabled) {
+      const int elapsed =
+          static_cast<int>(std::chrono::duration_cast<std::chrono::seconds>(
+                               std::chrono::steady_clock::now() - chat_started)
+                               .count());
+      Utils::UI::print_turn_status(elapsed);
+      Utils::UI::print_response(response);
+      record_interaction(*memory_, input, response);
+      break;
+    }
+
+    // Try to extract a tool call from the assistant reply.
+    std::string tool_name;
+    nlohmann::json args;
+    std::string parse_result = extract_tool_call(response, tool_name, args);
+
+    if (parse_result == "none") {
+      // No tool call: final response.
+      const int elapsed =
+          static_cast<int>(std::chrono::duration_cast<std::chrono::seconds>(
+                               std::chrono::steady_clock::now() - chat_started)
+                               .count());
+      Utils::UI::print_turn_status(elapsed);
+      Utils::UI::print_response(response);
+      record_interaction(*memory_, input, response);
+      break;
+    }
+
+    if (!parse_result.empty()) {
+      // Malformed tool call: feed the error back as an observation.
+      std::string obs = "Error: " + parse_result +
+                        "\n"
+                        "Available tools: " +
+                        Core::ToolRegistry::instance().known_names();
+      obs = truncate_observation(obs);
+      current_input = obs;
+      ++turns;
+      if (turns >= cap) {
+        Utils::UI::print_warning("Tool turn cap (" + std::to_string(cap) +
+                                 ") reached; stopping.");
+        break;
+      }
+      continue;
+    }
+
+    // Valid tool call: resolve to a registered tool.
+    const Core::ToolSpec *spec = Core::ToolRegistry::instance().find(tool_name);
+    // Also try match_prefix in case the model used a colon form.
+    if (!spec)
+      spec = Core::ToolRegistry::instance().match_prefix(tool_name + ":");
+    if (!spec) {
+      // Unknown tool.
+      std::string obs = "unknown tool " + tool_name + "; available: " +
+                        Core::ToolRegistry::instance().known_names();
+      obs = truncate_observation(obs);
+      current_input = obs;
+      ++turns;
+      if (turns >= cap) {
+        Utils::UI::print_warning("Tool turn cap (" + std::to_string(cap) +
+                                 ") reached; stopping.");
+        break;
+      }
+      continue;
+    }
+
+    // Consent gate for mutating tools.
+    if (spec->risk == Core::ToolRiskTier::Mutating) {
+      std::cout << "Tool " << spec->name
+                << " is mutating. Continue? (y/N): " << std::flush;
+      std::string confirm;
+      std::getline(std::cin, confirm);
+      if (confirm != "y" && confirm != "Y") {
+        std::string obs = "Command cancelled by user";
+        obs = truncate_observation(obs);
+        current_input = obs;
+        ++turns;
+        if (turns >= cap) {
+          Utils::UI::print_warning("Tool turn cap (" + std::to_string(cap) +
+                                   ") reached; stopping.");
+          break;
+        }
+        continue;
+      }
+    }
+
+    // Convert JSON args to the tool's command-line input and execute via the
+    // existing dispatch (consent, sandbox, validation) in silent mode so the
+    // result is captured without double-printing.
+    std::string tool_input = json_args_to_input(tool_name, args);
+    handle_direct_command(tool_input, /*silent=*/true);
+    std::string obs = last_command_result_;
+    if (obs.empty())
+      obs = "Tool " + tool_name + " completed with no output.";
+    obs = truncate_observation(obs);
+
+    // Print the tool call/result in the activity format.
+    Utils::UI::print_tool_call(spec->name, tool_input);
+    Utils::UI::print_tool_result(obs);
+
+    current_input = obs;
+    ++turns;
+    if (turns >= cap) {
+      Utils::UI::print_warning("Tool turn cap (" + std::to_string(cap) +
+                               ") reached; stopping.");
+      break;
+    }
   }
 }
 

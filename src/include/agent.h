@@ -3,6 +3,7 @@
 #include "config.h" // For AGENTWARE_API
 #include "search_service.h"
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,9 @@ private:
   // Tool capabilities detected once at startup; see detect_search_capabilities.
   Services::SearchCapabilities search_caps_;
   int command_count_{0};
+  // Last result produced by handle_direct_command; read by the model tool-call
+  // loop (PR-3) when running in silent mode.
+  std::string last_command_result_;
 
 public:
   // Move operations
@@ -44,8 +48,20 @@ public:
                       const std::vector<int> &valid_choices,
                       int default_choice);
   void process_user_input(const std::string &input);
-  void handle_direct_command(const std::string &input);
+  void handle_direct_command(const std::string &input, bool silent = false);
   void handle_ai_chat(const std::string &input);
+  // PR-3 tool-call seam helpers (flag-gated, default off).
+  // Extracts a single JSON tool call from assistant text. Returns
+  // "none" if no call is present, "error:..." on malformed input,
+  // or "" on success with out_tool/out_args populated.
+  static std::string extract_tool_call(const std::string &text,
+                                       std::string &out_tool,
+                                       nlohmann::json &out_args);
+  // Converts JSON arguments to the tool's command-line input format.
+  static std::string json_args_to_input(const std::string &tool,
+                                        const nlohmann::json &args);
+  // Truncates an observation to the configured limit with a marker.
+  static std::string truncate_observation(const std::string &obs);
   void handle_file_injection_command(const std::string &input);
   void handle_shell_command(const std::string &input);
   void handle_meta_command(const std::string &input);
