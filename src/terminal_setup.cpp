@@ -13,7 +13,7 @@
 //
 // stderr is treated exactly like stdout: same code page (console-wide
 // on Windows), VT enabled on its own handle, saved and restored
-// separately — error paths print colored output via std::cerr too.
+// separately: error paths print colored output via std::cerr too.
 
 #include "terminal_setup.h"
 
