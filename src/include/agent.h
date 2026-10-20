@@ -2,6 +2,7 @@
 #include "agent_mode.h"
 #include "config.h" // For AGENTWARE_API
 #include "search_service.h"
+#include <atomic>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -33,6 +34,9 @@ private:
   // Last result produced by handle_direct_command; read by the model tool-call
   // loop (PR-3) when running in silent mode.
   std::string last_command_result_;
+  // Set while a (possibly detached, timed-out) tool handler is still running.
+  // New tool calls are refused while this is true.
+  std::atomic<bool> tool_running_{false};
 
 public:
   // Move operations

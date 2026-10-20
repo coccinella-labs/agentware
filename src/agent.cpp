@@ -1,4 +1,9 @@
 #include "agent.h"
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 #include "ai_service.h"
 #include "auth_service.h"
 #include "checkpoint_service.h"
@@ -1410,12 +1415,25 @@ void Agent::handle_ai_chat(const std::string &input) {
     // exfiltration of private data to the model). Read-only for execution
     // but consent-gated.
     if (tool_name == "fetch" || tool_name == "github") {
+      bool is_tty = false;
+#ifdef _WIN32
+      is_tty = _isatty(_fileno(stdin)) != 0;
+#else
+      is_tty = isatty(fileno(stdin)) != 0;
+#endif
+      if (!is_tty) {
+        std::string obs = "consent denied: no TTY";
+        obs = truncate_observation(obs);
+        current_input = quote_observation(obs);
+        ++turns;
+        Utils::UI::print_tool_call(spec->name, tool_name);
+        Utils::UI::print_tool_result(obs);
+        continue;
+      }
       std::string label = (tool_name == "fetch") ? "fetch: may exfiltrate data"
                                                   : "github: reads private repo data";
       std::cout << "Tool " << tool_name << ": " << label
                 << ". Continue? (y/N): " << std::flush;
-      std::cout << "Tool fetch: may exfiltrate data. Continue? (y/N): "
-                << std::flush;
       std::string confirm;
       std::getline(std::cin, confirm);
       if (confirm != "y" && confirm != "Y") {
@@ -1423,9 +1441,41 @@ void Agent::handle_ai_chat(const std::string &input) {
         obs = truncate_observation(obs);
         current_input = quote_observation(obs);
         ++turns;
+        Utils::UI::print_tool_call(spec->name, tool_name);
         Utils::UI::print_tool_result(obs);
         continue;
       }
+    }
+
+    // Refuse new tool calls while a timed-out handler is still running.
+    if (tool_running_.load()) {
+      std::string obs = "previous tool still running; refusing new call";
+      obs = truncate_observation(obs);
+      current_input = quote_observation(obs);
+      ++turns;
+      Utils::UI::print_tool_call(spec->name, tool_name);
+      Utils::UI::print_tool_result(obs);
+      continue;
+    }
+
+    // PR 2: git:diff, todos: and analyze: are not model-callable until
+    // their services filter secret paths. Refuse with a recoverable message.
+    bool model_disabled = (tool_name == "todos" || tool_name == "analyze");
+    if (tool_name == "git") {
+      std::string sub = args.value("subcommand", args.value("action",
+          args.value("command", std::string("status"))));
+      if (sub == "diff")
+        model_disabled = true;
+    }
+    if (model_disabled) {
+      std::string obs = "tool " + tool_name +
+                        " is not available on the model surface in v1";
+      obs = truncate_observation(obs);
+      current_input = quote_observation(obs);
+      ++turns;
+      Utils::UI::print_tool_call(spec->name, tool_name);
+      Utils::UI::print_tool_result(obs);
+      continue;
     }
 
     // Read-only loop (PR 2): mutating tools are never callable from the
@@ -1506,8 +1556,16 @@ void Agent::handle_ai_chat(const std::string &input) {
     }
     auto result_ptr = std::make_shared<std::string>();
     bool timed_out = !Core::run_with_timeout(
-        [&]() { handle_direct_command(tool_input, /*silent=*/true, result_ptr.get()); },
+        [&]() {
+          tool_running_.store(true);
+          handle_direct_command(tool_input, /*silent=*/true, result_ptr.get());
+          tool_running_.store(false);
+        },
         kToolTimeoutSec);
+    if (timed_out) {
+      // Thread is detached and may still be running; tool_running_ stays
+      // true until it finishes. New tool calls are refused meanwhile.
+    }
     std::string obs;
     if (timed_out) {
       obs = "tool timed out after " + std::to_string(kToolTimeoutSec) +
