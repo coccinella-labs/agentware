@@ -134,6 +134,10 @@ done
 # fetch: from the model is denied without a TTY (no consent read from pipe).
 run_case "fetch-no-tty"   '["{\"tool\":\"fetch\",\"arguments\":{\"url\":\"http://127.0.0.1:18093\"}}","Done."]'   "fetch page" "consent denied: no TTY"
 
+run_case "fetch-no-tty-y"   '["{\"tool\":\"fetch\",\"arguments\":{\"url\":\"http://127.0.0.1:18093\"}}","Done."]'   "fetch page" "consent denied: no TTY" "y"
+
+run_case "github-no-tty-y"  '["{\"tool\":\"github\",\"arguments\":{\"params\":\"repo:o/r\"}}","Done."]'  "github repo" "consent denied: no TTY" "y"
+
 # grep must not leak secrets from .env even when it matches.
 run_case "grep-no-secret-leak"   '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"API_KEY\",\"directory\":\".\"}}","Done."]'   "grep api key" "No matches found"
 
