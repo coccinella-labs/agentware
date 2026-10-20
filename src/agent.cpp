@@ -920,7 +920,14 @@ std::string Agent::extract_tool_call(const std::string &text,
   std::string candidate = text;
   size_t fence = candidate.find("```");
   if (fence != std::string::npos) {
-    size_t open_nl = candidate.find('\n', fence);
+  size_t open_nl = candidate.find('\n', fence);
+  size_t close = candidate.find("```", (open_nl == std::string::npos) ? fence + 3 : open_nl);
+  if (close != std::string::npos) {
+    size_t content_start = (open_nl == std::string::npos) ? fence + 3 : open_nl + 1;
+    if (close > content_start) {
+      candidate = candidate.substr(content_start, close - content_start);
+    }
+  }
     size_t close = candidate.find(
         "```", open_nl == std::string::npos ? fence + 3 : open_nl);
     if (open_nl != std::string::npos && close != std::string::npos &&
