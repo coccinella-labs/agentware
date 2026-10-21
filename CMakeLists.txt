@@ -652,7 +652,9 @@ target_link_libraries(agentware-tests PRIVATE
     gtest_main
     gtest
 )
-# The checked-in tool registry snapshot lives next to the test source.
+# The checked-in tool registry snapshot lives next to the test source. The
+# test reads it at runtime and normalizes CRLF, so it is independent of the
+# working directory and of the line endings a checkout produces.
 target_compile_definitions(agentware-tests PRIVATE
     TEST_SNAPSHOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src/tests")
 add_test(NAME basic_tests COMMAND agentware-tests)

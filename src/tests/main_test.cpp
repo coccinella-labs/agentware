@@ -2389,14 +2389,16 @@ TEST(ToolRegistrySnapshotTest, MatchesCheckedInSnapshot) {
   // tiered, whether the model may call them, and whether they need consent.
   // Any change to the registry or to the model-surface policy must be
   // reviewed, so a difference fails here.
-  const std::string path = std::string(TEST_SNAPSHOT_DIR) +
-                           "/tool_registry_snapshot.txt";
+  // The snapshot is read at runtime from the source tree, so the test does
+  // not depend on the working directory. A checkout with CRLF line endings
+  // (the Windows default) must still compare equal, so CRLF is normalized
+  // away.
+  const std::string path =
+      std::string(TEST_SNAPSHOT_DIR) + "/tool_registry_snapshot.txt";
   std::ifstream file(path);
   ASSERT_TRUE(file.good()) << "cannot read snapshot: " << path;
   std::stringstream buf;
   buf << file.rdbuf();
-  // The snapshot is a text file: a checkout with CRLF line endings (the
-  // Windows default) must still compare equal, so CRLF is normalized away.
   std::string expected = buf.str();
   expected.erase(std::remove(expected.begin(), expected.end(), '\r'),
                  expected.end());
