@@ -138,7 +138,8 @@ jobs:
               --output-on-failure -R basic_tests
           else
             # Gtest unit suite (Linux/macOS; Windows runs this separately).
-            ctest --test-dir build --output-on-failure -R basic_tests
+            ctest --test-dir build --output-on-failure \
+              -R 'basic_tests|cli_behavior'
             # Offline golden suites (Linux/macOS only; Windows excluded
             # because the bash harness needs shebang support).
             bash src/tests/run_routing_golden.sh build/bin/agentware-agent
