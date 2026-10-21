@@ -27,6 +27,12 @@ public:
   static ValidationResult validate_file_access(const std::string &path,
                                                const std::string &root = "");
 
+  // Refuses a path that is not a regular file (FIFO, device, socket,
+  // directory). Reading such a path either blocks forever (FIFO) or
+  // returns unbounded data (device). The path is resolved through
+  // symlinks first, so a symlink to a FIFO is caught too. Never throws.
+  static ValidationResult validate_regular_file(const std::string &path);
+
   // Text validation
   static ValidationResult
   validate_non_empty(const std::string &text,

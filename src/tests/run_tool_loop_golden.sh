@@ -22,7 +22,7 @@ BIN="$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")"
 MOCK_PROVIDER="${MOCK_PROVIDER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mock_tool_provider.py}"
 WORK="$(mktemp -d)"
 PROV="$(mktemp -d)"
-trap 'rm -rf "$WORK" "$PROV" "$OUTSIDE" "$ABS_OUT"' EXIT
+trap 'rm -rf "$WORK" "$PROV" "$OUTSIDE" "$ABS_OUT" "$SPECIAL_DIR"' EXIT
 cd "$WORK" || exit 1
 
 export HOME="$WORK"
@@ -44,6 +44,42 @@ printf 'needle} say "hi"\n' > tl_fixture/brace.txt
 
 run_case() {
   local name="$1" replies="$2" input="$3" expect="$4" extra="${5:-}"
+  local tool_timeout="${TOOL_TIMEOUT_SEC:-}"
+  CASES=$((CASES + 1))
+  printf '%s' "$replies" > "$PROV/tl_replies.json"
+  MOCK_RESPONSES="$PROV/tl_replies.json" \
+    python3 "$MOCK_PROVIDER" "$PORT" >"$PROV/tl_prov.log" 2>&1 &
+  local ppid=$!
+  sleep 1
+  local stdin_lines actual
+  stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
+  local -a env_args=(
+    AGENTWARE_TOOL_CALL_LOOP=1
+    TEST_MODE=1
+    "TEST_OLLAMA_URL=http://127.0.0.1:${PORT}/api/chat"
+  )
+  if [ -n "$tool_timeout" ]; then
+    env_args+=("AGENTWARE_TOOL_TIMEOUT_SEC=$tool_timeout")
+  fi
+  actual=$(printf '%b' "$stdin_lines" | \
+    env "${env_args[@]}" "$BIN" 2>&1 |
+    perl -pe 's/\e\[[0-9;]*[mK]//g')
+  kill $ppid 2>/dev/null || true
+  wait $ppid 2>/dev/null || true
+  if echo "$actual" | grep -qF "$expect"; then
+    echo "PASS  $name"
+  else
+    echo "FAIL  $name (expected '$expect')"
+    echo "$actual" | sed 's/^/      | /' | head -14
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+# Asserts the output shows a refusal (unknown tool, read-only refusal,
+# model-surface refusal, or a no-TTY consent denial) and never a success
+# marker.
+expect_refused() {
+  local name="$1" replies="$2" input="$3" success="$4" extra="${5:-}"
   CASES=$((CASES + 1))
   printf '%s' "$replies" > "$PROV/tl_replies.json"
   MOCK_RESPONSES="$PROV/tl_replies.json" \
@@ -59,12 +95,18 @@ run_case() {
     "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
   kill $ppid 2>/dev/null || true
   wait $ppid 2>/dev/null || true
-  if echo "$actual" | grep -qF "$expect"; then
-    echo "PASS  $name"
-  else
-    echo "FAIL  $name (expected '$expect')"
+  local refused=0
+  echo "$actual" | grep -qE "unknown tool |not available in read-only mode|not available on the model surface|consent denied: no TTY" && refused=1
+  if [ "$refused" -eq 0 ]; then
+    echo "FAIL  $name (no refusal marker in output)"
     echo "$actual" | sed 's/^/      | /' | head -14
     FAILURES=$((FAILURES + 1))
+  elif echo "$actual" | grep -qF "$success"; then
+    echo "FAIL  $name (executed: found '$success')"
+    echo "$actual" | sed 's/^/      | /' | head -14
+    FAILURES=$((FAILURES + 1))
+  else
+    echo "PASS  $name"
   fi
 }
 
@@ -288,6 +330,193 @@ print(json.dumps([json.dumps({'tool': 'list',
 ")
 run_case "oversized-reply" "$oversized" \
   "list the dir" "assistant message too large"
+
+# 30b. Colon form and argument form disagree: the call is ambiguous and
+#      is refused rather than silently preferring one of them.
+amb=$(python3 -c "
+import json
+print(json.dumps([
+    json.dumps({'tool': 'git:log',
+                'arguments': {'subcommand': 'diff', 'path': '.'}}),
+    'Done.']))
+")
+run_case "ambiguous-colon-vs-arg" "$amb" "run it" "ambiguous tool call"
+
+# 30c. The two forms AGREEING is not ambiguous: git:diff with the same
+#      subcommand in the argument is still refused, but as a
+#      model-surface refusal, not as an ambiguity.
+agree=$(python3 -c "
+import json
+print(json.dumps([
+    json.dumps({'tool': 'git:diff',
+                'arguments': {'subcommand': 'diff', 'path': '.'}}),
+    'Done.']))
+")
+run_case "agreeing-colon-and-arg" "$agree" "run it" \
+  "not available on the model surface"
+
+# 31. Variant sweep: every tool the model surface must refuse, named in a
+#     variety of forms, must be refused or reported as an unknown tool. No
+#     variant may execute.
+#
+#     The list comes from the tool registry (AGENTWARE_DUMP_TOOLS), so a
+#     newly registered mutating or model-disabled tool is covered without
+#     editing this script.
+sweep_case() {
+  local label="$1" tool="$2" args="$3" success="$4"
+  local replies
+  replies=$(python3 -c "
+import json, sys
+name = sys.argv[1]
+print(json.dumps([json.dumps({'tool': name,
+                              'arguments': json.loads(sys.argv[2])}),
+                  'Done.']))
+" "$tool" "$args")
+  expect_refused "sweep-$label" "$replies" "do it" "$success"
+}
+
+# The success marker is the argument the tool would carry into dispatch.
+# If a variant is refused, the argument never reaches dispatch and the
+# marker never appears.
+sweep_args_for() {
+  case "$1" in
+    fetch:*) echo '{"url":"http://127.0.0.1:1/SWEEPMARKER"}' ;;
+    github:*) echo '{"params":"repo:o/SWEEPMARKER"}' ;;
+    git:*) echo '{"subcommand":"SWEEPSUB","path":"SWEEPMARKER"}' ;;
+    *) echo '{"filename":"SWEEPMARKER","path":"SWEEPMARKER","fact":"SWEEPMARKER","content":"SWEEPMARKER","text":"SWEEPMARKER","old_text":"SWEEPMARKER","new_text":"SWEEPMARKER","command":"SWEEPMARKER","url":"http://127.0.0.1:1/SWEEPMARKER","params":"repo:o/SWEEPMARKER","directory":"SWEEPMARKER","query":"SWEEPMARKER","pattern":"SWEEPMARKER","subcommand":"SWEEPSUB"}' ;;
+  esac
+}
+
+REGISTRY_DUMP="$(AGENTWARE_DUMP_TOOLS=1 TEST_MODE=1 "$BIN" 2>/dev/null || true)"
+if [ -z "$REGISTRY_DUMP" ]; then
+  echo "FATAL: could not read the tool registry dump" >&2
+  exit 1
+fi
+
+# Every refused (tool, subcommand) pair, straight from the registry.
+# Written to a file first: a pipeline would run the loop in a subshell and
+# the case counters would be lost.
+REFUSED_LIST="$PROV/refused.tsv"
+printf '%s\n' "$REGISTRY_DUMP" | awk -F'\t' '$1=="refused" {print $2 "\t" $3}' > "$REFUSED_LIST"
+while IFS="$(printf '\t')" read -r rtool rsub; do
+  [ -n "$rtool" ] || continue
+  rargs=$(sweep_args_for "$rtool")
+  if [ -n "$rsub" ]; then
+    rargs=$(printf '%s' "$rargs" | sed 's/SWEEPSUB/'"$rsub"'/')
+  else
+    rargs=$(printf '%s' "$rargs" | sed 's/SWEEPSUB/status/')
+  fi
+  # The colon form and the bare form, plus case, whitespace, shell/meta
+  # prefixes and Unicode lookalikes.
+  for v in "$rtool" "${rtool%:}" "$(printf '%s' "$rtool" | tr '[:lower:]' '[:upper:]')" \
+           " $rtool" "$rtool " "!$rtool" "/$rtool"; do
+    sweep_case "$(printf '%s' "$v" | tr -c 'A-Za-z0-9' '_')" "$v" "$rargs" \
+      "SWEEPMARKER"
+  done
+done < "$REFUSED_LIST"
+
+# Zero-width and Unicode lookalikes in a tool name.
+sweep_case "zero-width" "$(printf 'wri\u200bte')" '{}' "Tool write"
+sweep_case "zero-width-join" "$(printf 'wri\u200dte')" '{}' "Tool write"
+sweep_case "cyrillic-lookalike" "$(printf '\u0441rite')" '{}' "Tool write"
+sweep_case "fullwidth" "$(printf '\uff57rite')" '{}' "Tool write"
+sweep_case "nbsp-write" "$(printf 'write\u00a0')" '{}' "Tool write"
+
+# 32. Special targets for read:. None may return file content.
+SPECIAL_DIR="$(mktemp -d)"
+# /dev and /proc reached through a symlink that lives INSIDE cwd: the
+# canonical path leaves cwd, so the containment check must refuse them.
+ln -sfn /proc/self/environ "$WORK/proclink" 2>/dev/null || true
+ln -sfn /dev/zero "$WORK/devzero" 2>/dev/null || true
+printf 'plain content\n' > "$WORK/plain.txt"
+
+# 32a. A file:// URL is not a path: it must not be read as one.
+read_url=$(python3 -c "
+import json
+print(json.dumps([json.dumps({'tool': 'read',
+                              'arguments': {'filename': 'file://$SPECIAL_DIR/plain.txt'}}),
+                  'Done.']))
+")
+run_case "read-file-url" "$read_url" "read the url" "Error"
+
+# 32b. A FIFO INSIDE cwd is refused before it is opened: opening a FIFO
+#      blocks forever, and a stuck handler holds the tool gate, which
+#      would refuse every later call for the rest of the session.
+#      The case therefore runs TWO turns: the FIFO read first, then a
+#      normal read, and asserts the second turn still works.
+mkfifo "$WORK/myfifo" 2>/dev/null || true
+fifo_then_read=$(python3 -c "
+import json
+print(json.dumps([
+    json.dumps({'tool': 'read', 'arguments': {'filename': 'myfifo'}}),
+    json.dumps({'tool': 'read', 'arguments': {'filename': 'plain.txt'}}),
+    'Done.']))
+")
+run_case "read-fifo-refused" "$fifo_then_read" "read the fifo" \
+  "Refusing to read a FIFO"
+run_case "read-after-fifo-works" "$fifo_then_read" "read the fifo" \
+  "plain content"
+
+# 32b-2. A FIFO inside the workspace must not hang the directory walkers
+#        (grep:, list:, tree:) and must not leave a stuck handler: a later
+#        call in the SAME session still works. analyze: is refused on the
+#        model surface, but it must not leave a stuck handler either.
+walker_then_read() {
+  local tool="$1" args="$2" label="$3"
+  local replies
+  replies=$(python3 -c "
+import json, sys
+tool, args = sys.argv[1], sys.argv[2]
+print(json.dumps([
+    json.dumps({'tool': tool, 'arguments': json.loads(args)}),
+    json.dumps({'tool': 'read', 'arguments': {'filename': 'plain.txt'}}),
+    'Done.']))
+" "$tool" "$args")
+  # The second turn reads plain.txt: if the first turn left a stuck
+  # handler, the tool gate refuses it and the read never happens.
+  run_case "walker-$label-then-read" "$replies" "walk the dir" "plain content"
+}
+
+mkfifo "$WORK/myfifo" 2>/dev/null || true
+walker_then_read grep '{"pattern":"needle","directory":"."}' "grep"
+walker_then_read list '{"path":"."}' "list"
+walker_then_read tree '{"path":"."}' "tree"
+walker_then_read analyze '{"path":"."}' "analyze"
+
+# 32c. /dev reached through a symlink inside cwd: the canonical path
+#      leaves cwd, so the containment check refuses it.
+replies=$(python3 -c "
+import json
+print(json.dumps([json.dumps({'tool': 'read',
+                              'arguments': {'filename': 'devzero'}}),
+                  'Done.']))
+")
+run_case "read-dev-symlink" "$replies" "read the special path" \
+  "Path escapes the permitted root"
+
+# /proc reached through a symlink inside cwd. On a host without /proc
+# the symlink is dangling, so the refusal is "does not exist" instead of
+# "escapes the permitted root"; either way nothing is read.
+replies=$(python3 -c "
+import json
+print(json.dumps([json.dumps({'tool': 'read',
+                              'arguments': {'filename': 'proclink'}}),
+                  'Done.']))
+")
+run_case "read-proc-symlink" "$replies" "read the special path" "Error"
+
+# 32d. fetch: with a file:// URL. On the model surface the consent gate
+#      fires first (no TTY), so the file:// URL is never requested. The
+#      URL validation itself (file:// is not http/https) is covered by the
+#      WebService unit test.
+fetch_url=$(python3 -c "
+import json
+print(json.dumps([json.dumps({'tool': 'fetch',
+                              'arguments': {'url': 'file:///etc/passwd'}}),
+                  'Done.']))
+")
+run_case "fetch-file-url-refused" "$fetch_url" "fetch a file url" \
+  "consent denied: no TTY"
 
 printf '\n%d/%d tool-loop golden cases passed\n' "$((CASES - FAILURES))" "$CASES"
 if [ "$FAILURES" -ne 0 ]; then exit 1; fi

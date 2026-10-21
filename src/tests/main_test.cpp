@@ -8,6 +8,7 @@
 #include "sandbox_service.h"
 #include "search_service.h"
 #include "theme_service.h"
+#include "tool_registry.h"
 #include "tool_run_gate.h"
 #include "ui.h"
 #include "validation.h"
@@ -28,6 +29,7 @@ void record_interaction(Data::MemoryManager &memory, const std::string &tag,
 void record_global_fact(Data::MemoryManager &memory, const std::string &fact);
 } // namespace Core
 #include <cctype>
+#include <algorithm>
 #include <chrono>
 #ifndef _WIN32
 #include <csignal>
@@ -2380,6 +2382,34 @@ TEST(LayoutTest, PromptBodyExcludesTrailingSpace) {
   const auto parts = Utils::UI::prompt_lines(80, "Mode (default 2): ");
   ASSERT_EQ(parts.size(), 1u);
   EXPECT_EQ(parts[0].back(), ':');
+}
+
+TEST(ToolRegistrySnapshotTest, MatchesCheckedInSnapshot) {
+  // The snapshot is the reviewed record of which tools exist, how they are
+  // tiered, whether the model may call them, and whether they need consent.
+  // Any change to the registry or to the model-surface policy must be
+  // reviewed, so a difference fails here.
+  // The snapshot is read at runtime from the source tree, so the test does
+  // not depend on the working directory. A checkout with CRLF line endings
+  // (the Windows default) must still compare equal, so CRLF is normalized
+  // away.
+  const std::string path =
+      std::string(TEST_SNAPSHOT_DIR) + "/tool_registry_snapshot.txt";
+  std::ifstream file(path);
+  ASSERT_TRUE(file.good()) << "cannot read snapshot: " << path;
+  std::stringstream buf;
+  buf << file.rdbuf();
+  std::string expected = buf.str();
+  expected.erase(std::remove(expected.begin(), expected.end(), '\r'),
+                 expected.end());
+  const std::string actual = Core::tool_registry_dump();
+  if (expected != actual) {
+    std::cerr << "tool registry snapshot mismatch\n--- expected ---\n"
+              << expected << "--- actual ---\n" << actual;
+  }
+  EXPECT_EQ(actual, expected)
+      << "tool registry changed; update src/tests/tool_registry_snapshot.txt "
+         "and review the diff";
 }
 
 TEST(ToolRunGateTest, SecondAcquireRefusedWhileHandlerRuns) {

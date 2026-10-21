@@ -63,9 +63,6 @@ public:
   static std::string extract_tool_call(const std::string &text,
                                        std::string &out_tool,
                                        nlohmann::json &out_args);
-  // Converts JSON arguments to the tool's command-line input format.
-  static std::string json_args_to_input(const std::string &tool,
-                                        const nlohmann::json &args);
   // Truncates an observation to the configured limit with a marker.
   static std::string truncate_observation(const std::string &obs);
   // Wraps an observation as quoted, untrusted data for the model.
