@@ -8,6 +8,7 @@
 #include "sandbox_service.h"
 #include "search_service.h"
 #include "theme_service.h"
+#include "tool_registry.h"
 #include "tool_run_gate.h"
 #include "ui.h"
 #include "validation.h"
@@ -2380,6 +2381,28 @@ TEST(LayoutTest, PromptBodyExcludesTrailingSpace) {
   const auto parts = Utils::UI::prompt_lines(80, "Mode (default 2): ");
   ASSERT_EQ(parts.size(), 1u);
   EXPECT_EQ(parts[0].back(), ':');
+}
+
+TEST(ToolRegistrySnapshotTest, MatchesCheckedInSnapshot) {
+  // The snapshot is the reviewed record of which tools exist, how they are
+  // tiered, whether the model may call them, and whether they need consent.
+  // Any change to the registry or to the model-surface policy must be
+  // reviewed, so a difference fails here.
+  const std::string path = std::string(TEST_SNAPSHOT_DIR) +
+                           "/tool_registry_snapshot.txt";
+  std::ifstream file(path);
+  ASSERT_TRUE(file.good()) << "cannot read snapshot: " << path;
+  std::stringstream buf;
+  buf << file.rdbuf();
+  const std::string expected = buf.str();
+  const std::string actual = Core::tool_registry_dump();
+  if (expected != actual) {
+    std::cerr << "tool registry snapshot mismatch\n--- expected ---\n"
+              << expected << "--- actual ---\n" << actual;
+  }
+  EXPECT_EQ(actual, expected)
+      << "tool registry changed; update src/tests/tool_registry_snapshot.txt "
+         "and review the diff";
 }
 
 TEST(ToolRunGateTest, SecondAcquireRefusedWhileHandlerRuns) {

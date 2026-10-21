@@ -66,19 +66,4 @@ bool requires_consent(const ToolCall &call);
 // understands) from a canonical call.
 std::string tool_call_to_input(const ToolCall &call);
 
-// One line per registered tool, for tooling and tests:
-//
-//   tool\t<name>\t<risk>\t<model-callable>\t<requires-consent>
-//
-// risk is "read-only" or "mutating"; model-callable is "yes" or "no".
-//
-// Then one line per (tool, subcommand) pair the model surface must
-// refuse:
-//
-//   refused\t<tool>\t<subcommand>\t<requires-consent>
-//
-// The dump comes from the registry, so a newly registered tool shows up
-// without any list being maintained by hand.
-std::string tool_registry_dump();
-
 } // namespace Core

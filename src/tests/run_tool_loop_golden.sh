@@ -387,7 +387,7 @@ sweep_args_for() {
   esac
 }
 
-REGISTRY_DUMP="$(AGENTWARE_DUMP_TOOLS=1 "$BIN" 2>/dev/null || true)"
+REGISTRY_DUMP="$(AGENTWARE_DUMP_TOOLS=1 TEST_MODE=1 "$BIN" 2>/dev/null || true)"
 if [ -z "$REGISTRY_DUMP" ]; then
   echo "FATAL: could not read the tool registry dump" >&2
   exit 1
@@ -456,6 +456,40 @@ run_case "read-fifo-refused" "$fifo_then_read" "read the fifo" \
   "Refusing to read a FIFO"
 run_case "read-after-fifo-works" "$fifo_then_read" "read the fifo" \
   "plain content"
+
+# 32b-2. A FIFO inside the workspace must not hang the directory walkers
+#        (grep:, list:, tree:) and must not leave a stuck handler: a later
+#        call in the SAME session still works. analyze: is refused on the
+#        model surface, but it must not leave a stuck handler either.
+walker_then_read() {
+  local tool="$1" args="$2" label="$3"
+  local replies
+  replies=$(python3 -c "
+import json, sys
+tool, args = sys.argv[1], sys.argv[2]
+print(json.dumps([
+    json.dumps({'tool': tool, 'arguments': json.loads(args)}),
+    json.dumps({'tool': 'read', 'arguments': {'filename': 'plain.txt'}}),
+    'Done.']))
+" "$tool" "$args")
+  # The second turn reads plain.txt: if the first turn left a stuck
+  # handler, the tool gate refuses it and the read never happens.
+  run_case "walker-$label-then-read" "$replies" "walk the dir" "plain content"
+}
+
+mkfifo "$WORK/myfifo" 2>/dev/null || true
+walker_then_read grep '{"pattern":"needle","directory":"."}' "grep"
+walker_then_read list '{"path":"."}' "list"
+walker_then_read tree '{"path":"."}' "tree"
+walker_then_read analyze '{"path":"."}' "analyze"
+
+# tree: must not list a non-regular file at all.
+tree_reply=$(python3 -c "
+import json
+print(json.dumps([json.dumps({'tool': 'tree', 'arguments': {'path': '.'}}),
+                  'Done.']))
+")
+expect_no "tree-hides-fifo" "$tree_reply" "walk the dir" "myfifo"
 
 # 32c. /dev reached through a symlink inside cwd: the canonical path
 #      leaves cwd, so the containment check refuses it.

@@ -63,4 +63,19 @@ private:
 // Populates the registry with every colon tool the agent knows. Idempotent.
 void register_all_tools();
 
+// One line per registered tool, for tooling and tests:
+//
+//   tool\t<name>\t<risk>\t<model-callable>\t<requires-consent>
+//
+// risk is "read-only" or "mutating"; model-callable is "yes" or "no".
+//
+// Then one line per (tool, subcommand) pair the model surface must
+// refuse:
+//
+//   refused\t<tool>\t<subcommand>\t<requires-consent>
+//
+// The dump comes from the registry, so a newly registered tool shows up
+// without any list being maintained by hand.
+std::string tool_registry_dump();
+
 } // namespace Core
