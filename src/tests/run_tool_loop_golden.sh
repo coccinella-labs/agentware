@@ -11,18 +11,12 @@
 set -u
 
 BIN="${1:?usage: run_tool_loop_golden.sh <agentware-agent binary>}"
-PORT="${PORT:-0}"
-if [ "$PORT" = "0" ]; then
-  for p in 11499 11500 11501 11502 11503; do
-    if ! (exec 3<>/dev/tcp/127.0.0.1/$p) 2>/dev/null; then PORT=$p; break; fi
-  done
-fi
-: "${PORT:=11499}"
 BIN="$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")"
 MOCK_PROVIDER="${MOCK_PROVIDER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mock_tool_provider.py}"
 WORK="$(mktemp -d)"
 PROV="$(mktemp -d)"
-trap 'rm -rf "$WORK" "$PROV" "$OUTSIDE" "$ABS_OUT" "$SPECIAL_DIR"' EXIT
+PROVIDER_PID=""
+trap 'stop_provider; rm -rf "$WORK" "$PROV" "$OUTSIDE" "$ABS_OUT" "$SPECIAL_DIR"' EXIT
 cd "$WORK" || exit 1
 
 export HOME="$WORK"
@@ -47,18 +41,61 @@ printf 'one\n' > tl_fixture/one.txt
 printf 'two\n' > tl_fixture/two.txt
 printf 'needle} say "hi"\n' > tl_fixture/brace.txt
 
-# Waits until the mock provider accepts a connection on the port, so a slow
-# or failed provider start is reported as a failure instead of showing up as
-# an unrelated timeout inside the binary.
-provider_ready() {
-  local port="$1" i
-  for i in $(seq 1 100); do
-    if (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
-      return 0
+# Starts the mock provider and waits until it is actually serving.
+#
+# The provider takes an OS-assigned port and writes it to $PROV/port, so
+# two runs can never collide on a fixed port. The wait proves the port
+# accepts a connection before the agent is started: a provider that never
+# came up has to show up as a provider failure, not as an unrelated
+# timeout inside the binary.
+#
+# Prints the port on stdout. Returns 1 if the provider never came up.
+start_provider() {
+  rm -f "$PROV/port" "$PROV/port.tmp"
+  MOCK_RESPONSES="$PROV/tl_replies.json" \
+  MOCK_PROVIDER_PORT_FILE="$PROV/port" \
+    python3 "$MOCK_PROVIDER" >"$PROV/tl_prov.log" 2>&1 &
+  PROVIDER_PID=$!
+  local i port
+  for i in $(seq 1 200); do
+    if [ -s "$PROV/port" ]; then
+      port=$(tr -cd '0-9' < "$PROV/port")
+      if [ -n "$port" ] && (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
+        echo "$port"
+        return 0
+      fi
+    fi
+    if ! kill -0 "$PROVIDER_PID" 2>/dev/null; then
+      return 1
     fi
     sleep 0.1
   done
   return 1
+}
+
+stop_provider() {
+  [ -n "$PROVIDER_PID" ] || return 0
+  kill "$PROVIDER_PID" 2>/dev/null || true
+  wait "$PROVIDER_PID" 2>/dev/null || true
+  PROVIDER_PID=""
+}
+
+# Prints the provider log under a failing case. Without it, "the provider
+# was never reachable" and "the provider was reached but never answered"
+# are indistinguishable from the outside, which is how a provider-side
+# failure once hid behind a wall of 30 s connect timeouts.
+dump_provider_log() {
+  echo "      | --- mock provider log ---"
+  sed 's/^/      | /' "$PROV/tl_prov.log" 2>/dev/null | head -12
+}
+
+# Reports a provider that never came up, and counts the case failed.
+provider_failed() {
+  local name="$1"
+  echo "FAIL  $name (mock provider never accepted a connection)"
+  dump_provider_log
+  stop_provider
+  FAILURES=$((FAILURES + 1))
 }
 
 run_case() {
@@ -66,16 +103,19 @@ run_case() {
   local tool_timeout="${TOOL_TIMEOUT_SEC:-}"
   CASES=$((CASES + 1))
   printf '%s' "$replies" > "$PROV/tl_replies.json"
-  MOCK_RESPONSES="$PROV/tl_replies.json" \
-    python3 "$MOCK_PROVIDER" "$PORT" >"$PROV/tl_prov.log" 2>&1 &
-  local ppid=$!
-  sleep 1
+  local port
+  if ! port=$(start_provider); then
+    provider_failed "$name"
+    return
+  fi
   local stdin_lines actual
   stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
   local -a env_args=(
     AGENTWARE_TOOL_CALL_LOOP=1
     TEST_MODE=1
-    "TEST_OLLAMA_URL=http://127.0.0.1:${PORT}/api/chat"
+    no_proxy=127.0.0.1,localhost
+    NO_PROXY=127.0.0.1,localhost
+    "TEST_OLLAMA_URL=http://127.0.0.1:${port}/api/chat"
   )
   if [ -n "$tool_timeout" ]; then
     env_args+=("AGENTWARE_TOOL_TIMEOUT_SEC=$tool_timeout")
@@ -83,13 +123,13 @@ run_case() {
   actual=$(printf '%b' "$stdin_lines" | \
     env "${env_args[@]}" "$BIN" 2>&1 |
     perl -pe 's/\e\[[0-9;]*[mK]//g')
-  kill $ppid 2>/dev/null || true
-  wait $ppid 2>/dev/null || true
+  stop_provider
   if echo "$actual" | grep -qF "$expect"; then
     echo "PASS  $name"
   else
     echo "FAIL  $name (expected '$expect')"
     echo "$actual" | sed 's/^/      | /' | head -14
+    dump_provider_log
     FAILURES=$((FAILURES + 1))
   fi
 }
@@ -101,17 +141,11 @@ expect_refused() {
   local name="$1" replies="$2" input="$3" success="$4" extra="${5:-}"
   CASES=$((CASES + 1))
   printf '%s' "$replies" > "$PROV/tl_replies.json"
-  MOCK_RESPONSES="$PROV/tl_replies.json" \
-    python3 "$MOCK_PROVIDER" "$PORT" >"$PROV/tl_prov.log" 2>&1 &
-  local ppid=$!
-  provider_ready "$PORT" || {
-    echo "FAIL  $name (mock provider never accepted a connection on port $PORT)"
-    sed 's/^/      | /' "$PROV/tl_prov.log" | head -10
-    kill "$ppid" 2>/dev/null || true
-    wait "$ppid" 2>/dev/null || true
-    FAILURES=$((FAILURES + 1))
+  local port
+  if ! port=$(start_provider); then
+    provider_failed "$name"
     return
-  }
+  fi
   local stdin_lines actual
   stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
   actual=$(printf '%b' "$stdin_lines" | \
@@ -119,19 +153,20 @@ expect_refused() {
     TEST_MODE=1 \
     no_proxy=127.0.0.1,localhost \
     NO_PROXY=127.0.0.1,localhost \
-    TEST_OLLAMA_URL="http://127.0.0.1:${PORT}/api/chat" \
+    TEST_OLLAMA_URL="http://127.0.0.1:${port}/api/chat" \
     "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
-  kill $ppid 2>/dev/null || true
-  wait $ppid 2>/dev/null || true
+  stop_provider
   local refused=0
   echo "$actual" | grep -qE "unknown tool |not available in read-only mode|not available on the model surface|consent denied: no TTY" && refused=1
   if [ "$refused" -eq 0 ]; then
     echo "FAIL  $name (no refusal marker in output)"
     echo "$actual" | sed 's/^/      | /' | head -14
+    dump_provider_log
     FAILURES=$((FAILURES + 1))
   elif echo "$actual" | grep -qF "$success"; then
     echo "FAIL  $name (executed: found '$success')"
     echo "$actual" | sed 's/^/      | /' | head -14
+    dump_provider_log
     FAILURES=$((FAILURES + 1))
   else
     echo "PASS  $name"
@@ -143,17 +178,11 @@ expect_no() {
   local name="$1" replies="$2" input="$3" absent="$4" extra="${5:-}"
   CASES=$((CASES + 1))
   printf '%s' "$replies" > "$PROV/tl_replies.json"
-  MOCK_RESPONSES="$PROV/tl_replies.json" \
-    python3 "$MOCK_PROVIDER" "$PORT" >"$PROV/tl_prov.log" 2>&1 &
-  local ppid=$!
-  provider_ready "$PORT" || {
-    echo "FAIL  $name (mock provider never accepted a connection on port $PORT)"
-    sed 's/^/      | /' "$PROV/tl_prov.log" | head -10
-    kill "$ppid" 2>/dev/null || true
-    wait "$ppid" 2>/dev/null || true
-    FAILURES=$((FAILURES + 1))
+  local port
+  if ! port=$(start_provider); then
+    provider_failed "$name"
     return
-  }
+  fi
   local stdin_lines actual
   stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
   actual=$(printf '%b' "$stdin_lines" | \
@@ -161,13 +190,13 @@ expect_no() {
     TEST_MODE=1 \
     no_proxy=127.0.0.1,localhost \
     NO_PROXY=127.0.0.1,localhost \
-    TEST_OLLAMA_URL="http://127.0.0.1:${PORT}/api/chat" \
+    TEST_OLLAMA_URL="http://127.0.0.1:${port}/api/chat" \
     "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
-  kill $ppid 2>/dev/null || true
-  wait $ppid 2>/dev/null || true
+  stop_provider
   if echo "$actual" | grep -qF "$absent"; then
     echo "FAIL  $name (unexpected '$absent')"
     echo "$actual" | sed 's/^/      | /' | head -14
+    dump_provider_log
     FAILURES=$((FAILURES + 1))
   else
     echo "PASS  $name"
