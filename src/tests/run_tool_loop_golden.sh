@@ -42,6 +42,20 @@ printf 'one\n' > tl_fixture/one.txt
 printf 'two\n' > tl_fixture/two.txt
 printf 'needle} say "hi"\n' > tl_fixture/brace.txt
 
+# Waits until the mock provider accepts a connection on the port, so a slow
+# or failed provider start is reported as a failure instead of showing up as
+# an unrelated timeout inside the binary.
+provider_ready() {
+  local port="$1" i
+  for i in $(seq 1 100); do
+    if (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 run_case() {
   local name="$1" replies="$2" input="$3" expect="$4" extra="${5:-}"
   local tool_timeout="${TOOL_TIMEOUT_SEC:-}"
@@ -85,12 +99,21 @@ expect_refused() {
   MOCK_RESPONSES="$PROV/tl_replies.json" \
     python3 "$MOCK_PROVIDER" "$PORT" >"$PROV/tl_prov.log" 2>&1 &
   local ppid=$!
-  sleep 1
+  provider_ready "$PORT" || {
+    echo "FAIL  $name (mock provider never accepted a connection on port $PORT)"
+    sed 's/^/      | /' "$PROV/tl_prov.log" | head -10
+    kill "$ppid" 2>/dev/null || true
+    wait "$ppid" 2>/dev/null || true
+    FAILURES=$((FAILURES + 1))
+    return
+  }
   local stdin_lines actual
   stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
   actual=$(printf '%b' "$stdin_lines" | \
     AGENTWARE_TOOL_CALL_LOOP=1 \
     TEST_MODE=1 \
+    no_proxy=127.0.0.1,localhost \
+    NO_PROXY=127.0.0.1,localhost \
     TEST_OLLAMA_URL="http://127.0.0.1:${PORT}/api/chat" \
     "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
   kill $ppid 2>/dev/null || true
@@ -118,12 +141,21 @@ expect_no() {
   MOCK_RESPONSES="$PROV/tl_replies.json" \
     python3 "$MOCK_PROVIDER" "$PORT" >"$PROV/tl_prov.log" 2>&1 &
   local ppid=$!
-  sleep 1
+  provider_ready "$PORT" || {
+    echo "FAIL  $name (mock provider never accepted a connection on port $PORT)"
+    sed 's/^/      | /' "$PROV/tl_prov.log" | head -10
+    kill "$ppid" 2>/dev/null || true
+    wait "$ppid" 2>/dev/null || true
+    FAILURES=$((FAILURES + 1))
+    return
+  }
   local stdin_lines actual
   stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
   actual=$(printf '%b' "$stdin_lines" | \
     AGENTWARE_TOOL_CALL_LOOP=1 \
     TEST_MODE=1 \
+    no_proxy=127.0.0.1,localhost \
+    NO_PROXY=127.0.0.1,localhost \
     TEST_OLLAMA_URL="http://127.0.0.1:${PORT}/api/chat" \
     "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
   kill $ppid 2>/dev/null || true
