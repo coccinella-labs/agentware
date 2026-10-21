@@ -4,13 +4,42 @@
 
 ## [Unreleased]
 
+* Model-driven tool-call loop: opt-in autonomous agent execution (`AGENTWARE_TOOL_CALL_LOOP=1`) allowing models to propose JSON tool calls that the runtime validates, executes, and feeds back as observations across multiple turns.
+* Central `ToolRegistry`: a single source of truth for tool definitions, capability classifications (read-only vs mutating), model-surface dispatch metadata, and interactive consent policies.
+
+### Added
+
+* Model tool-call loop runtime: assistant response parser for JSON tool invocations, turn-bounded execution (`AGENTWARE_TOOL_TURN_CAP`, default 8), observation truncation, and per-tool timeout controls (`AGENTWARE_TOOL_TIMEOUT_SEC`, default 30s).
+* Hermetic tool loop golden test harness (`tool_loop_golden`, 131 test cases) registered in `ctest` and backed by a local mock provider (`mock_tool_provider.py`).
+* Canonical tool-call parser and registry snapshot verification test (`ToolRegistrySnapshotTest`) ensuring runtime tools match `tool_registry_snapshot.txt` with CRLF normalization across platforms.
+* Read-only `git:diff` command for working-tree inspection without mutating repository state.
+* Tool registry dump via `AGENTWARE_DUMP_TOOLS=1` under `TEST_MODE=1`.
+* Repository code styling tools: `.clang-format` configuration and `yamllint` checks integrated into pre-commit and CI.
+
+### Changed
+
+* Linux and macOS CI jobs now run Google Test (`basic_tests`), routing goldens (`routing_golden`), and tool loop goldens (`tool_loop_golden`) after `make preflight`.
+* Expanded Google Test suite from 85 cases across 31 suites to 130 cases across 42 suites, adding coverage for `ToolRegistry`, `ToolRunGate`, snapshot parity, and timeout utilities.
+* Shortened default network timeout to 10 seconds during tool-loop turns (`AGENTWARE_NET_TIMEOUT_SEC`), keeping a 30-second default for direct user requests.
+* Web service loopback targets now bypass ambient HTTP proxies, ensuring local Ollama instances are not routed through external proxies.
+* Refined terminal presentation for the engineering loop with Unicode box frames, branded dividers, status spinners, and distinct turn glyphs.
+* Windows console now initializes UTF-8 mode and Virtual Terminal processing on startup, and MSVC builds use `/utf-8` to ensure glyphs compile under `/W4 /WX`.
+
 ### Fixed
 
-- The daily maintenance workflow publishes its report as a pull request instead
-  of pushing straight to `main`. The `main-merge-queue` ruleset requires three
-  status checks on `main`, and a direct push carries none, so every scheduled
-  run failed with `3 of 3 required status checks are expected` from 2026-10-17
-  until this change.
+* The daily maintenance workflow publishes its report as a pull request instead of pushing straight to `main`. The `main-merge-queue` ruleset requires three status checks on `main`, and a direct push carries none, so every scheduled run failed with `3 of 3 required status checks are expected` from 2026-10-17 until this change.
+* DuckDuckGo search endpoint now follows HTTP redirects and requests JSON results properly.
+* Grep match count now accurately reflects filtered results rather than raw scanner totals.
+* Made `/proc` symlink verification portable across Linux and macOS in the tool loop golden harness.
+* Restored release build reliability on Windows by bootstrapping the `vcpkg` toolchain and aligning macOS release dependencies with CI.
+* Eliminated trailing newlines and normalized line endings across maintenance reports and documentation captures.
+
+### Security
+
+* Read-only tool execution gate (`ToolRunGate`): mutating tools (`cmd:`, `write:`, `replace:`, `remember:`, `clear`, `forget`) and heavy tools (`todos:`, `analyze:`, `git:diff`) are strictly rejected when invoked from the model surface.
+* Enforced working directory containment on tool arguments: directory traversal (`..`), absolute paths, and external symlinks are refused with `Path escapes the permitted root`.
+* Secrets filtering (`is_secrets_path`): sensitive paths (`.env`, `.ssh`, tokens, secret keys) are blocked from reads and filtered out of search, grep, and walker results.
+* Interactive consent gate: outbound network tools (`fetch:`, `github:`) require interactive TTY confirmation and fail with `consent denied: no TTY` in unattended or non-interactive environments.
 
 ## [0.1.7] - 2026-10-16
 
