@@ -13,6 +13,15 @@ set -u
 BIN="${1:?usage: run_tool_loop_golden.sh <agentware-agent binary>}"
 BIN="$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")"
 MOCK_PROVIDER="${MOCK_PROVIDER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mock_tool_provider.py}"
+# Scratch directories the script creates. They are declared up front
+# because the EXIT trap removes them, and an interrupt can arrive
+# before the later ones are assigned: under 'set -u' an unset variable
+# would abort the trap itself, and the cleanup would be skipped.
+WORK=""
+PROV=""
+OUTSIDE=""
+ABS_OUT=""
+SPECIAL_DIR=""
 WORK="$(mktemp -d)"
 PROV="$(mktemp -d)"
 PROVIDER_PID=""
@@ -128,7 +137,10 @@ on_exit() {
   if ! check_no_leaked_providers; then
     status=1
   fi
-  rm -rf "$WORK" "$PROV" "$OUTSIDE" "$ABS_OUT" "$SPECIAL_DIR"
+  local dir
+  for dir in "$WORK" "$PROV" "$OUTSIDE" "$ABS_OUT" "$SPECIAL_DIR"; do
+    [ -n "$dir" ] && rm -rf "$dir"
+  done
   exit $status
 }
 
