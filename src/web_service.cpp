@@ -482,6 +482,23 @@ WebResponse WebService::fetch_with_headers(const std::string &url,
   return response;
 }
 
+namespace {
+
+// True when the URL names a loopback host (127.0.0.0/8, ::1, localhost).
+bool is_loopback_url(const std::string &url) {
+  static const std::string hosts[] = {"http://127.", "https://127.",
+                                      "http://[::1]", "https://[::1]",
+                                      "http://localhost", "https://localhost",
+                                      "http://0.0.0.0", "https://0.0.0.0"};
+  for (const auto &h : hosts) {
+    if (url.rfind(h, 0) == 0)
+      return true;
+  }
+  return false;
+}
+
+} // namespace
+
 WebResponse WebService::post_json(const std::string &url,
                                   const std::string &json_body,
                                   const HeaderMap &headers) {
@@ -500,10 +517,26 @@ WebResponse WebService::post_json(const std::string &url,
       cpr_headers["Content-Type"] = "application/json";
     }
 
+    // A loopback target (a local Ollama, a local mock) must never be
+    // routed through an ambient http_proxy: the proxy cannot reach the
+    // loopback interface and the request hangs until it times out.
+    // Detect loopback and disable proxies for that request.
+    const bool loopback = is_loopback_url(url);
+
     // Make POST request
-    cpr::Response cpr_response =
-        cpr::Post(cpr::Url{url}, cpr_headers, cpr::Body{json_body},
-                  cpr::Timeout{std::chrono::seconds{default_network_timeout()}});
+    cpr::Session session;
+    session.SetUrl(cpr::Url{url});
+    for (const auto &kv : cpr_headers) {
+      session.SetHeader(cpr::Header{{kv.first, kv.second}});
+    }
+    session.SetBody(cpr::Body{json_body});
+    session.SetTimeout(cpr::Timeout{std::chrono::seconds{default_network_timeout()}});
+    if (loopback) {
+      // An explicit empty proxy disables the environment proxy for this
+      // request.
+      session.SetProxies(cpr::Proxies{{"http", ""}, {"https", ""}});
+    }
+    cpr::Response cpr_response = session.Post();
 
     // Fill response
     response.status_code = static_cast<int>(cpr_response.status_code);
