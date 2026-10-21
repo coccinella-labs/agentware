@@ -6,14 +6,28 @@
 #include "ai_service.h"
 #include "config.h"
 #include "memory_manager.h"
+#include "startup_trace.h"
 #include "terminal_setup.h"
 #include "tool_call.h"
 #include "ui.h"
 
+namespace {
+// The earliest point a C++ program can report from. If the time is
+// spent before main (the dynamic loader, static initializers), this
+// line is the first thing in the trace and the gap to "main: entered"
+// is that time.
+struct StartupTraceInit {
+  StartupTraceInit() { Utils::startup_trace("process: static initialization"); }
+} startup_trace_init;
+} // namespace
+
 int main() {
+  Utils::startup_trace("main: entered");
   try {
     // Initialize configuration (reads env vars, .env, etc.)
+    Utils::startup_trace("main: loading environment");
     Utils::Config::load_environment();
+    Utils::startup_trace("main: environment loaded");
 
     // Test hook: dump the tool registry and exit. The golden suite reads
     // this to build its sweep, so the list of tools under test comes
@@ -32,21 +46,27 @@ int main() {
     // at exit and on Ctrl-C. A false return means the console cannot
     // do VT (legacy conhost): switch to the ASCII, colors-off glyph
     // table instead of printing mojibake boxes.
+    Utils::startup_trace("main: terminal setup");
     if (!Utils::Terminal::setup()) {
       Utils::UI::enable_ascii_fallback();
     }
     Utils::Terminal::install_ctrl_c_restore();
+    Utils::startup_trace("main: terminal ready");
 
     // Check for test mode is handled in Agent::initialize_mode()
 
     // Display welcome screen
+    Utils::startup_trace("main: print logo");
     Utils::UI::print_logo();
+    Utils::startup_trace("main: logo printed");
 
     // Create agent
     Core::Agent agent;
+    Utils::startup_trace("main: agent constructed");
 
     // Run agent
     agent.run();
+    Utils::startup_trace("main: agent run returned");
 
     std::cout << Utils::Color::DIM << "Agent run completed"
               << Utils::Color::RESET << std::endl;

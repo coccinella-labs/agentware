@@ -46,6 +46,15 @@ CASES=0
 PROVIDER_PORT=""
 PROVIDER_PID=""
 
+# Startup trace. The agent writes it when AGENTWARE_STARTUP_TRACE points
+# at a file; only the first case enables it, so the file holds one
+# startup, and it is printed at the end of the suite because the scratch
+# directory is removed by the EXIT trap.
+STARTUP_TRACE="$PROV/startup_trace.log"
+# Wall-clock bracket of the first case, filled in while the case runs.
+SPAWNED_AT=""
+FINISHED_AT=""
+
 # Fixtures: a tiny tree so tool output is small and stable.
 printf 'golden needle alpha\nsecond line\n' > hello.txt
 printf 'notes file with needle words\n' > notes.md
@@ -189,9 +198,20 @@ run_case() {
   if [ -n "$tool_timeout" ]; then
     env_args+=("AGENTWARE_TOOL_TIMEOUT_SEC=$tool_timeout")
   fi
+  if [ "$CASES" -eq 1 ]; then
+    env_args+=("AGENTWARE_STARTUP_TRACE=$STARTUP_TRACE")
+  fi
+  if [ "$CASES" -eq 1 ]; then
+    # Brackets the whole process, including the exec and anything that
+    # happens before main. The trace inside the agent cannot see that.
+    SPAWNED_AT=$(date '+%H:%M:%S')
+  fi
   actual=$(printf '%b' "$stdin_lines" | \
     env "${env_args[@]}" "$BIN" 2>&1 |
     perl -pe 's/\e\[[0-9;]*[mK]//g')
+  if [ "$CASES" -eq 1 ]; then
+    FINISHED_AT=$(date '+%H:%M:%S')
+  fi
   stop_provider
   if echo "$actual" | grep -qF "$expect"; then
     echo "PASS  $name"
@@ -216,6 +236,10 @@ expect_refused() {
   fi
   local stdin_lines actual
   stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
+  TRACE_ENV=""
+  if [ "$CASES" -eq 1 ]; then
+    TRACE_ENV="AGENTWARE_STARTUP_TRACE=$STARTUP_TRACE"
+  fi
   actual=$(printf '%b' "$stdin_lines" | \
     AGENTWARE_TOOL_CALL_LOOP=1 \
     TEST_MODE=1 \
@@ -223,6 +247,7 @@ expect_refused() {
     NO_PROXY=127.0.0.1,localhost \
     TEST_OLLAMA_URL="http://127.0.0.1:${PROVIDER_PORT}" \
     AGENTWARE_NET_TIMEOUT_SEC="${NET_TIMEOUT_SEC:-5}" \
+    ${TRACE_ENV:-} \
     "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
   stop_provider
   local refused=0
@@ -253,6 +278,10 @@ expect_no() {
   fi
   local stdin_lines actual
   stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
+  TRACE_ENV=""
+  if [ "$CASES" -eq 1 ]; then
+    TRACE_ENV="AGENTWARE_STARTUP_TRACE=$STARTUP_TRACE"
+  fi
   actual=$(printf '%b' "$stdin_lines" | \
     AGENTWARE_TOOL_CALL_LOOP=1 \
     TEST_MODE=1 \
@@ -260,6 +289,7 @@ expect_no() {
     NO_PROXY=127.0.0.1,localhost \
     TEST_OLLAMA_URL="http://127.0.0.1:${PROVIDER_PORT}" \
     AGENTWARE_NET_TIMEOUT_SEC="${NET_TIMEOUT_SEC:-5}" \
+    ${TRACE_ENV:-} \
     "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
   stop_provider
   if echo "$actual" | grep -qF "$absent"; then
@@ -672,6 +702,13 @@ run_case "fetch-file-url-refused" "$fetch_url" "fetch a file url" \
 # normal path and the interrupted one.
 if ! check_no_leaked_providers; then
   FAILURES=$((FAILURES + 1))
+fi
+
+if [ -s "$STARTUP_TRACE" ]; then
+  echo ""
+  echo "--- startup trace (first case) ---"
+  echo "      | agent spawned at ${SPAWNED_AT}, finished at ${FINISHED_AT}"
+  sed 's/^/      | /' "$STARTUP_TRACE"
 fi
 
 printf '\n%d/%d tool-loop golden cases passed\n' "$((CASES - FAILURES))" "$CASES"
