@@ -11,6 +11,7 @@
 #include "command_router.h"
 #include "search_service.h"
 #include "tool_registry.h"
+#include "tool_run_gate.h"
 #include "command_service.h"
 #include "config.h"
 #include "context_service.h"
@@ -602,17 +603,23 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
         auto search_result =
             Services::search_code(search_caps_, search_options);
 
-        if (search_result.matches.empty()) {
+        // Secrets paths are filtered out of the results, so the count
+        // below reflects what is actually shown.
+        std::vector<std::string> shown;
+        for (const auto &match : search_result.matches) {
+          if (Core::Agent::is_secrets_path(match.file_path))
+            continue;
+          shown.push_back(match.file_path + ":" +
+                          std::to_string(match.line_number) + ": " +
+                          match.line_content);
+        }
+        if (shown.empty()) {
           result = "No matches found for pattern: " + pattern;
         } else {
-          result = "Found " + std::to_string(search_result.matches.size()) +
+          result = "Found " + std::to_string(shown.size()) +
                    " matches (via " + search_result.backend_used + "):\n";
-          for (const auto &match : search_result.matches) {
-            if (Core::Agent::is_secrets_path(match.file_path))
-              continue;
-            result += match.file_path + ":" +
-                      std::to_string(match.line_number) + ": " +
-                      match.line_content + "\n";
+          for (const auto &line : shown) {
+            result += line + "\n";
           }
           if (search_result.truncated) {
             result +=
@@ -928,12 +935,21 @@ std::string Agent::extract_tool_call(const std::string &text,
   out_tool.clear();
   out_args = nlohmann::json::object();
 
-  // Recognition rule: a tool call is recognized only when the entire
-  // assistant message is a single JSON object, or when the message
-  // contains exactly one tagged fenced code block whose body is a single
-  // JSON object. JSON that appears inside prose, examples, or quoted
-  // snippets never executes. Anything else is treated as a final answer
-  // ("none"), so prose + JSON is a final answer, not a tool call.
+  // Recognition rule: a tool call is recognized only if the ENTIRE
+  // assistant message parses as one JSON object that carries a "tool"
+  // key. Prose, examples, arrays, multiple objects, and trailing text
+  // are final answers and never execute. A single tagged fenced block
+  // whose body is one such object is also recognized.
+  // Size cap: an oversized assistant message is refused before any
+  // parsing, so a huge reply cannot be used to smuggle a call past the
+  // recognizer or to blow up the parser.
+  constexpr size_t kMaxAssistantMessageBytes = 64 * 1024;
+  if (text.size() > kMaxAssistantMessageBytes) {
+    return "error: assistant message too large (" +
+           std::to_string(text.size()) + " bytes); maximum is " +
+           std::to_string(kMaxAssistantMessageBytes);
+  }
+
   std::string trimmed = text;
   size_t ts = trimmed.find_first_not_of(" \t\n\r");
   if (ts == std::string::npos) {
@@ -946,10 +962,11 @@ std::string Agent::extract_tool_call(const std::string &text,
   }
 
   std::string candidate;
-  bool had_fence = false;
   if (trimmed.rfind("```", 0) == 0) {
+    // The whole message must be exactly one fenced block.
     size_t open_nl = trimmed.find('\n');
-    size_t close = trimmed.find("```", (open_nl == std::string::npos) ? 3 : open_nl);
+    size_t close =
+        trimmed.find("```", (open_nl == std::string::npos) ? 3 : open_nl);
     if (close == std::string::npos) {
       return "none"; // unterminated fence -> not a call
     }
@@ -963,31 +980,49 @@ std::string Agent::extract_tool_call(const std::string &text,
       return "none";
     }
     candidate = trimmed.substr(content_start, close - content_start);
-    had_fence = true;
   } else {
     candidate = trimmed;
-    if (candidate.find("```") != std::string::npos) {
-      return "none"; // prose containing a code block -> final answer
-    }
   }
 
+  // Full-message parse. The callback records whether a top-level object
+  // STARTED and whether one COMPLETED, so a failure can be classified
+  // without a hand-rolled brace scan.
+  bool top_object_started = false;
+  bool top_object_completed = false;
   nlohmann::json j;
   try {
-    j = nlohmann::json::parse(candidate, nullptr, true);
-  } catch (...) {
-    // Malformed JSON. If it looks like an attempted call, return a
-    // recoverable error; otherwise treat as a final answer.
-    if (candidate.find("{") != std::string::npos &&
-        candidate.find("\"tool\"") != std::string::npos) {
+    j = nlohmann::json::parse(
+        candidate,
+        [&](int depth, nlohmann::json::parse_event_t event,
+            nlohmann::json &) {
+          if (depth != 0)
+            return true;
+          if (event == nlohmann::json::parse_event_t::object_start)
+            top_object_started = true;
+          else if (event == nlohmann::json::parse_event_t::object_end)
+            top_object_completed = true;
+          return true;
+        },
+        true);
+  } catch (const nlohmann::json::parse_error &) {
+    if (top_object_completed) {
+      // A complete object parsed and then more content followed:
+      // multiple objects, or trailing text. The whole message is not one
+      // JSON object, so it is a final answer and nothing executes.
+      return "none";
+    }
+    if (top_object_started) {
+      // The message began a JSON object and never finished it: the model
+      // was mid-call (truncated or invalid JSON). Recoverable error so
+      // the model can retry.
       return "error: malformed tool call: invalid JSON";
     }
-    if (trimmed.rfind("{", 0) == 0) {
-      return "error: malformed tool call: invalid JSON";
-    }
+    // Prose (which may embed JSON) is a final answer.
     return "none";
   }
 
   if (!j.is_object()) {
+    // Arrays and bare scalars are final answers.
     return "none";
   }
 
@@ -1003,11 +1038,11 @@ std::string Agent::extract_tool_call(const std::string &text,
     return "needs_user_input: " + j["needs_user_input"].get<std::string>();
   }
 
-  if (!j.contains("tool") || !j["tool"].is_string()) {
-    if (j.contains("tool")) {
-      return "error: malformed tool call: 'tool' must be a string";
-    }
-    return "none";
+  if (!j.contains("tool")) {
+    return "none"; // a JSON object without a tool key is a final answer
+  }
+  if (!j["tool"].is_string()) {
+    return "error: malformed tool call: 'tool' must be a string";
   }
 
   out_tool = j["tool"].get<std::string>();
@@ -1015,18 +1050,6 @@ std::string Agent::extract_tool_call(const std::string &text,
     out_args = j["arguments"];
   } else if (j.contains("arguments")) {
     return "error: malformed tool call: 'arguments' must be an object";
-  }
-
-  if (!had_fence) {
-    size_t first_end = candidate.find('}');
-    if (first_end != std::string::npos) {
-      std::string tail = candidate.substr(first_end + 1);
-      size_t ns = tail.find_first_not_of(" \t\n\r");
-      if (ns != std::string::npos) {
-        return "error: multiple tool calls in one reply; only one call per "
-               "turn is allowed";
-      }
-    }
   }
 
   return "";
@@ -1289,7 +1312,7 @@ void Agent::handle_ai_chat(const std::string &input) {
   int turns = 0;
   int retries = 0;
   constexpr int kRetryBudget = 3;
-  auto tool_running = std::make_shared<std::atomic<bool>>(false);
+  Core::ToolRunGate tool_gate;
 
   while (true) {
     std::atomic<bool> done(false);
@@ -1374,6 +1397,7 @@ void Agent::handle_ai_chat(const std::string &input) {
       current_input = quote_observation(obs);
       ++turns;
       ++retries;
+      Utils::UI::print_tool_result(obs);
       if (retries >= kRetryBudget) {
         Utils::UI::print_warning("Retry budget (" + std::to_string(kRetryBudget) +
                                  ") exhausted; stopping.");
@@ -1400,6 +1424,7 @@ void Agent::handle_ai_chat(const std::string &input) {
       current_input = quote_observation(obs);
       ++turns;
       ++retries;
+      Utils::UI::print_tool_result(obs);
       if (retries >= kRetryBudget) {
         Utils::UI::print_warning("Retry budget (" + std::to_string(kRetryBudget) +
                                  ") exhausted; stopping.");
@@ -1450,7 +1475,7 @@ void Agent::handle_ai_chat(const std::string &input) {
     }
 
     // Refuse new tool calls while a timed-out handler is still running.
-    if (tool_running->load()) {
+    if (tool_gate.held()) {
       std::string obs = "previous tool still running; refusing new call";
       obs = truncate_observation(obs);
       current_input = quote_observation(obs);
@@ -1463,10 +1488,10 @@ void Agent::handle_ai_chat(const std::string &input) {
     // PR 2: git:diff, todos: and analyze: are not model-callable until
     // their services filter secret paths. Refuse with a recoverable message.
     bool model_disabled = (tool_name == "todos" || tool_name == "analyze");
-    if (tool_name == "git") {
+    if (tool_name == "git" || tool_name == "git:diff") {
       std::string sub = args.value("subcommand", args.value("action",
           args.value("command", std::string("status"))));
-      if (sub == "diff")
+      if (sub == "diff" || tool_name == "git:diff")
         model_disabled = true;
     }
     if (model_disabled) {
@@ -1490,6 +1515,7 @@ void Agent::handle_ai_chat(const std::string &input) {
       obs = truncate_observation(obs);
       current_input = quote_observation(obs);
       ++turns;
+      Utils::UI::print_tool_result(obs);
       if (turns >= cap) {
         Utils::UI::print_warning("Tool turn cap (" + std::to_string(cap) +
                                  ") reached; stopping.");
@@ -1590,8 +1616,7 @@ void Agent::handle_ai_chat(const std::string &input) {
       }
     }
     auto result_ptr = std::make_shared<std::string>();
-    bool expected = false;
-    if (!tool_running->compare_exchange_strong(expected, true)) {
+    if (!tool_gate.try_acquire()) {
       // Another handler is still running; refuse.
       std::string obs = "previous tool still running; refusing new call";
       obs = truncate_observation(obs);
@@ -1601,21 +1626,17 @@ void Agent::handle_ai_chat(const std::string &input) {
       Utils::UI::print_tool_result(obs);
       continue;
     }
+    // The handler releases the gate itself, so a detached (timed-out)
+    // handler keeps the gate closed until it actually returns.
+    auto gate_flag = tool_gate.handle();
     bool timed_out = !Core::run_with_timeout(
         [&]() {
           handle_direct_command(tool_input, /*silent=*/true, result_ptr.get());
-          tool_running->store(false);
+          gate_flag->store(false);
         },
         kToolTimeoutSec);
-    if (timed_out) {
-      // Thread is detached and may still be running; tool_running stays
-      // true until it finishes (see docs). New tool calls are refused.
-    } else {
-      tool_running->store(false);
-    }
-    if (timed_out) {
-      // Thread is detached and may still be running; tool_running_ stays
-      // true until it finishes. New tool calls are refused meanwhile.
+    if (!timed_out) {
+      tool_gate.release();
     }
     std::string obs;
     if (timed_out) {
