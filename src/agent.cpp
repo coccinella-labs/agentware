@@ -10,6 +10,7 @@
 #include "codebase_service.h"
 #include "command_router.h"
 #include "search_service.h"
+#include "tool_call.h"
 #include "tool_registry.h"
 #include "tool_run_gate.h"
 #include "command_service.h"
@@ -1055,108 +1056,6 @@ std::string Agent::extract_tool_call(const std::string &text,
   return "";
 }
 
-std::string Agent::json_args_to_input(const std::string &tool,
-                                      const nlohmann::json &args) {
-  if (tool == "search") {
-    return "search:" + args.value("query", args.value("q", std::string("")));
-  }
-  if (tool == "cmd" || tool == "bash") {
-    return "cmd:" + args.value("command", args.value("cmd", std::string("")));
-  }
-  if (tool == "read") {
-    std::string path = args.value(
-        "path", args.value("filename", args.value("file", std::string(""))));
-    if (args.contains("start") || args.contains("count") ||
-        args.contains("lines")) {
-      int start = args.value("start", args.value("start_line", 1));
-      int count = args.value("count", args.value("line_count", 0));
-      if (count > 0) {
-        return "read:" + path + ":" + std::to_string(start) + ":" +
-               std::to_string(count);
-      }
-      if (start > 1) {
-        return "read:" + path + ":" + std::to_string(start);
-      }
-    }
-    return "read:" + path;
-  }
-  if (tool == "write") {
-    std::string path = args.value(
-        "path", args.value("filename", args.value("file", std::string(""))));
-    std::string content =
-        args.value("content", args.value("text", std::string("")));
-    return "write:" + path + " " + content;
-  }
-  if (tool == "replace") {
-    std::string path = args.value(
-        "path", args.value("filename", args.value("file", std::string(""))));
-    std::string old_text = args.value(
-        "old", args.value("old_text", args.value("search", std::string(""))));
-    std::string new_text = args.value(
-        "new",
-        args.value("new_text", args.value("replacement", std::string(""))));
-    int count = args.value("count", args.value("expected_count", 0));
-    std::string input = "replace:" + path + ":" + old_text + ":" + new_text;
-    if (count > 0)
-      input += ":" + std::to_string(count);
-    return input;
-  }
-  if (tool == "grep") {
-    std::string pattern =
-        args.value("pattern", args.value("query", std::string("")));
-    std::string dir = args.value(
-        "directory", args.value("dir", args.value("path", std::string("."))));
-    std::string filter =
-        args.value("filter", args.value("file_filter", std::string("*")));
-    std::string input = "grep:" + pattern + ":" + dir;
-    if (filter != "*")
-      input += ":" + filter;
-    return input;
-  }
-  if (tool == "remember") {
-    return "remember:" +
-           args.value("fact", args.value("text", args.value("content",
-                                                            std::string(""))));
-  }
-  if (tool == "analyze") {
-    return "analyze:" +
-           args.value("path", args.value("directory", std::string(".")));
-  }
-  if (tool == "components") {
-    return "components:" +
-           args.value("path", args.value("directory", std::string(".")));
-  }
-  if (tool == "todos") {
-    return "todos:" +
-           args.value("path", args.value("directory", std::string(".")));
-  }
-  if (tool == "tree") {
-    return "tree:" +
-           args.value("path", args.value("directory", std::string(".")));
-  }
-  if (tool == "git") {
-    std::string sub = args.value(
-        "subcommand",
-        args.value("action", args.value("command", std::string("status"))));
-    std::string path =
-        args.value("path", args.value("directory", std::string(".")));
-    return "git:" + sub + (path != "." ? " " + path : "");
-  }
-  if (tool == "github") {
-    return "github:" +
-           args.value("params", args.value("query", std::string("")));
-  }
-  if (tool == "list") {
-    std::string path =
-        args.value("path", args.value("directory", std::string(".")));
-    std::string glob =
-        args.value("glob", args.value("pattern", std::string("*")));
-    return "list:" + path + ":" + glob;
-  }
-  // Unknown: pass through as-is (will be caught by dispatch)
-  return tool + ":" + args.dump();
-}
-
 std::string Agent::truncate_observation(const std::string &obs) {
   constexpr size_t kMax = 4000;
   if (obs.size() <= kMax)
@@ -1411,12 +1310,10 @@ void Agent::handle_ai_chat(const std::string &input) {
       continue;
     }
 
-    // Valid tool call: resolve to a registered tool.
-    const Core::ToolSpec *spec = Core::ToolRegistry::instance().find(tool_name);
-    // Also try match_prefix in case the model used a colon form.
-    if (!spec)
-      spec = Core::ToolRegistry::instance().match_prefix(tool_name + ":");
-    if (!spec) {
+    // Valid tool call: canonicalize ONCE. Every check below reads the
+    // canonical form, never the raw string the model wrote.
+    Core::ToolCall call;
+    if (!Core::canonicalize_tool_call(tool_name, args, call)) {
       // Unknown tool.
       std::string obs = "unknown tool " + tool_name + "; available: " +
                         Core::ToolRegistry::instance().known_names();
@@ -1441,7 +1338,7 @@ void Agent::handle_ai_chat(const std::string &input) {
     // fetch: and github: from the model require consent in v1 (possible
     // exfiltration of private data to the model). Read-only for execution
     // but consent-gated.
-    if (tool_name == "fetch" || tool_name == "github") {
+    if (Core::requires_consent(call)) {
       bool is_tty = false;
 #ifdef _WIN32
       is_tty = _isatty(_fileno(stdin)) != 0;
@@ -1453,13 +1350,14 @@ void Agent::handle_ai_chat(const std::string &input) {
         obs = truncate_observation(obs);
         current_input = quote_observation(obs);
         ++turns;
-        Utils::UI::print_tool_call(spec->name, tool_name);
+        Utils::UI::print_tool_call(call.tool, call.tool);
         Utils::UI::print_tool_result(obs);
         continue;
       }
-      std::string label = (tool_name == "fetch") ? "fetch: may exfiltrate data"
-                                                  : "github: reads private repo data";
-      std::cout << "Tool " << tool_name << ": " << label
+      std::string label =
+          (call.tool == "fetch:") ? "fetch: may exfiltrate data"
+                                   : "github: reads private repo data";
+      std::cout << "Tool " << call.tool << ": " << label
                 << ". Continue? (y/N): " << std::flush;
       std::string confirm;
       std::getline(std::cin, confirm);
@@ -1468,7 +1366,7 @@ void Agent::handle_ai_chat(const std::string &input) {
         obs = truncate_observation(obs);
         current_input = quote_observation(obs);
         ++turns;
-        Utils::UI::print_tool_call(spec->name, tool_name);
+        Utils::UI::print_tool_call(call.tool, call.tool);
         Utils::UI::print_tool_result(obs);
         continue;
       }
@@ -1480,27 +1378,20 @@ void Agent::handle_ai_chat(const std::string &input) {
       obs = truncate_observation(obs);
       current_input = quote_observation(obs);
       ++turns;
-      Utils::UI::print_tool_call(spec->name, tool_name);
+      Utils::UI::print_tool_call(call.tool, call.tool);
       Utils::UI::print_tool_result(obs);
       continue;
     }
 
     // PR 2: git:diff, todos: and analyze: are not model-callable until
     // their services filter secret paths. Refuse with a recoverable message.
-    bool model_disabled = (tool_name == "todos" || tool_name == "analyze");
-    if (tool_name == "git" || tool_name == "git:diff") {
-      std::string sub = args.value("subcommand", args.value("action",
-          args.value("command", std::string("status"))));
-      if (sub == "diff" || tool_name == "git:diff")
-        model_disabled = true;
-    }
-    if (model_disabled) {
-      std::string obs = "tool " + tool_name +
+    if (Core::is_model_surface_disabled(call)) {
+      std::string obs = "tool " + call.tool +
                         " is not available on the model surface in v1";
       obs = truncate_observation(obs);
       current_input = quote_observation(obs);
       ++turns;
-      Utils::UI::print_tool_call(spec->name, tool_name);
+      Utils::UI::print_tool_call(call.tool, call.tool);
       Utils::UI::print_tool_result(obs);
       continue;
     }
@@ -1508,8 +1399,9 @@ void Agent::handle_ai_chat(const std::string &input) {
     // Read-only loop (PR 2): mutating tools are never callable from the
     // model surface. They are refused with a recoverable message and never
     // prompt, so a non-interactive run cannot be driven into a side effect.
-    if (spec->risk == Core::ToolRiskTier::Mutating) {
-      std::string obs = "mutating tool " + tool_name +
+    const Core::ToolSpec *spec = Core::find_tool(call.tool);
+    if (spec && spec->risk == Core::ToolRiskTier::Mutating) {
+      std::string obs = "mutating tool " + call.tool +
                         " is not available in read-only mode; only read-only "
                         "tools may run from the model loop.";
       obs = truncate_observation(obs);
@@ -1527,11 +1419,11 @@ void Agent::handle_ai_chat(const std::string &input) {
     // Convert JSON args to the tool's command-line input and execute via the
     // existing dispatch (consent, sandbox, validation) in silent mode so the
     // result is captured without double-printing.
-    std::string tool_input = json_args_to_input(tool_name, args);
+    std::string tool_input = Core::tool_call_to_input(call);
 
     // Scope a shorter network timeout to the model path for fetch:/github:
     // (does not change user-typed behavior).
-    const bool net_scoped = (tool_name == "fetch" || tool_name == "github");
+    const bool net_scoped = Core::requires_consent(call);
     // RAII guard: shorter network timeout only for the model path; restored
     // on scope exit so user-typed behavior is unchanged.
     struct NetTimeoutGuard {
@@ -1566,23 +1458,21 @@ void Agent::handle_ai_chat(const std::string &input) {
     // paths and refuse secrets paths. User-typed commands are unaffected.
     {
       std::string check_path;
-      if (tool_name == "read") {
-        size_t c = tool_input.find(':');
-        check_path = (c == std::string::npos) ? "" : tool_input.substr(c + 1);
-      } else if (tool_name == "list") {
-        size_t c = tool_input.find(':');
-        std::string p = (c == std::string::npos) ? "" : tool_input.substr(c + 1);
-        size_t c2 = p.find(':');
-        check_path = (c2 == std::string::npos) ? p : p.substr(0, c2);
-      } else if (tool_name == "grep") {
-        if (args.contains("directory") && args["directory"].is_string())
-          check_path = args["directory"].get<std::string>();
-        else if (args.contains("path") && args["path"].is_string())
-          check_path = args["path"].get<std::string>();
-      } else if (tool_name == "analyze" || tool_name == "components" ||
-                 tool_name == "todos" || tool_name == "tree") {
-        size_t c = tool_input.find(':');
-        check_path = (c == std::string::npos) ? "" : tool_input.substr(c + 1);
+      if (call.tool == "read:") {
+        check_path = call.args.value(
+            "path", call.args.value("filename", call.args.value(
+                          "file", std::string(""))));
+      } else if (call.tool == "list:") {
+        check_path = call.args.value(
+            "path", call.args.value("directory", std::string(".")));
+      } else if (call.tool == "grep:") {
+        check_path = call.args.value(
+            "directory", call.args.value("dir", call.args.value(
+                             "path", std::string("."))));
+      } else if (call.tool == "analyze:" || call.tool == "components:" ||
+                 call.tool == "todos:" || call.tool == "tree:") {
+        check_path = call.args.value(
+            "path", call.args.value("directory", std::string(".")));
       }
       // trim
       size_t a = check_path.find_first_not_of(" \\t");
@@ -1599,7 +1489,7 @@ void Agent::handle_ai_chat(const std::string &input) {
           obs = truncate_observation(obs);
           current_input = quote_observation(obs);
           ++turns;
-          Utils::UI::print_tool_call(spec->name, tool_input);
+          Utils::UI::print_tool_call(call.tool, tool_input);
           Utils::UI::print_tool_result(obs);
           continue;
         }
@@ -1622,7 +1512,7 @@ void Agent::handle_ai_chat(const std::string &input) {
       obs = truncate_observation(obs);
       current_input = quote_observation(obs);
       ++turns;
-      Utils::UI::print_tool_call(spec->name, tool_name);
+      Utils::UI::print_tool_call(call.tool, call.tool);
       Utils::UI::print_tool_result(obs);
       continue;
     }
@@ -1654,7 +1544,7 @@ void Agent::handle_ai_chat(const std::string &input) {
 
 
     // Print the tool call/result in the activity format.
-    Utils::UI::print_tool_call(spec->name, tool_input);
+    Utils::UI::print_tool_call(call.tool, tool_input);
     Utils::UI::print_tool_result(obs);
 
     current_input = quote_observation(obs);
