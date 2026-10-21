@@ -137,15 +137,6 @@ void CodebaseService::build_tree_recursive(const std::string &path,
       std::string name = entry.path().filename().string();
       if (name[0] != '.' && name != "node_modules" && name != "build" &&
           name != "dist") {
-        // Only directories and regular files are walked further. A FIFO,
-        // device or socket is listed by name but never opened, so it can
-        // never block a walker.
-        std::error_code ec;
-        const bool is_dir = entry.is_directory(ec);
-        if (ec)
-          continue;
-        if (!is_dir && !entry.is_regular_file(ec))
-          continue;
         entries.push_back(entry);
       }
     }
