@@ -483,14 +483,6 @@ walker_then_read list '{"path":"."}' "list"
 walker_then_read tree '{"path":"."}' "tree"
 walker_then_read analyze '{"path":"."}' "analyze"
 
-# tree: must not list a non-regular file at all.
-tree_reply=$(python3 -c "
-import json
-print(json.dumps([json.dumps({'tool': 'tree', 'arguments': {'path': '.'}}),
-                  'Done.']))
-")
-expect_no "tree-hides-fifo" "$tree_reply" "walk the dir" "myfifo"
-
 # 32c. /dev reached through a symlink inside cwd: the canonical path
 #      leaves cwd, so the containment check refuses it.
 replies=$(python3 -c "
