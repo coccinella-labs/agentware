@@ -33,10 +33,13 @@ inline FILE *open_process(const std::string &command, const char *mode) {
   // Callers either shell-quote interpolated values, validate paths via
   // is_safe_shell_path, or (for command_service) intentionally execute the
   // user's shell command as the cmd: tool. A full execvp refactor would remove
-  // the shell entirely; tracked as a follow-up. The suppression comment must
-  // sit directly above the sink for CodeQL to honor it.
-  // codeql[cpp/command-line-injection]
-  return popen(command.c_str(), mode);
+  // the shell entirely; tracked as a follow-up.
+  //
+  // The CodeQL suppression goes on the sink's OWN line. The C/C++ extractor
+  // anchors this alert on the argument expression, and a suppression comment
+  // on the preceding line was not honored: code scanning alert 45 stayed
+  // open with the tag one line above the sink.
+  return popen(command.c_str(), mode); // codeql[cpp/command-line-injection]
 }
 
 // Shell-safety check for paths interpolated into shell commands.
