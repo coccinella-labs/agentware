@@ -11,6 +11,18 @@
 set -u
 
 BIN="${1:?usage: remediation_probes.sh <agentware-agent binary>}"
+# The probes run from a temporary directory, so a relative path would no
+# longer point at the binary by the time it is used. Resolve it once,
+# here, the same way the golden harnesses do.
+BIN_DIR="$(cd "$(dirname "$BIN")" 2>/dev/null && pwd)" || {
+    echo "cannot resolve the binary path: $BIN" >&2
+    exit 1
+}
+if [ ! -x "$BIN_DIR/$(basename "$BIN")" ]; then
+    echo "not an executable: $BIN" >&2
+    exit 1
+fi
+BIN="$BIN_DIR/$(basename "$BIN")"
 WORK="$(mktemp -d)"
 trap 'kill "$SERVER_PID" 2>/dev/null; rm -rf "$WORK"' EXIT
 cd "$WORK" || exit 1
@@ -49,18 +61,33 @@ python3 -c "print('lorem ipsum dolor sit amet ' * 60)" > big.txt
 python3 -c "import json; print(json.dumps({'data': 'x' * 2000}))" > big.json
 
 # Local HTTP server for /fetch probes (no external network).
-SERVE_PORT=18321
+# The port is taken from the operating system instead of being fixed: a
+# fixed port collides with whatever else is on a shared runner, and the
+# collision shows up as a probe failure that has nothing to do with the
+# agent.
+SERVE_PORT=$(python3 -c 'import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()')
 python3 -m http.server "$SERVE_PORT" --bind 127.0.0.1 > server.log 2>&1 &
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null; rm -rf "$WORK"' EXIT
 i=0
+READY=0
 while [ "$i" -lt 50 ]; do
   if curl -sf -o /dev/null "http://127.0.0.1:$SERVE_PORT/sample.txt"; then
+    READY=1
     break
   fi
   sleep 0.2
   i=$((i + 1))
 done
+if [ "$READY" -ne 1 ]; then
+  echo "FAIL: the local HTTP server never came up on port $SERVE_PORT" >&2
+  cat server.log >&2
+  exit 1
+fi
 
 # probe <name> <expected_exit> <expected_output_grep> [input lines...]
 # Each input line is fed to the binary's stdin in order. The binary runs
