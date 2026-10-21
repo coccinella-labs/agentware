@@ -780,12 +780,28 @@ if(LCOV_EXE)
 endif()
 
 # Add preflight target (local pre-deployment checks).
-# The binary is already built at this point, so the check runs with
-# NO_BUILD=1: a nested build inside this build would re-run CMake on the
-# same build directory and fight the outer build for the cache file.
-add_custom_target(preflight
-    COMMAND ${CMAKE_COMMAND} -E env NO_BUILD=1
-            ${CMAKE_SOURCE_DIR}/src/scripts/preflight.sh
-    DEPENDS agentware-agent
-    COMMENT "Running preflight checks"
-)
+#
+# The check is a bash script, so it only runs where a POSIX shell can run
+# it. On Windows the target says so and does nothing: there is no make,
+# the binary lives under build/bin/Release, and the Windows job runs the
+# unit suite instead.
+#
+# Where it does run, it runs with NO_BUILD=1: the binary is already built
+# at this point, and a nested build inside this build would re-run CMake
+# on the same build directory and fight the outer build for the cache
+# file.
+if(WIN32)
+    add_custom_target(preflight
+        COMMAND ${CMAKE_COMMAND} -E echo
+                "preflight needs a POSIX shell; skipped on Windows"
+        DEPENDS agentware-agent
+        COMMENT "Running preflight checks (skipped on Windows)"
+    )
+else()
+    add_custom_target(preflight
+        COMMAND ${CMAKE_COMMAND} -E env NO_BUILD=1
+                ${CMAKE_SOURCE_DIR}/src/scripts/preflight.sh
+        DEPENDS agentware-agent
+        COMMENT "Running preflight checks"
+    )
+endif()
