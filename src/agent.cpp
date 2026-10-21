@@ -928,12 +928,11 @@ std::string Agent::extract_tool_call(const std::string &text,
   out_tool.clear();
   out_args = nlohmann::json::object();
 
-  // Recognition rule: a tool call is recognized only when the entire
-  // assistant message is a single JSON object, or when the message
-  // contains exactly one tagged fenced code block whose body is a single
-  // JSON object. JSON that appears inside prose, examples, or quoted
-  // snippets never executes. Anything else is a final answer ("none"),
-  // so prose + JSON is a final answer, not a tool call.
+  // Recognition rule: a tool call is recognized only if the ENTIRE
+  // assistant message parses as one JSON object that carries a "tool"
+  // key. Prose, examples, arrays, multiple objects, and trailing text
+  // are final answers and never execute. A single tagged fenced block
+  // whose body is one such object is also recognized.
   std::string trimmed = text;
   size_t ts = trimmed.find_first_not_of(" \t\n\r");
   if (ts == std::string::npos) {
@@ -946,8 +945,8 @@ std::string Agent::extract_tool_call(const std::string &text,
   }
 
   std::string candidate;
-  bool had_fence = false;
   if (trimmed.rfind("```", 0) == 0) {
+    // The whole message must be exactly one fenced block.
     size_t open_nl = trimmed.find('\n');
     size_t close =
         trimmed.find("```", (open_nl == std::string::npos) ? 3 : open_nl);
@@ -964,68 +963,49 @@ std::string Agent::extract_tool_call(const std::string &text,
       return "none";
     }
     candidate = trimmed.substr(content_start, close - content_start);
-    had_fence = true;
-  } else if (trimmed.rfind("{", 0) == 0) {
-    // The whole message must be one bare JSON object.
-    candidate = trimmed;
   } else {
-    // Prose (with or without embedded JSON) is a final answer.
+    candidate = trimmed;
+  }
+
+  // Full-message parse. The callback records whether a top-level object
+  // STARTED and whether one COMPLETED, so a failure can be classified
+  // without a hand-rolled brace scan.
+  bool top_object_started = false;
+  bool top_object_completed = false;
+  nlohmann::json j;
+  try {
+    j = nlohmann::json::parse(
+        candidate,
+        [&](int depth, nlohmann::json::parse_event_t event,
+            nlohmann::json &) {
+          if (depth != 0)
+            return true;
+          if (event == nlohmann::json::parse_event_t::object_start)
+            top_object_started = true;
+          else if (event == nlohmann::json::parse_event_t::object_end)
+            top_object_completed = true;
+          return true;
+        },
+        true);
+  } catch (const nlohmann::json::parse_error &) {
+    if (top_object_completed) {
+      // A complete object parsed and then more content followed:
+      // multiple objects, or trailing text. The whole message is not one
+      // JSON object, so it is a final answer and nothing executes.
+      return "none";
+    }
+    if (top_object_started) {
+      // The message began a JSON object and never finished it: the model
+      // was mid-call (truncated or invalid JSON). Recoverable error so
+      // the model can retry.
+      return "error: malformed tool call: invalid JSON";
+    }
+    // Prose (which may embed JSON) is a final answer.
     return "none";
   }
 
-  // Scan for the end of the first top-level JSON object with a depth
-  // counter, so a nested "arguments" object does not end the scan early.
-  // Anything but whitespace after that object is a violation: a second
-  // object is a multi-call, anything else is a malformed call.
-  size_t depth = 0;
-  size_t obj_end = std::string::npos;
-  bool in_string = false;
-  bool escaped = false;
-  for (size_t i = 0; i < candidate.size(); ++i) {
-    const char c = candidate[i];
-    if (in_string) {
-      if (escaped) {
-        escaped = false;
-      } else if (c == '\\') {
-        escaped = true;
-      } else if (c == '"') {
-        in_string = false;
-      }
-      continue;
-    }
-    if (c == '"') {
-      in_string = true;
-    } else if (c == '{') {
-      ++depth;
-    } else if (c == '}') {
-      --depth;
-      if (depth == 0) {
-        obj_end = i;
-        break;
-      }
-    }
-  }
-  if (obj_end != std::string::npos) {
-    std::string tail = candidate.substr(obj_end + 1);
-    size_t ns = tail.find_first_not_of(" \t\n\r");
-    if (ns != std::string::npos) {
-      if (tail.find('{') != std::string::npos) {
-        return "error: multiple tool calls in one reply; only one call per "
-               "turn is allowed";
-      }
-      return "error: malformed tool call: trailing content after the JSON "
-             "object";
-    }
-  }
-
-  nlohmann::json j;
-  try {
-    j = nlohmann::json::parse(candidate, nullptr, true);
-  } catch (...) {
-    return "error: malformed tool call: invalid JSON";
-  }
-
   if (!j.is_object()) {
+    // Arrays and bare scalars are final answers.
     return "none";
   }
 
@@ -1041,11 +1021,11 @@ std::string Agent::extract_tool_call(const std::string &text,
     return "needs_user_input: " + j["needs_user_input"].get<std::string>();
   }
 
-  if (!j.contains("tool") || !j["tool"].is_string()) {
-    if (j.contains("tool")) {
-      return "error: malformed tool call: 'tool' must be a string";
-    }
-    return "none";
+  if (!j.contains("tool")) {
+    return "none"; // a JSON object without a tool key is a final answer
+  }
+  if (!j["tool"].is_string()) {
+    return "error: malformed tool call: 'tool' must be a string";
   }
 
   out_tool = j["tool"].get<std::string>();

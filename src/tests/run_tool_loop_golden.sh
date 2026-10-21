@@ -39,6 +39,7 @@ printf 'API_KEY=supersecret\n' > .env
 mkdir -p tl_fixture
 printf 'one\n' > tl_fixture/one.txt
 printf 'two\n' > tl_fixture/two.txt
+printf 'needle} say "hi"\n' > tl_fixture/brace.txt
 
 run_case() {
   local name="$1" replies="$2" input="$3" expect="$4" extra="${5:-}"
@@ -66,6 +67,33 @@ run_case() {
   fi
 }
 
+# Same setup, but asserts a marker is ABSENT (nothing executed).
+expect_no() {
+  local name="$1" replies="$2" input="$3" absent="$4" extra="${5:-}"
+  CASES=$((CASES + 1))
+  printf '%s' "$replies" > "$PROV/tl_replies.json"
+  MOCK_RESPONSES="$PROV/tl_replies.json" \
+    python3 "$MOCK_PROVIDER" "$PORT" >"$PROV/tl_prov.log" 2>&1 &
+  local ppid=$!
+  sleep 1
+  local stdin_lines actual
+  stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
+  actual=$(printf '%b' "$stdin_lines" | \
+    AGENTWARE_TOOL_CALL_LOOP=1 \
+    TEST_MODE=1 \
+    TEST_OLLAMA_URL="http://127.0.0.1:${PORT}/api/chat" \
+    "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
+  kill $ppid 2>/dev/null || true
+  wait $ppid 2>/dev/null || true
+  if echo "$actual" | grep -qF "$absent"; then
+    echo "FAIL  $name (unexpected '$absent')"
+    echo "$actual" | sed 's/^/      | /' | head -14
+    FAILURES=$((FAILURES + 1))
+  else
+    echo "PASS  $name"
+  fi
+}
+
 # 1. Single valid tool call executes and feeds observation back.
 run_case "single-read" \
   '["{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","Done."]' \
@@ -81,10 +109,11 @@ run_case "unknown-tool" \
   '["{\"tool\":\"nope\",\"arguments\":{}}","Done."]' \
   "do something" "unknown tool nope"
 
-# 4. Two calls in one reply is rejected.
-run_case "multi-call" \
+# 4. Two JSON objects in one message: not one JSON object, so it is a
+#    final answer. Nothing executes.
+expect_no "multi-call-not-executed" \
   '["{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}\n{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","Done."]' \
-  "list twice" "multiple tool calls"
+  "list twice" "Tool list"
 
 # 5. Prose + JSON is treated as a final answer (no execution).
 run_case "prose-json" \
@@ -172,6 +201,32 @@ print(json.dumps([json.dumps({'tool': name, 'arguments': {}}), 'Done.']))
 " "$t")
   run_case "unknown-meta-$t" "$replies" "do it" "unknown tool $t"
 done
+
+# 19. Nested arguments object: one JSON object, recognized and executed.
+run_case "nested-arguments" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"needle\",\"directory\":\".\"}}","Done."]' \
+  "grep for needle" "hello.txt"
+
+# 20. A closing brace inside a string value must not end the object.
+run_case "brace-inside-string" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"needle}\",\"directory\":\".\"}}","Done."]' \
+  "grep for needle}" "brace.txt"
+
+# 21. Escaped quotes inside a string value must not end the object.
+run_case "escaped-quotes" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"say \\\"hi\\\"\",\"directory\":\".\"}}","Done."]' \
+  "grep for say hi" "brace.txt"
+
+# 22. Trailing text after a complete object: not one JSON object, so it is
+#     a final answer and nothing executes.
+expect_no "trailing-text-not-executed" \
+  '["{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}} and that is it","Done."]' \
+  "list the dir" "Tool list"
+
+# 23. A JSON array is not a JSON object: final answer, nothing executes.
+expect_no "array-not-executed" \
+  '["[{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}]","Done."]' \
+  "list the dir" "Tool list"
 
 printf '\n%d/%d tool-loop golden cases passed\n' "$((CASES - FAILURES))" "$CASES"
 if [ "$FAILURES" -ne 0 ]; then exit 1; fi
