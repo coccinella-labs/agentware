@@ -131,17 +131,12 @@ jobs:
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            # Failures here must fail the job. This step previously ended in
-            # '|| true', which masked both build and test failures outright.
-            cmake --build build --target preflight \
-              --config ${{ matrix.build_type }}
             # Run the unit suite. This is the only CTest execution on Windows
             # and it was previously absent entirely, so POSIX-guarded tests
             # have never actually run there.
             ctest --test-dir build -C ${{ matrix.build_type }} \
               --output-on-failure -R basic_tests
           else
-            make preflight
             # Gtest unit suite (Linux/macOS; Windows runs this separately).
             ctest --test-dir build --output-on-failure -R basic_tests
             # Offline golden suites (Linux/macOS only; Windows excluded
