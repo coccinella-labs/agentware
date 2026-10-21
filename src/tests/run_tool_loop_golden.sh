@@ -331,9 +331,37 @@ print(json.dumps([json.dumps({'tool': 'list',
 run_case "oversized-reply" "$oversized" \
   "list the dir" "assistant message too large"
 
-# 31. Variant sweep: every mutating or model-disabled tool, named in a
-#     variety of forms, must be refused or reported as an unknown tool.
-#     No variant may execute.
+# 30b. Colon form and argument form disagree: the call is ambiguous and
+#      is refused rather than silently preferring one of them.
+amb=$(python3 -c "
+import json
+print(json.dumps([
+    json.dumps({'tool': 'git:log',
+                'arguments': {'subcommand': 'diff', 'path': '.'}}),
+    'Done.']))
+")
+run_case "ambiguous-colon-vs-arg" "$amb" "run it" "ambiguous tool call"
+
+# 30c. The two forms AGREEING is not ambiguous: git:diff with the same
+#      subcommand in the argument is still refused, but as a
+#      model-surface refusal, not as an ambiguity.
+agree=$(python3 -c "
+import json
+print(json.dumps([
+    json.dumps({'tool': 'git:diff',
+                'arguments': {'subcommand': 'diff', 'path': '.'}}),
+    'Done.']))
+")
+run_case "agreeing-colon-and-arg" "$agree" "run it" \
+  "not available on the model surface"
+
+# 31. Variant sweep: every tool the model surface must refuse, named in a
+#     variety of forms, must be refused or reported as an unknown tool. No
+#     variant may execute.
+#
+#     The list comes from the tool registry (AGENTWARE_DUMP_TOOLS), so a
+#     newly registered mutating or model-disabled tool is covered without
+#     editing this script.
 sweep_case() {
   local label="$1" tool="$2" args="$3" success="$4"
   local replies
@@ -347,44 +375,45 @@ print(json.dumps([json.dumps({'tool': name,
   expect_refused "sweep-$label" "$replies" "do it" "$success"
 }
 
-# Mutating tools: cmd:, write:, replace:, remember:, clear, forget.
-for t in "cmd:" "write:" "replace:" "remember:" "clear" "forget"; do
-  base="${t%:}"
-  for v in "$t" "${t%:}:" "$(printf '%s' "$t" | tr '[:lower:]' '[:upper:]')" \
-           " $t" "$t " "!$t" "/$t"; do
-    sweep_case "$(printf '%s' "$v" | tr -c 'A-Za-z0-9' '_')" "$v" '{}' \
-      "Sandboxed"
-  done
-done
+# The success marker is the argument the tool would carry into dispatch.
+# If a variant is refused, the argument never reaches dispatch and the
+# marker never appears.
+sweep_args_for() {
+  case "$1" in
+    fetch:*) echo '{"url":"http://127.0.0.1:1/SWEEPMARKER"}' ;;
+    github:*) echo '{"params":"repo:o/SWEEPMARKER"}' ;;
+    git:*) echo '{"subcommand":"SWEEPSUB","path":"SWEEPMARKER"}' ;;
+    *) echo '{"filename":"SWEEPMARKER","path":"SWEEPMARKER","fact":"SWEEPMARKER","content":"SWEEPMARKER","text":"SWEEPMARKER","old_text":"SWEEPMARKER","new_text":"SWEEPMARKER","command":"SWEEPMARKER","url":"http://127.0.0.1:1/SWEEPMARKER","params":"repo:o/SWEEPMARKER","directory":"SWEEPMARKER","query":"SWEEPMARKER","pattern":"SWEEPMARKER","subcommand":"SWEEPSUB"}' ;;
+  esac
+}
 
-# Model-disabled tools: todos:, analyze:, and git:diff.
-for t in "todos:" "analyze:"; do
-  for v in "$t" "$(printf '%s' "$t" | tr '[:lower:]' '[:upper:]')" \
-           " $t" "$t " "!$t" "/$t"; do
-    sweep_case "$(printf '%s' "$v" | tr -c 'A-Za-z0-9' '_')" "$v" '{}' \
-      "Found "
-  done
-done
-# git:diff in both the colon form and the argument form.
-for v in "git:diff" "GIT:DIFF" " git:diff" "git:diff " "!git:diff" "/git:diff"; do
-  sweep_case "$(printf '%s' "$v" | tr -c 'A-Za-z0-9' '_')" "$v" '{}' \
-    "diff --git"
-done
-sweep_case "git-diff-arg" "git" '{"subcommand":"diff","path":"."}' "diff --git"
-sweep_case "git-diff-arg-upper" "GIT" '{"subcommand":"DIFF","path":"."}' "diff --git"
-sweep_case "git-diff-arg-space" "git" '{"subcommand":" diff ","path":"."}' "diff --git"
+REGISTRY_DUMP="$(AGENTWARE_DUMP_TOOLS=1 "$BIN" 2>/dev/null || true)"
+if [ -z "$REGISTRY_DUMP" ]; then
+  echo "FATAL: could not read the tool registry dump" >&2
+  exit 1
+fi
 
-# Consent-gated tools: fetch: and github:. Every variant must still be
-# consent-gated. The success marker is the argument the tool would carry
-# into dispatch, which only appears when the consent gate was skipped.
-for v in "fetch:" "fetch" "FETCH:" " fetch:" "fetch: " "!fetch:" "/fetch:"; do
-  sweep_case "$(printf '%s' "$v" | tr -c 'A-Za-z0-9' '_')" "$v" \
-    '{"url":"http://127.0.0.1:1/"}' "127.0.0.1:1"
-done
-for v in "github:" "github" "GITHUB:" " github:" "github: " "!github:" "/github:"; do
-  sweep_case "$(printf '%s' "$v" | tr -c 'A-Za-z0-9' '_')" "$v" \
-    '{"params":"repo:o/r"}' "repo:o/r"
-done
+# Every refused (tool, subcommand) pair, straight from the registry.
+# Written to a file first: a pipeline would run the loop in a subshell and
+# the case counters would be lost.
+REFUSED_LIST="$PROV/refused.tsv"
+printf '%s\n' "$REGISTRY_DUMP" | awk -F'\t' '$1=="refused" {print $2 "\t" $3}' > "$REFUSED_LIST"
+while IFS="$(printf '\t')" read -r rtool rsub; do
+  [ -n "$rtool" ] || continue
+  rargs=$(sweep_args_for "$rtool")
+  if [ -n "$rsub" ]; then
+    rargs=$(printf '%s' "$rargs" | sed 's/SWEEPSUB/'"$rsub"'/')
+  else
+    rargs=$(printf '%s' "$rargs" | sed 's/SWEEPSUB/status/')
+  fi
+  # The colon form and the bare form, plus case, whitespace, shell/meta
+  # prefixes and Unicode lookalikes.
+  for v in "$rtool" "${rtool%:}" "$(printf '%s' "$rtool" | tr '[:lower:]' '[:upper:]')" \
+           " $rtool" "$rtool " "!$rtool" "/$rtool"; do
+    sweep_case "$(printf '%s' "$v" | tr -c 'A-Za-z0-9' '_')" "$v" "$rargs" \
+      "SWEEPMARKER"
+  done
+done < "$REFUSED_LIST"
 
 # Zero-width and Unicode lookalikes in a tool name.
 sweep_case "zero-width" "$(printf 'wri\u200bte')" '{}' "Tool write"
@@ -399,7 +428,7 @@ SPECIAL_DIR="$(mktemp -d)"
 # canonical path leaves cwd, so the containment check must refuse them.
 ln -sfn /proc/self/environ "$WORK/proclink" 2>/dev/null || true
 ln -sfn /dev/zero "$WORK/devzero" 2>/dev/null || true
-printf 'plain content\n' > "$SPECIAL_DIR/plain.txt"
+printf 'plain content\n' > "$WORK/plain.txt"
 
 # 32a. A file:// URL is not a path: it must not be read as one.
 read_url=$(python3 -c "
@@ -410,19 +439,23 @@ print(json.dumps([json.dumps({'tool': 'read',
 ")
 run_case "read-file-url" "$read_url" "read the url" "Error"
 
-# 32b. A FIFO INSIDE cwd: opening it blocks forever, so the per-tool
-#      timeout must fire and the model must be told, not left hanging.
-#      (A FIFO outside cwd is caught by the containment check instead;
-#      that case is covered below.)
+# 32b. A FIFO INSIDE cwd is refused before it is opened: opening a FIFO
+#      blocks forever, and a stuck handler holds the tool gate, which
+#      would refuse every later call for the rest of the session.
+#      The case therefore runs TWO turns: the FIFO read first, then a
+#      normal read, and asserts the second turn still works.
 mkfifo "$WORK/myfifo" 2>/dev/null || true
-read_fifo=$(python3 -c "
-import json, sys
-print(json.dumps([json.dumps({'tool': 'read',
-                              'arguments': {'filename': sys.argv[1]}}),
-                  'Done.']))
-" "myfifo")
-TOOL_TIMEOUT_SEC=1 run_case "read-fifo-timeout" "$read_fifo" "read the fifo" \
-  "tool timed out after 1s"
+fifo_then_read=$(python3 -c "
+import json
+print(json.dumps([
+    json.dumps({'tool': 'read', 'arguments': {'filename': 'myfifo'}}),
+    json.dumps({'tool': 'read', 'arguments': {'filename': 'plain.txt'}}),
+    'Done.']))
+")
+run_case "read-fifo-refused" "$fifo_then_read" "read the fifo" \
+  "Refusing to read a FIFO"
+run_case "read-after-fifo-works" "$fifo_then_read" "read the fifo" \
+  "plain content"
 
 # 32c. /dev reached through a symlink inside cwd: the canonical path
 #      leaves cwd, so the containment check refuses it.

@@ -1385,6 +1385,25 @@ void Agent::handle_ai_chat(const std::string &input) {
 
     // PR 2: git:diff, todos: and analyze: are not model-callable until
     // their services filter secret paths. Refuse with a recoverable message.
+    // An ambiguous call (the colon form and the subcommand argument
+    // disagree) is refused before anything else looks at it.
+    if (call.ambiguous) {
+      std::string obs = "ambiguous tool call: " + call.tool +
+                        " names two different subcommands";
+      obs = truncate_observation(obs);
+      current_input = quote_observation(obs);
+      ++turns;
+      ++retries;
+      Utils::UI::print_tool_call(call.tool, call.tool);
+      Utils::UI::print_tool_result(obs);
+      if (retries >= kRetryBudget) {
+        Utils::UI::print_warning("Retry budget (" + std::to_string(kRetryBudget) +
+                                 ") exhausted; stopping.");
+        break;
+      }
+      continue;
+    }
+
     if (Core::is_model_surface_disabled(call)) {
       std::string obs = "tool " + call.tool +
                         " is not available on the model surface in v1";
@@ -1484,6 +1503,15 @@ void Agent::handle_ai_chat(const std::string &input) {
       }
       if (!check_path.empty() && check_path != ".") {
         std::string err = model_path_check(check_path);
+        if (err.empty() && call.tool == "read:") {
+          // Refuse non-regular files (FIFO, device, socket) before the
+          // read starts: opening a FIFO blocks forever, which would leave
+          // a stuck handler holding the tool gate for the rest of the
+          // session.
+          auto regular = Utils::Validator::validate_regular_file(check_path);
+          if (!regular.is_valid)
+            err = regular.error_message;
+        }
         if (!err.empty()) {
           std::string obs = err;
           obs = truncate_observation(obs);

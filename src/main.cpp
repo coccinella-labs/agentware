@@ -7,12 +7,21 @@
 #include "config.h"
 #include "memory_manager.h"
 #include "terminal_setup.h"
+#include "tool_call.h"
 #include "ui.h"
 
 int main() {
   try {
     // Initialize configuration (reads env vars, .env, etc.)
     Utils::Config::load_environment();
+
+    // Test hook: dump the tool registry and exit. The golden suite reads
+    // this to build its sweep, so the list of tools under test comes
+    // from the registry rather than a hand-maintained list.
+    if (Utils::Config::get_env_var("AGENTWARE_DUMP_TOOLS", "") == "1") {
+      std::cout << Core::tool_registry_dump();
+      return 0;
+    }
 
     // Windows-only console bring-up: UTF-8 output code page + VT
     // processing on stdout/stderr; original state saved and restored
