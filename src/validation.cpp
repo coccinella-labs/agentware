@@ -53,6 +53,45 @@ ValidationResult Validator::validate_file_exists(const std::string &path) {
   return result;
 }
 
+ValidationResult Validator::validate_regular_file(const std::string &path) {
+  ValidationResult result = {true, "", {}};
+
+  if (path.empty()) {
+    result.is_valid = false;
+    result.error_message = "File path cannot be empty";
+    return result;
+  }
+
+  std::error_code ec;
+  // status() follows symlinks, so a symlink to a FIFO or device is
+  // caught as what it actually points at.
+  const std::filesystem::file_status st =
+      std::filesystem::status(std::filesystem::path(path), ec);
+  if (ec || !std::filesystem::exists(st)) {
+    // A missing path is reported by the existence check, not here.
+    return result;
+  }
+
+  if (std::filesystem::is_regular_file(st)) {
+    return result;
+  }
+
+  result.is_valid = false;
+  std::string what = "not a regular file";
+  if (std::filesystem::is_directory(st)) {
+    what = "a directory";
+  } else if (std::filesystem::is_fifo(st)) {
+    what = "a FIFO";
+  } else if (std::filesystem::is_character_file(st) ||
+             std::filesystem::is_block_file(st)) {
+    what = "a device";
+  } else if (std::filesystem::is_socket(st)) {
+    what = "a socket";
+  }
+  result.error_message = "Refusing to read " + what + ": " + path;
+  return result;
+}
+
 namespace {
 // Component-wise prefix check: true when every component of `prefix`
 // matches the leading components of `path`. Separator-agnostic.

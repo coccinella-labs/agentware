@@ -100,28 +100,46 @@ bool canonicalize_tool_call(const std::string &raw_name,
   out.tool = canonical;
   out.resolved = true;
 
-  // Subcommand: an explicit "tool:sub" form wins, otherwise the
-  // subcommand argument. Both forms must land on the same value so a
-  // refusal cannot be bypassed by switching form.
+  // Subcommand: an explicit "tool:sub" form and a "subcommand" argument
+  // are two ways to say the same thing. If both are present and they
+  // DISAGREE, the call is ambiguous and is refused: silently preferring
+  // one of them would let a caller name one subcommand and run another.
+  std::string from_colon;
+  std::string from_args;
   if (!rest.empty()) {
-    out.subcommand = rest;
-  } else {
-    if (canonical == "git:") {
-      out.subcommand = out.args.value(
-          "subcommand", out.args.value("action",
-                          out.args.value("command", std::string(""))));
-    } else if (canonical == "github:") {
-      // github:params carries "repo:owner/name" style specs.
-      std::string params = out.args.value(
-          "params", out.args.value("query", out.args.value(
-                            "subcommand", std::string(""))));
-      size_t c = params.find(':');
-      out.subcommand = (c == std::string::npos) ? params : params.substr(0, c);
-    }
-    out.subcommand = trim_ascii(ascii_lower(out.subcommand));
+    from_colon = rest;
   }
+  if (canonical == "git:") {
+    from_args = out.args.value("subcommand", out.args.value("action",
+                             out.args.value("command", std::string(""))));
+  } else if (canonical == "github:") {
+    // github:params carries "repo:owner/name" style specs.
+    std::string params = out.args.value(
+        "params", out.args.value("query", out.args.value(
+                          "subcommand", std::string(""))));
+    size_t c = params.find(':');
+    from_args = (c == std::string::npos) ? params : params.substr(0, c);
+  }
+  from_colon = trim_ascii(ascii_lower(from_colon));
+  from_args = trim_ascii(ascii_lower(from_args));
 
+  if (!from_colon.empty() && !from_args.empty() && from_colon != from_args) {
+    out.ambiguous = true;
+    out.subcommand = from_colon;
+    return true;
+  }
+  out.subcommand = from_colon.empty() ? from_args : from_colon;
   return true;
+}
+
+// The path a tool call reads, when it has one. Empty when the tool does
+// not take a path.
+std::string tool_call_path(const ToolCall &call) {
+  if (call.tool == "read:") {
+    return call.args.value("path", call.args.value("filename",
+                           call.args.value("file", std::string(""))));
+  }
+  return "";
 }
 
 bool is_model_surface_disabled(const ToolCall &call) {
@@ -244,6 +262,65 @@ std::string tool_call_to_input(const ToolCall &call) {
   }
   // Unknown: pass through as-is (will be caught by dispatch)
   return tool + ":" + args.dump();
+}
+
+std::string tool_registry_dump() {
+  Core::register_all_tools();
+  std::string out;
+  for (const auto &t : ToolRegistry::instance().tools()) {
+    ToolCall call;
+    call.tool = t.name;
+    call.resolved = true;
+    // The model-surface policy is per (tool, subcommand); the dump
+    // reports the tool with no subcommand, which is the conservative
+    // answer for a tool whose subcommands differ.
+    const bool model_callable =
+        t.risk != ToolRiskTier::Mutating && !is_model_surface_disabled(call);
+    out += "tool\t";
+    out += t.name;
+    out += "\t";
+    out += (t.risk == ToolRiskTier::Mutating) ? "mutating" : "read-only";
+    out += "\t";
+    out += model_callable ? "yes" : "no";
+    out += "\t";
+    out += requires_consent(call) ? "yes" : "no";
+    out += "\n";
+  }
+  // Every (tool, subcommand) the model surface must refuse. The list is
+  // derived from the registry plus the policy above, so a newly
+  // registered mutating tool is covered without editing a list.
+  for (const auto &t : ToolRegistry::instance().tools()) {
+    ToolCall call;
+    call.tool = t.name;
+    call.resolved = true;
+    const bool refused = t.risk == ToolRiskTier::Mutating ||
+                         requires_consent(call) ||
+                         is_model_surface_disabled(call);
+    if (refused) {
+      out += "refused\t";
+      out += t.name;
+      out += "\t";
+      out += "";
+      out += "\t";
+      out += requires_consent(call) ? "yes" : "no";
+      out += "\n";
+    }
+  }
+  // Subcommand-level refusals (git:diff).
+  for (const char *tool : {"git:"}) {
+    for (const char *sub : {"diff"}) {
+      ToolCall call;
+      call.tool = tool;
+      call.subcommand = sub;
+      call.resolved = true;
+      out += "refused\t";
+      out += tool;
+      out += "\t";
+      out += sub;
+      out += "\tno\n";
+    }
+  }
+  return out;
 }
 
 } // namespace Core

@@ -28,6 +28,8 @@ struct ToolCall {
   nlohmann::json args;
   // True when the name resolved to a registered tool.
   bool resolved = false;
+  // True when the colon form and the subcommand argument disagree.
+  bool ambiguous = false;
   // The name exactly as the model wrote it, for error messages only.
   std::string raw_name;
 };
@@ -48,6 +50,10 @@ bool canonicalize_tool_call(const std::string &raw_name,
 // The registry entry for a canonical tool name, or nullptr.
 const ToolSpec *find_tool(const std::string &canonical_tool);
 
+// The path a tool call reads, when it has one. Empty when the tool does
+// not take a path.
+std::string tool_call_path(const ToolCall &call);
+
 // True when the model may not call this tool at all in v1, even though a
 // user can. These tools read file contents without filtering secret
 // paths, so the model surface must not reach them yet.
@@ -59,5 +65,20 @@ bool requires_consent(const ToolCall &call);
 // Build the dispatch input (the "name:args" string the existing dispatch
 // understands) from a canonical call.
 std::string tool_call_to_input(const ToolCall &call);
+
+// One line per registered tool, for tooling and tests:
+//
+//   tool\t<name>\t<risk>\t<model-callable>\t<requires-consent>
+//
+// risk is "read-only" or "mutating"; model-callable is "yes" or "no".
+//
+// Then one line per (tool, subcommand) pair the model surface must
+// refuse:
+//
+//   refused\t<tool>\t<subcommand>\t<requires-consent>
+//
+// The dump comes from the registry, so a newly registered tool shows up
+// without any list being maintained by hand.
+std::string tool_registry_dump();
 
 } // namespace Core
