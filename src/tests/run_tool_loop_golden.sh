@@ -374,6 +374,18 @@ sweep_case "git-diff-arg" "git" '{"subcommand":"diff","path":"."}' "diff --git"
 sweep_case "git-diff-arg-upper" "GIT" '{"subcommand":"DIFF","path":"."}' "diff --git"
 sweep_case "git-diff-arg-space" "git" '{"subcommand":" diff ","path":"."}' "diff --git"
 
+# Consent-gated tools: fetch: and github:. Every variant must still be
+# consent-gated. The success marker is the argument the tool would carry
+# into dispatch, which only appears when the consent gate was skipped.
+for v in "fetch:" "fetch" "FETCH:" " fetch:" "fetch: " "!fetch:" "/fetch:"; do
+  sweep_case "$(printf '%s' "$v" | tr -c 'A-Za-z0-9' '_')" "$v" \
+    '{"url":"http://127.0.0.1:1/"}' "127.0.0.1:1"
+done
+for v in "github:" "github" "GITHUB:" " github:" "github: " "!github:" "/github:"; do
+  sweep_case "$(printf '%s' "$v" | tr -c 'A-Za-z0-9' '_')" "$v" \
+    '{"params":"repo:o/r"}' "repo:o/r"
+done
+
 # Zero-width and Unicode lookalikes in a tool name.
 sweep_case "zero-width" "$(printf 'wri\u200bte')" '{}' "Tool write"
 sweep_case "zero-width-join" "$(printf 'wri\u200dte')" '{}' "Tool write"
