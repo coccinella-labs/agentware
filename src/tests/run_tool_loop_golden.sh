@@ -147,6 +147,8 @@ run_case "trailing-comma" \
 #     model-surface containment check.
 ABS_OUT="$(mktemp -d)"
 echo outside > "$ABS_OUT/outside.txt"
+# The escaped target for the tilde/$HOME cases.
+echo escaped > "$ABS_OUT/../escaped.txt" 2>/dev/null || true
 replies=$(python3 -c "
 import json, sys
 print(json.dumps([json.dumps({'tool': 'read',
@@ -155,6 +157,19 @@ print(json.dumps([json.dumps({'tool': 'read',
 " "$ABS_OUT/outside.txt")
 run_case "abs-path-outside-cwd" "$replies" \
   "read outside" "Path escapes the permitted root"
+
+# 10b. ~ and $HOME are expanded BEFORE the containment check. The
+#      "..\" after the expansion escapes cwd. Without expansion the
+#      literal path resolves inside cwd ("<cwd>/~/../escaped.txt" ->
+#      "<cwd>/escaped.txt") and would be allowed, so these cases prove
+#      the expansion happens first.
+run_case "tilde-expanded-refused" \
+  '["{\"tool\":\"read\",\"arguments\":{\"filename\":\"~/../escaped.txt\"}}","Done."]' \
+  "read tilde escape" "Path escapes the permitted root"
+
+run_case "home-var-expanded-refused" \
+  '["{\"tool\":\"read\",\"arguments\":{\"filename\":\"$HOME/../escaped.txt\"}}","Done."]' \
+  "read home escape" "Path escapes the permitted root"
 
 # 11. Secrets file inside cwd is refused.
 run_case "secrets-env" \
@@ -240,6 +255,18 @@ expect_no "trailing-text-not-executed" \
 expect_no "array-not-executed" \
   '["[{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}]","Done."]' \
   "list the dir" "Tool list"
+
+# 30. An oversized assistant message is refused before parsing.
+oversized=$(python3 -c "
+import json
+big = 'x' * 70000
+print(json.dumps([json.dumps({'tool': 'list',
+                              'arguments': {'path': 'tl_fixture'},
+                              'pad': big}),
+                  'Done.']))
+")
+run_case "oversized-reply" "$oversized" \
+  "list the dir" "assistant message too large"
 
 printf '\n%d/%d tool-loop golden cases passed\n' "$((CASES - FAILURES))" "$CASES"
 if [ "$FAILURES" -ne 0 ]; then exit 1; fi

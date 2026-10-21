@@ -11,6 +11,7 @@
 #include "command_router.h"
 #include "search_service.h"
 #include "tool_registry.h"
+#include "tool_run_gate.h"
 #include "command_service.h"
 #include "config.h"
 #include "context_service.h"
@@ -939,6 +940,16 @@ std::string Agent::extract_tool_call(const std::string &text,
   // key. Prose, examples, arrays, multiple objects, and trailing text
   // are final answers and never execute. A single tagged fenced block
   // whose body is one such object is also recognized.
+  // Size cap: an oversized assistant message is refused before any
+  // parsing, so a huge reply cannot be used to smuggle a call past the
+  // recognizer or to blow up the parser.
+  constexpr size_t kMaxAssistantMessageBytes = 64 * 1024;
+  if (text.size() > kMaxAssistantMessageBytes) {
+    return "error: assistant message too large (" +
+           std::to_string(text.size()) + " bytes); maximum is " +
+           std::to_string(kMaxAssistantMessageBytes);
+  }
+
   std::string trimmed = text;
   size_t ts = trimmed.find_first_not_of(" \t\n\r");
   if (ts == std::string::npos) {
@@ -1301,7 +1312,7 @@ void Agent::handle_ai_chat(const std::string &input) {
   int turns = 0;
   int retries = 0;
   constexpr int kRetryBudget = 3;
-  auto tool_running = std::make_shared<std::atomic<bool>>(false);
+  Core::ToolRunGate tool_gate;
 
   while (true) {
     std::atomic<bool> done(false);
@@ -1464,7 +1475,7 @@ void Agent::handle_ai_chat(const std::string &input) {
     }
 
     // Refuse new tool calls while a timed-out handler is still running.
-    if (tool_running->load()) {
+    if (tool_gate.held()) {
       std::string obs = "previous tool still running; refusing new call";
       obs = truncate_observation(obs);
       current_input = quote_observation(obs);
@@ -1605,8 +1616,7 @@ void Agent::handle_ai_chat(const std::string &input) {
       }
     }
     auto result_ptr = std::make_shared<std::string>();
-    bool expected = false;
-    if (!tool_running->compare_exchange_strong(expected, true)) {
+    if (!tool_gate.try_acquire()) {
       // Another handler is still running; refuse.
       std::string obs = "previous tool still running; refusing new call";
       obs = truncate_observation(obs);
@@ -1616,21 +1626,17 @@ void Agent::handle_ai_chat(const std::string &input) {
       Utils::UI::print_tool_result(obs);
       continue;
     }
+    // The handler releases the gate itself, so a detached (timed-out)
+    // handler keeps the gate closed until it actually returns.
+    auto gate_flag = tool_gate.handle();
     bool timed_out = !Core::run_with_timeout(
         [&]() {
           handle_direct_command(tool_input, /*silent=*/true, result_ptr.get());
-          tool_running->store(false);
+          gate_flag->store(false);
         },
         kToolTimeoutSec);
-    if (timed_out) {
-      // Thread is detached and may still be running; tool_running stays
-      // true until it finishes (see docs). New tool calls are refused.
-    } else {
-      tool_running->store(false);
-    }
-    if (timed_out) {
-      // Thread is detached and may still be running; tool_running_ stays
-      // true until it finishes. New tool calls are refused meanwhile.
+    if (!timed_out) {
+      tool_gate.release();
     }
     std::string obs;
     if (timed_out) {

@@ -8,6 +8,7 @@
 #include "sandbox_service.h"
 #include "search_service.h"
 #include "theme_service.h"
+#include "tool_run_gate.h"
 #include "ui.h"
 #include "validation.h"
 #include "version.h"
@@ -2379,6 +2380,40 @@ TEST(LayoutTest, PromptBodyExcludesTrailingSpace) {
   const auto parts = Utils::UI::prompt_lines(80, "Mode (default 2): ");
   ASSERT_EQ(parts.size(), 1u);
   EXPECT_EQ(parts[0].back(), ':');
+}
+
+TEST(ToolRunGateTest, SecondAcquireRefusedWhileHandlerRuns) {
+  // A second tool call is refused while a slow handler still runs, and
+  // allowed again once that handler returns.
+  Core::ToolRunGate gate;
+  ASSERT_TRUE(gate.try_acquire());
+  EXPECT_TRUE(gate.held());
+  // Second call while the first is in flight: refused.
+  EXPECT_FALSE(gate.try_acquire());
+  EXPECT_TRUE(gate.held());
+
+  // The handler finishes and releases the gate.
+  gate.release();
+  EXPECT_FALSE(gate.held());
+  EXPECT_TRUE(gate.try_acquire());
+}
+
+TEST(ToolRunGateTest, ReleasedFromAnotherThread) {
+  // The release path used by the loop: a worker thread holds the gate and
+  // releases it when it finishes, so a later call is allowed.
+  Core::ToolRunGate gate;
+  ASSERT_TRUE(gate.try_acquire());
+  auto flag = gate.handle();
+  std::atomic<bool> ran{false};
+  std::thread worker([flag, &ran]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    flag->store(false);
+    ran = true;
+  });
+  worker.join();
+  EXPECT_TRUE(ran.load());
+  EXPECT_FALSE(gate.held());
+  EXPECT_TRUE(gate.try_acquire());
 }
 
 TEST(TimeoutUtilTest, FastCompletes) {
