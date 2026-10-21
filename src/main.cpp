@@ -18,7 +18,11 @@ int main() {
     // Test hook: dump the tool registry and exit. The golden suite reads
     // this to build its sweep, so the list of tools under test comes
     // from the registry rather than a hand-maintained list.
-    if (Utils::Config::get_env_var("AGENTWARE_DUMP_TOOLS", "") == "1") {
+    //
+    // TEST_MODE is required as well: the dump is a test affordance, and
+    // must not be reachable in a normal run.
+    if (Utils::Config::get_env_var("AGENTWARE_DUMP_TOOLS", "") == "1" &&
+        Utils::Config::get_env_var("TEST_MODE", "") == "1") {
       std::cout << Core::tool_registry_dump();
       return 0;
     }

@@ -1,0 +1,29 @@
+tool	search:	read-only	yes	no
+tool	cmd:	mutating	no	no
+tool	read:	read-only	yes	no
+tool	write:	mutating	no	no
+tool	list:	read-only	yes	no
+tool	fetch:	read-only	yes	yes
+tool	replace:	mutating	no	no
+tool	grep:	read-only	yes	no
+tool	analyze:	read-only	no	no
+tool	components:	read-only	yes	no
+tool	todos:	read-only	no	no
+tool	tree:	read-only	yes	no
+tool	git:	read-only	yes	no
+tool	github:	read-only	yes	yes
+tool	remember:	mutating	no	no
+tool	memory	read-only	yes	no
+tool	clear	mutating	no	no
+tool	forget	mutating	no	no
+refused	cmd:		no
+refused	write:		no
+refused	fetch:		yes
+refused	replace:		no
+refused	analyze:		no
+refused	todos:		no
+refused	github:		yes
+refused	remember:		no
+refused	clear		no
+refused	forget		no
+refused	git:	diff	no
