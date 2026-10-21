@@ -1488,10 +1488,10 @@ void Agent::handle_ai_chat(const std::string &input) {
     // PR 2: git:diff, todos: and analyze: are not model-callable until
     // their services filter secret paths. Refuse with a recoverable message.
     bool model_disabled = (tool_name == "todos" || tool_name == "analyze");
-    if (tool_name == "git") {
+    if (tool_name == "git" || tool_name == "git:diff") {
       std::string sub = args.value("subcommand", args.value("action",
           args.value("command", std::string("status"))));
-      if (sub == "diff")
+      if (sub == "diff" || tool_name == "git:diff")
         model_disabled = true;
     }
     if (model_disabled) {

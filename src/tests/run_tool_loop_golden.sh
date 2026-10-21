@@ -256,6 +256,27 @@ expect_no "array-not-executed" \
   '["[{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}]","Done."]' \
   "list the dir" "Tool list"
 
+# 29. git:diff, todos: and analyze: are not model-callable in v1: their
+#     services do not filter secret paths yet.
+for t in 'git:diff' 'todos' 'analyze'; do
+  replies=$(python3 -c "
+import json, sys
+name = sys.argv[1]
+print(json.dumps([json.dumps({'tool': name,
+                              'arguments': {'subcommand': 'diff',
+                                            'path': '.'}}),
+                  'Done.']))
+" "$t")
+  run_case "model-disabled-$t" "$replies" "run it" \
+    "not available on the model surface"
+done
+
+# The same refusal when git:diff is named with a subcommand argument
+# instead of the colon form.
+run_case "model-disabled-git-subcommand" \
+  '["{\"tool\":\"git\",\"arguments\":{\"subcommand\":\"diff\",\"path\":\".\"}}","Done."]' \
+  "run it" "not available on the model surface"
+
 # 30. An oversized assistant message is refused before parsing.
 oversized=$(python3 -c "
 import json
