@@ -779,9 +779,13 @@ if(LCOV_EXE)
     )
 endif()
 
-# Add preflight target (comprehensive pre-deployment checks)
+# Add preflight target (local pre-deployment checks).
+# The binary is already built at this point, so the check runs with
+# NO_BUILD=1: a nested build inside this build would re-run CMake on the
+# same build directory and fight the outer build for the cache file.
 add_custom_target(preflight
-    COMMAND ${CMAKE_SOURCE_DIR}/src/scripts/preflight.sh
+    COMMAND ${CMAKE_COMMAND} -E env NO_BUILD=1
+            ${CMAKE_SOURCE_DIR}/src/scripts/preflight.sh
     DEPENDS agentware-agent
-    COMMENT "Running comprehensive preflight checks"
+    COMMENT "Running preflight checks"
 )

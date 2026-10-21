@@ -55,25 +55,26 @@ docker-build:
 	@echo "Building Docker image..."
 	@docker build -t agentware/agent -f Dockerfile .
 
-# Run preflight checks (smart detection)
+# Run the local preflight check (incremental build).
 preflight:
 	@echo "Running preflight checks..."
 	@./src/scripts/preflight.sh
 
-# Run quick preflight checks
+# Run the preflight check without building (fast: uses the existing binary).
 preflight-quick:
-	@echo "Running quick preflight checks..."
-	@QUICK=true ./src/scripts/preflight.sh
+	@echo "Running preflight checks (no build)..."
+	@NO_BUILD=1 ./src/scripts/preflight.sh
 
-# Run full preflight checks
+# Run the preflight check the slow way: clean build plus clang-tidy.
 preflight-full:
-	@echo "Running full preflight checks..."
-	@QUICK=false ./src/scripts/preflight.sh
+	@echo "Running preflight checks (clean build, clang-tidy)..."
+	@PREFLIGHT_CLEAN=1 PREFLIGHT_CLANG_TIDY=1 ./src/scripts/preflight.sh
 
-# Run CI-style preflight checks
+# Kept for existing callers. There is no separate CI flavour any more:
+# the check is the same everywhere.
 preflight-ci:
-	@echo "Running CI-style preflight checks..."
-	@CI=true ./src/scripts/preflight.sh
+	@echo "Running preflight checks..."
+	@./src/scripts/preflight.sh
 
 # Run full check (clean, build, test, preflight-quick, preflight)
 full-check:
