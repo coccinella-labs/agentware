@@ -54,6 +54,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
         self.end_headers()
 
     def do_GET(self):
@@ -62,6 +63,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-type", "text/plain")
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
         elif self.path == "/api/tags":
@@ -71,6 +73,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.send_header("Content-Length", "0")
+            self.send_header("Connection", "close")
             self.end_headers()
 
     def do_POST(self):
@@ -113,6 +116,16 @@ def main():
     # be reachable from another host.
     httpd = Server(("127.0.0.1", port), Handler)
     actual = httpd.server_address[1]
+    # Record this process's own PID. The harness checks every recorded
+    # PID at the end of the suite and fails if any provider outlived its
+    # case. The provider writes the record itself, so the check does not
+    # depend on the harness keeping track of the PID: a provider started
+    # in a subshell, where the harness would lose it, is still recorded.
+    pid_file = os.environ.get("MOCK_PROVIDER_PID_FILE", "")
+    if pid_file:
+        with open(pid_file, "a") as f:
+            f.write(str(os.getpid()) + "\n")
+            f.flush()
     port_file = os.environ.get("MOCK_PROVIDER_PORT_FILE", "")
     if port_file:
         # Write atomically so the harness never reads a half-written file.

@@ -16,7 +16,7 @@ MOCK_PROVIDER="${MOCK_PROVIDER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mo
 WORK="$(mktemp -d)"
 PROV="$(mktemp -d)"
 PROVIDER_PID=""
-trap 'stop_provider; rm -rf "$WORK" "$PROV" "$OUTSIDE" "$ABS_OUT" "$SPECIAL_DIR"' EXIT
+trap on_exit EXIT
 cd "$WORK" || exit 1
 
 export HOME="$WORK"
@@ -30,6 +30,12 @@ export ENV_SENTINEL
 
 FAILURES=0
 CASES=0
+
+# Every provider process this harness started records its own PID in
+# $PROV/pids. The record lives in the provider, not in the shell, so the
+# leak check below still works when the harness loses track of a PID.
+PROVIDER_PORT=""
+PROVIDER_PID=""
 
 # Fixtures: a tiny tree so tool output is small and stable.
 printf 'golden needle alpha\nsecond line\n' > hello.txt
@@ -49,23 +55,30 @@ printf 'needle} say "hi"\n' > tl_fixture/brace.txt
 # came up has to show up as a provider failure, not as an unrelated
 # timeout inside the binary.
 #
-# Prints the port on stdout. Returns 1 if the provider never came up.
+# Sets PROVIDER_PORT and PROVIDER_PID as globals and returns 0, or
+# returns 1 if the provider never came up. It is called directly, never
+# in a command substitution: a command substitution runs it in a
+# subshell, and the backgrounded provider would then be orphaned when
+# that subshell exits, so the parent would never learn its PID and
+# could never kill it.
 start_provider() {
   rm -f "$PROV/port" "$PROV/port.tmp"
   MOCK_RESPONSES="$PROV/tl_replies.json" \
   MOCK_PROVIDER_PORT_FILE="$PROV/port" \
+  MOCK_PROVIDER_PID_FILE="$PROV/pids" \
     python3 "$MOCK_PROVIDER" >"$PROV/tl_prov.log" 2>&1 &
-  PROVIDER_PID=$!
+  local pid=$!
+  PROVIDER_PID="$pid"
   local i port
   for i in $(seq 1 200); do
     if [ -s "$PROV/port" ]; then
       port=$(tr -cd '0-9' < "$PROV/port")
       if [ -n "$port" ] && (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
-        echo "$port"
+        PROVIDER_PORT="$port"
         return 0
       fi
     fi
-    if ! kill -0 "$PROVIDER_PID" 2>/dev/null; then
+    if ! kill -0 "$pid" 2>/dev/null; then
       return 1
     fi
     sleep 0.1
@@ -78,6 +91,45 @@ stop_provider() {
   kill "$PROVIDER_PID" 2>/dev/null || true
   wait "$PROVIDER_PID" 2>/dev/null || true
   PROVIDER_PID=""
+}
+
+# Prints the PID of every provider this harness started that is still
+# alive. The PIDs come from the providers' own records, not from a
+# process search: a search would also match providers belonging to
+# another run, and it would not know which processes this run started.
+leaked_providers() {
+  local pid
+  [ -f "$PROV/pids" ] || return 0
+  while read -r pid; do
+    [ -n "$pid" ] || continue
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "$pid"
+    fi
+  done < "$PROV/pids"
+}
+
+# Fails the suite if any provider outlived its case.
+check_no_leaked_providers() {
+  local leaked
+  leaked=$(leaked_providers)
+  if [ -n "$leaked" ]; then
+    echo "LEAKED PROVIDERS (still alive after their case): $leaked"
+    return 1
+  fi
+  return 0
+}
+
+# The EXIT trap. It stops the provider that is still running, checks
+# that nothing leaked, and keeps the suite's exit status unless a leak
+# was found.
+on_exit() {
+  local status=$?
+  stop_provider
+  if ! check_no_leaked_providers; then
+    status=1
+  fi
+  rm -rf "$WORK" "$PROV" "$OUTSIDE" "$ABS_OUT" "$SPECIAL_DIR"
+  exit $status
 }
 
 # Prints the provider log under a failing case. Without it, "the provider
@@ -103,8 +155,7 @@ run_case() {
   local tool_timeout="${TOOL_TIMEOUT_SEC:-}"
   CASES=$((CASES + 1))
   printf '%s' "$replies" > "$PROV/tl_replies.json"
-  local port
-  if ! port=$(start_provider); then
+  if ! start_provider; then
     provider_failed "$name"
     return
   fi
@@ -115,7 +166,7 @@ run_case() {
     TEST_MODE=1
     no_proxy=127.0.0.1,localhost
     NO_PROXY=127.0.0.1,localhost
-    "TEST_OLLAMA_URL=http://127.0.0.1:${port}/api/chat"
+    "TEST_OLLAMA_URL=http://127.0.0.1:${PROVIDER_PORT}/api/chat"
   )
   if [ -n "$tool_timeout" ]; then
     env_args+=("AGENTWARE_TOOL_TIMEOUT_SEC=$tool_timeout")
@@ -141,8 +192,7 @@ expect_refused() {
   local name="$1" replies="$2" input="$3" success="$4" extra="${5:-}"
   CASES=$((CASES + 1))
   printf '%s' "$replies" > "$PROV/tl_replies.json"
-  local port
-  if ! port=$(start_provider); then
+  if ! start_provider; then
     provider_failed "$name"
     return
   fi
@@ -153,7 +203,7 @@ expect_refused() {
     TEST_MODE=1 \
     no_proxy=127.0.0.1,localhost \
     NO_PROXY=127.0.0.1,localhost \
-    TEST_OLLAMA_URL="http://127.0.0.1:${port}/api/chat" \
+    TEST_OLLAMA_URL="http://127.0.0.1:${PROVIDER_PORT}/api/chat" \
     "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
   stop_provider
   local refused=0
@@ -178,8 +228,7 @@ expect_no() {
   local name="$1" replies="$2" input="$3" absent="$4" extra="${5:-}"
   CASES=$((CASES + 1))
   printf '%s' "$replies" > "$PROV/tl_replies.json"
-  local port
-  if ! port=$(start_provider); then
+  if ! start_provider; then
     provider_failed "$name"
     return
   fi
@@ -190,7 +239,7 @@ expect_no() {
     TEST_MODE=1 \
     no_proxy=127.0.0.1,localhost \
     NO_PROXY=127.0.0.1,localhost \
-    TEST_OLLAMA_URL="http://127.0.0.1:${port}/api/chat" \
+    TEST_OLLAMA_URL="http://127.0.0.1:${PROVIDER_PORT}/api/chat" \
     "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
   stop_provider
   if echo "$actual" | grep -qF "$absent"; then
@@ -598,5 +647,13 @@ print(json.dumps([json.dumps({'tool': 'fetch',
 run_case "fetch-file-url-refused" "$fetch_url" "fetch a file url" \
   "consent denied: no TTY"
 
+# No provider may outlive its case. This runs before the EXIT trap, and
+# the trap runs the same check again, so a leak is reported on both the
+# normal path and the interrupted one.
+if ! check_no_leaked_providers; then
+  FAILURES=$((FAILURES + 1))
+fi
+
 printf '\n%d/%d tool-loop golden cases passed\n' "$((CASES - FAILURES))" "$CASES"
+
 if [ "$FAILURES" -ne 0 ]; then exit 1; fi
