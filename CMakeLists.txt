@@ -658,6 +658,27 @@ target_link_libraries(agentware-tests PRIVATE
 target_compile_definitions(agentware-tests PRIVATE
     TEST_SNAPSHOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src/tests")
 add_test(NAME basic_tests COMMAND agentware-tests)
+
+# The plain interactive surface: the help text, the version banner and
+# the legacy write:/read: round trip, driven against the real binary.
+# This is a separate executable so it can be run on its own, and so the
+# binary it drives is a build dependency rather than a runtime path.
+add_executable(agentware-cli-tests
+    src/tests/cli_behavior_test.cpp
+    src/version.cpp
+)
+target_include_directories(agentware-cli-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/include
+    ${CMAKE_CURRENT_BINARY_DIR}/include
+)
+target_link_libraries(agentware-cli-tests PRIVATE
+    gtest_main
+    gtest
+)
+target_compile_definitions(agentware-cli-tests PRIVATE
+    AGENTWARE_BINARY_PATH="$<TARGET_FILE:agentware-agent>")
+add_dependencies(agentware-cli-tests agentware-agent)
+add_test(NAME cli_behavior COMMAND agentware-cli-tests)
 add_test(NAME remediation_probes
   COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/remediation_probes.sh"
     "$<TARGET_FILE:agentware-agent>")
