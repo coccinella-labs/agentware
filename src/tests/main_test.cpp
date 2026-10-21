@@ -2424,6 +2424,7 @@ TEST(TimeoutUtilTest, FastCompletes) {
 
 TEST(TimeoutUtilTest, SlowTimesOut) {
   EXPECT_FALSE(Core::run_with_timeout([]() { std::this_thread::sleep_for(std::chrono::seconds(2)); }, 1));
+}
 
 TEST(ToolRegistryTest, RegisterAndFind) {
   Core::register_all_tools();
