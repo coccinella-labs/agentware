@@ -932,8 +932,8 @@ std::string Agent::extract_tool_call(const std::string &text,
   // assistant message is a single JSON object, or when the message
   // contains exactly one tagged fenced code block whose body is a single
   // JSON object. JSON that appears inside prose, examples, or quoted
-  // snippets never executes. Anything else is treated as a final answer
-  // ("none"), so prose + JSON is a final answer, not a tool call.
+  // snippets never executes. Anything else is a final answer ("none"),
+  // so prose + JSON is a final answer, not a tool call.
   std::string trimmed = text;
   size_t ts = trimmed.find_first_not_of(" \t\n\r");
   if (ts == std::string::npos) {
@@ -949,7 +949,8 @@ std::string Agent::extract_tool_call(const std::string &text,
   bool had_fence = false;
   if (trimmed.rfind("```", 0) == 0) {
     size_t open_nl = trimmed.find('\n');
-    size_t close = trimmed.find("```", (open_nl == std::string::npos) ? 3 : open_nl);
+    size_t close =
+        trimmed.find("```", (open_nl == std::string::npos) ? 3 : open_nl);
     if (close == std::string::npos) {
       return "none"; // unterminated fence -> not a call
     }
@@ -964,10 +965,56 @@ std::string Agent::extract_tool_call(const std::string &text,
     }
     candidate = trimmed.substr(content_start, close - content_start);
     had_fence = true;
-  } else {
+  } else if (trimmed.rfind("{", 0) == 0) {
+    // The whole message must be one bare JSON object.
     candidate = trimmed;
-    if (candidate.find("```") != std::string::npos) {
-      return "none"; // prose containing a code block -> final answer
+  } else {
+    // Prose (with or without embedded JSON) is a final answer.
+    return "none";
+  }
+
+  // Scan for the end of the first top-level JSON object with a depth
+  // counter, so a nested "arguments" object does not end the scan early.
+  // Anything but whitespace after that object is a violation: a second
+  // object is a multi-call, anything else is a malformed call.
+  size_t depth = 0;
+  size_t obj_end = std::string::npos;
+  bool in_string = false;
+  bool escaped = false;
+  for (size_t i = 0; i < candidate.size(); ++i) {
+    const char c = candidate[i];
+    if (in_string) {
+      if (escaped) {
+        escaped = false;
+      } else if (c == '\\') {
+        escaped = true;
+      } else if (c == '"') {
+        in_string = false;
+      }
+      continue;
+    }
+    if (c == '"') {
+      in_string = true;
+    } else if (c == '{') {
+      ++depth;
+    } else if (c == '}') {
+      --depth;
+      if (depth == 0) {
+        obj_end = i;
+        break;
+      }
+    }
+  }
+  if (obj_end != std::string::npos) {
+    std::string tail = candidate.substr(obj_end + 1);
+    size_t ns = tail.find_first_not_of(" \t\n\r");
+    if (ns != std::string::npos) {
+      if (tail.find('{') != std::string::npos) {
+        return "error: multiple tool calls in one reply; only one call per "
+               "turn is allowed";
+      }
+      return "error: malformed tool call: trailing content after the JSON "
+             "object";
     }
   }
 
@@ -975,16 +1022,7 @@ std::string Agent::extract_tool_call(const std::string &text,
   try {
     j = nlohmann::json::parse(candidate, nullptr, true);
   } catch (...) {
-    // Malformed JSON. If it looks like an attempted call, return a
-    // recoverable error; otherwise treat as a final answer.
-    if (candidate.find("{") != std::string::npos &&
-        candidate.find("\"tool\"") != std::string::npos) {
-      return "error: malformed tool call: invalid JSON";
-    }
-    if (trimmed.rfind("{", 0) == 0) {
-      return "error: malformed tool call: invalid JSON";
-    }
-    return "none";
+    return "error: malformed tool call: invalid JSON";
   }
 
   if (!j.is_object()) {
@@ -1015,18 +1053,6 @@ std::string Agent::extract_tool_call(const std::string &text,
     out_args = j["arguments"];
   } else if (j.contains("arguments")) {
     return "error: malformed tool call: 'arguments' must be an object";
-  }
-
-  if (!had_fence) {
-    size_t first_end = candidate.find('}');
-    if (first_end != std::string::npos) {
-      std::string tail = candidate.substr(first_end + 1);
-      size_t ns = tail.find_first_not_of(" \t\n\r");
-      if (ns != std::string::npos) {
-        return "error: multiple tool calls in one reply; only one call per "
-               "turn is allowed";
-      }
-    }
   }
 
   return "";
@@ -1374,6 +1400,7 @@ void Agent::handle_ai_chat(const std::string &input) {
       current_input = quote_observation(obs);
       ++turns;
       ++retries;
+      Utils::UI::print_tool_result(obs);
       if (retries >= kRetryBudget) {
         Utils::UI::print_warning("Retry budget (" + std::to_string(kRetryBudget) +
                                  ") exhausted; stopping.");
@@ -1400,6 +1427,7 @@ void Agent::handle_ai_chat(const std::string &input) {
       current_input = quote_observation(obs);
       ++turns;
       ++retries;
+      Utils::UI::print_tool_result(obs);
       if (retries >= kRetryBudget) {
         Utils::UI::print_warning("Retry budget (" + std::to_string(kRetryBudget) +
                                  ") exhausted; stopping.");
@@ -1490,6 +1518,7 @@ void Agent::handle_ai_chat(const std::string &input) {
       obs = truncate_observation(obs);
       current_input = quote_observation(obs);
       ++turns;
+      Utils::UI::print_tool_result(obs);
       if (turns >= cap) {
         Utils::UI::print_warning("Tool turn cap (" + std::to_string(cap) +
                                  ") reached; stopping.");
