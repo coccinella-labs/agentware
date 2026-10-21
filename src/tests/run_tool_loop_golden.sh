@@ -150,7 +150,7 @@ on_exit() {
 # failure once hid behind a wall of 30 s connect timeouts.
 dump_provider_log() {
   echo "      | --- mock provider log ---"
-  sed 's/^/      | /' "$PROV/tl_prov.log" 2>/dev/null | head -12
+  sed 's/^/      | /' "$PROV/tl_prov.log" 2>/dev/null | head -30
 }
 
 # Reports a provider that never came up, and counts the case failed.
@@ -178,7 +178,13 @@ run_case() {
     TEST_MODE=1
     no_proxy=127.0.0.1,localhost
     NO_PROXY=127.0.0.1,localhost
-    "TEST_OLLAMA_URL=http://127.0.0.1:${PROVIDER_PORT}/api/chat"
+    # The agent appends the endpoint path to this variable itself, so
+    # this is a BASE url. Passing the full endpoint here produced the
+    # doubled path /api/chat/api/chat, which the mock answered anyway
+    # because it serves any POST path.
+    "TEST_OLLAMA_URL=http://127.0.0.1:${PROVIDER_PORT}"
+    # A stalled case must cost seconds, not the 30 s network default.
+    "AGENTWARE_NET_TIMEOUT_SEC=${NET_TIMEOUT_SEC:-5}"
   )
   if [ -n "$tool_timeout" ]; then
     env_args+=("AGENTWARE_TOOL_TIMEOUT_SEC=$tool_timeout")
@@ -215,7 +221,8 @@ expect_refused() {
     TEST_MODE=1 \
     no_proxy=127.0.0.1,localhost \
     NO_PROXY=127.0.0.1,localhost \
-    TEST_OLLAMA_URL="http://127.0.0.1:${PROVIDER_PORT}/api/chat" \
+    TEST_OLLAMA_URL="http://127.0.0.1:${PROVIDER_PORT}" \
+    AGENTWARE_NET_TIMEOUT_SEC="${NET_TIMEOUT_SEC:-5}" \
     "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
   stop_provider
   local refused=0
@@ -251,7 +258,8 @@ expect_no() {
     TEST_MODE=1 \
     no_proxy=127.0.0.1,localhost \
     NO_PROXY=127.0.0.1,localhost \
-    TEST_OLLAMA_URL="http://127.0.0.1:${PROVIDER_PORT}/api/chat" \
+    TEST_OLLAMA_URL="http://127.0.0.1:${PROVIDER_PORT}" \
+    AGENTWARE_NET_TIMEOUT_SEC="${NET_TIMEOUT_SEC:-5}" \
     "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
   stop_provider
   if echo "$actual" | grep -qF "$absent"; then

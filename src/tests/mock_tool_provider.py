@@ -31,6 +31,26 @@ import json
 import os
 import sys
 import threading
+import time
+
+# Wall-clock stamps go into the provider log, because that log is what a
+# failing case prints. A monotonic clock is kept next to them so the
+# server-side cost of a request can be measured without trusting the
+# wall clock.
+START = time.monotonic()
+
+
+def stamp():
+    """A short wall-clock stamp, e.g. 21:04:07.412."""
+    now = time.time()
+    return time.strftime("%H:%M:%S", time.localtime(now)) + ".%03d" % int(
+        (now % 1) * 1000
+    )
+
+
+def since_start():
+    """Milliseconds since the provider started."""
+    return "%.1fms" % ((time.monotonic() - START) * 1000.0)
 
 
 def load_responses():
@@ -50,6 +70,18 @@ LOCK = threading.Lock()
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    def setup(self):
+        # Log the connection as soon as it is accepted. The client side
+        # of a stalled case can then be split into "never connected",
+        # "connected but never sent a request" and "sent a request",
+        # which are three different faults and used to look identical.
+        super().setup()
+        print(
+            f"mock provider: connection accepted from "
+            f"{self.client_address[0]}:{self.client_address[1]} at {stamp()}",
+            flush=True,
+        )
+
     def _headers(self, body):
         self.send_response(200)
         self.send_header("Content-type", "application/json")
@@ -80,7 +112,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # Log the request so a failing case shows whether it ever
         # arrived. Without this, "the provider was unreachable" and "the
         # provider was reached but never answered" look the same.
-        print(f"mock provider: POST {self.path}", flush=True)
+        #
+        # The received stamp and the sent stamp are logged separately:
+        # a provider that answers in a millisecond while the client
+        # keeps waiting proves the stall is on the client side, and a
+        # provider that receives the request but never sends the
+        # response proves the stall is on the server side.
+        received_at = stamp()
+        received_mono = time.monotonic()
+        print(
+            f"mock provider: request received {self.path} at {received_at} "
+            f"({since_start()} after start)",
+            flush=True,
+        )
         n = int(self.headers.get("Content-Length", 0))
         self.rfile.read(n)
         with LOCK:
@@ -96,6 +140,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._body = json.dumps(reply).encode()
         self._headers(self._body)
         self.wfile.write(self._body)
+        print(
+            f"mock provider: response sent {len(self._body)} bytes at {stamp()} "
+            f"({(time.monotonic() - received_mono) * 1000.0:.1f}ms after the "
+            f"request was received)",
+            flush=True,
+        )
 
     def log_message(self, *args):
         pass
