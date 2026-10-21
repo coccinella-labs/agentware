@@ -29,6 +29,11 @@ export HOME="$WORK"
 export USERPROFILE="$WORK"
 unset SERPAPI_KEY
 
+# Canary exported into the agentware process. Reading /proc/self/environ
+# would echo it back, which the special-target cases must never do.
+ENV_SENTINEL="tzq4-leak-canary-9x"
+export ENV_SENTINEL
+
 FAILURES=0
 CASES=0
 
@@ -526,16 +531,30 @@ print(json.dumps([json.dumps({'tool': 'read',
 run_case "read-dev-symlink" "$replies" "read the special path" \
   "Path escapes the permitted root"
 
-# /proc reached through a symlink inside cwd. On a host without /proc
-# the symlink is dangling, so the refusal is "does not exist" instead of
-# "escapes the permitted root"; either way nothing is read.
+# /proc reached through a symlink inside cwd. The refusal depends on the
+# host: where /proc exists the link resolves, the canonical path leaves
+# cwd, and the containment check refuses it ("Path escapes the permitted
+# root"); where /proc is absent the link is dangling and the refusal is a
+# not-found error. Either way nothing is read, so the expected refusal
+# follows whether the link resolves.
 replies=$(python3 -c "
 import json
 print(json.dumps([json.dumps({'tool': 'read',
                               'arguments': {'filename': 'proclink'}}),
                   'Done.']))
 ")
-run_case "read-proc-symlink" "$replies" "read the special path" "Error"
+if [ -e "$WORK/proclink" ]; then
+  proc_refusal="Path escapes the permitted root"
+else
+  proc_refusal="Error"
+fi
+run_case "read-proc-symlink" "$replies" "read the special path" "$proc_refusal"
+
+# The same read must never return file content. The sentinel is exported
+# into the agentware process, so a successful read of /proc/self/environ
+# would echo it back; this assertion is the same on every host.
+expect_no "read-proc-symlink-no-leak" "$replies" "read the special path" \
+  "$ENV_SENTINEL"
 
 # 32d. fetch: with a file:// URL. On the model surface the consent gate
 #      fires first (no TTY), so the file:// URL is never requested. The
