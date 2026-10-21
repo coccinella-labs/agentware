@@ -19,11 +19,28 @@ permissions:
   security-events: write
   packages: write
 
+# One in-flight run per branch (per PR number for pull requests). A new
+# push to a pull request cancels the superseded run instead of leaving it
+# to burn a runner, which is what made the macOS job sit in the queue
+# for hours behind work that had already been replaced.
+#
+# cancel-in-progress is limited to pull_request events on purpose:
+#   * pushes to main and merge_group runs are never cancelled, so a
+#     merge queue entry is not killed by a later push, and
+#   * two pushes to main queue up instead of cancelling each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     name: build (${{ matrix.os_short }},
       ${{ matrix.build_type == 'Release' && 'release' || 'debug' }})
     runs-on: ${{ matrix.os }}
+    # A stalled job must not hold a runner for hours. The macOS tool-loop
+    # suite is the slow one (it runs 131 cases), so it gets the larger
+    # budget; the Linux and Windows jobs finish in minutes.
+    timeout-minutes: ${{ matrix.os_short == 'macos' && 30 || 25 }}
     if: github.repository_owner == 'coccinella-labs'
     strategy:
       fail-fast: false
@@ -179,6 +196,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: build
     if: github.event_name != 'release'
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - run: |
@@ -196,6 +214,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - run: |
@@ -210,6 +229,7 @@ jobs:
 
   e2e:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     if: github.ref == 'refs/heads/main'
       || github.event_name == 'workflow_dispatch'
     steps:
@@ -226,6 +246,7 @@ jobs:
 
   docker:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     if: github.ref == 'refs/heads/main' || github.event_name == 'release'
     permissions:
       contents: read
@@ -260,6 +281,7 @@ jobs:
     name: release
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
