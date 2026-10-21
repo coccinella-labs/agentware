@@ -29,6 +29,7 @@ void record_interaction(Data::MemoryManager &memory, const std::string &tag,
 void record_global_fact(Data::MemoryManager &memory, const std::string &fact);
 } // namespace Core
 #include <cctype>
+#include <algorithm>
 #include <chrono>
 #ifndef _WIN32
 #include <csignal>
@@ -2394,7 +2395,11 @@ TEST(ToolRegistrySnapshotTest, MatchesCheckedInSnapshot) {
   ASSERT_TRUE(file.good()) << "cannot read snapshot: " << path;
   std::stringstream buf;
   buf << file.rdbuf();
-  const std::string expected = buf.str();
+  // The snapshot is a text file: a checkout with CRLF line endings (the
+  // Windows default) must still compare equal, so CRLF is normalized away.
+  std::string expected = buf.str();
+  expected.erase(std::remove(expected.begin(), expected.end(), '\r'),
+                 expected.end());
   const std::string actual = Core::tool_registry_dump();
   if (expected != actual) {
     std::cerr << "tool registry snapshot mismatch\n--- expected ---\n"
