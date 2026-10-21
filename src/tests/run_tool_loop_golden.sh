@@ -22,7 +22,7 @@ BIN="$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")"
 MOCK_PROVIDER="${MOCK_PROVIDER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mock_tool_provider.py}"
 WORK="$(mktemp -d)"
 PROV="$(mktemp -d)"
-trap 'rm -rf "$WORK" "$PROV" "$OUTSIDE"' EXIT
+trap 'rm -rf "$WORK" "$PROV" "$OUTSIDE" "$ABS_OUT"' EXIT
 cd "$WORK" || exit 1
 
 export HOME="$WORK"
@@ -36,6 +36,7 @@ CASES=0
 printf 'golden needle alpha\nsecond line\n' > hello.txt
 printf 'notes file with needle words\n' > notes.md
 printf 'API_KEY=supersecret\n' > .env
+printf 'API_KEY=supersecret\n' > id_rsa
 mkdir -p tl_fixture
 printf 'one\n' > tl_fixture/one.txt
 printf 'two\n' > tl_fixture/two.txt
@@ -140,10 +141,20 @@ run_case "trailing-comma" \
   '["{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"},}","Done."]' \
   "list the dir" "malformed tool call: invalid JSON"
 
-# 10. Absolute path outside cwd is refused (model surface).
-run_case "abs-path-outside-cwd" \
-  '["{\"tool\":\"read\",\"arguments\":{\"filename\":\"/etc/passwd\"}}","Done."]' \
-  "read passwd" "Path escapes the permitted root"
+# 10. Absolute path outside cwd is refused (model surface). The target is
+#     deliberately NOT a restricted system path: the read handler refuses
+#     /etc/passwd on its own, so that path would not exercise the
+#     model-surface containment check.
+ABS_OUT="$(mktemp -d)"
+echo outside > "$ABS_OUT/outside.txt"
+replies=$(python3 -c "
+import json, sys
+print(json.dumps([json.dumps({'tool': 'read',
+                              'arguments': {'filename': sys.argv[1]}}),
+                  'Done.']))
+" "$ABS_OUT/outside.txt")
+run_case "abs-path-outside-cwd" "$replies" \
+  "read outside" "Path escapes the permitted root"
 
 # 11. Secrets file inside cwd is refused.
 run_case "secrets-env" \
@@ -187,7 +198,9 @@ run_case "turn-cap-trip" \
   '["{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","Done."]' \
   "list many" "Tool turn cap (8) reached"
 
-# 17. grep must not leak secrets from .env even when it matches.
+# 17. grep must not leak secrets from a secrets file even when it matches.
+#     The file is NOT hidden: ripgrep skips hidden files by default, so a
+#     hidden fixture would never be searched and the case would be vacuous.
 run_case "grep-no-secret-leak" \
   '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"API_KEY\",\"directory\":\".\"}}","Done."]' \
   "grep api key" "No matches found"

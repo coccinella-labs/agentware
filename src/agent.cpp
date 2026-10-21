@@ -602,17 +602,23 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
         auto search_result =
             Services::search_code(search_caps_, search_options);
 
-        if (search_result.matches.empty()) {
+        // Secrets paths are filtered out of the results, so the count
+        // below reflects what is actually shown.
+        std::vector<std::string> shown;
+        for (const auto &match : search_result.matches) {
+          if (Core::Agent::is_secrets_path(match.file_path))
+            continue;
+          shown.push_back(match.file_path + ":" +
+                          std::to_string(match.line_number) + ": " +
+                          match.line_content);
+        }
+        if (shown.empty()) {
           result = "No matches found for pattern: " + pattern;
         } else {
-          result = "Found " + std::to_string(search_result.matches.size()) +
+          result = "Found " + std::to_string(shown.size()) +
                    " matches (via " + search_result.backend_used + "):\n";
-          for (const auto &match : search_result.matches) {
-            if (Core::Agent::is_secrets_path(match.file_path))
-              continue;
-            result += match.file_path + ":" +
-                      std::to_string(match.line_number) + ": " +
-                      match.line_content + "\n";
+          for (const auto &line : shown) {
+            result += line + "\n";
           }
           if (search_result.truncated) {
             result +=
