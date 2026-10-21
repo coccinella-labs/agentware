@@ -5,8 +5,8 @@
 # agentware
 
 A C++20 AI coding agent that runs in your terminal. It talks to hosted model
-providers, reads and edits files through its own commands, and works offline
-against local models.
+providers, reads and edits files through its own commands, runs an autonomous
+tool-call loop, and works offline against local models.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -28,6 +28,10 @@ and need no key.
 
 Around twenty services behind one binary: agent orchestration, AI provider calls, auth, checkpoints, codebase search, command execution, configuration, context tracking, a database layer, file and multi-file operations, git and GitHub integration, an MCP client module, memory management, sandboxing, theming, input validation, and a web service.
 
+A central tool registry classifies every tool by capability (read-only or
+mutating), model-surface availability, and interactive consent requirements,
+providing case-insensitive prefix resolution and canonical tool-call parsing.
+
 Codebase search shells out to `rg` and `fd` when they are on `PATH` and falls
 back to a built-in scanner when they are not, so search works either way.
 `github:threads:owner/repo:pr` reads inline review threads without the GraphQL
@@ -38,6 +42,40 @@ Model Context Protocol server entries are configured in
 server and a git server, both declared as `npx` commands. The MCP transport is
 not implemented, so no server process is started and no MCP tool is called;
 the `/mcp` commands report their own configuration and say so.
+
+## Model-driven tool loop (autonomous mode)
+
+Set `AGENTWARE_TOOL_CALL_LOOP=1` to allow the model to autonomously invoke
+tools across multiple turns. By default the loop is off (`0`), where the
+agent operates as a direct conversational assistant executing user-typed
+commands.
+
+When enabled, assistant responses are parsed for JSON tool calls (e.g.
+`{"tool": "read", "arguments": {"filename": "src/main.cpp"}}`). The runtime
+validates each call through an execution gate before running it, captures the
+output, and feeds truncated observations back to the model until it outputs a
+final text answer or reaches turn bounds.
+
+Strict safety invariants are enforced on the model surface:
+
+- **Read-only execution:** Mutating tools (`cmd:`, `write:`, `replace:`,
+  `remember:`, `clear`, `forget`) are strictly refused on the model surface.
+- **Model-disabled tools:** Heavy tools (`todos:`, `analyze:`, `git:diff`) are
+  refused on the model surface.
+- **CWD containment:** Paths that escape the current working directory via
+  parent traversal (`..`), absolute paths, or external symlinks are refused.
+- **Secrets filtering:** Sensitive paths (`.env`, `.ssh`, tokens, secret keys)
+  are blocked from reads and filtered out of search results.
+- **Consent gates:** Outbound network tools (`fetch:`, `github:`) require
+  interactive TTY confirmation and fail with `consent denied: no TTY` in
+  unattended or non-interactive environments.
+
+| Variable | Default | Description |
+|---|---|---|
+| `AGENTWARE_TOOL_CALL_LOOP` | `0` | Set to `1` or `true` to enable the autonomous tool loop |
+| `AGENTWARE_TOOL_TURN_CAP` | `8` | Maximum autonomous turns before returning control to the user |
+| `AGENTWARE_TOOL_TIMEOUT_SEC` | `30` | Per-tool execution timeout in seconds |
+| `AGENTWARE_NET_TIMEOUT_SEC` | `10` | Network timeout for model requests during tool loop turns (30s elsewhere) |
 
 ## Modal line editing (optional)
 
@@ -97,17 +135,25 @@ the Actions tab.
 cmake --build build --target test
 ```
 
-`ctest` runs three targets. `basic_tests` is the unit suite, currently 120 cases
-across 38 suites, covering command dispatch and redaction, file-access policy,
-project-root discovery, MCP and GitHub availability, review threads, sandbox
-construction, spawn, bounded execution, the Docker availability probe, safety,
-configuration, results, and Docker behavior, empty replace-pattern rejection,
-issue parsing, git log handling, memory persistence, input validation, and both
-search backends. `remediation_probes` is a shell harness that drives the built
-binary against known-bad input and asserts it refuses. It is POSIX-only and is
-not run on the Windows CI job. `routing_golden` is a 35-case shell harness that
-pins the dispatch routing contract through the real binary in a hermetic
-workspace; it makes zero outbound requests.
+`ctest` runs four targets:
+
+- **`basic_tests`**: Google Test suite with 130 cases across 42 suites. Covers
+  command dispatch and redaction, file-access policy, project-root discovery,
+  MCP and GitHub availability, review threads, sandbox construction, bounded
+  execution, safety denylists, memory persistence, input validation, search
+  backends, the central tool registry and snapshot verification, tool execution
+  gating, and process timeout utilities.
+- **`remediation_probes`**: A POSIX shell harness driving the built binary
+  against known-bad input and asserting refusal. It is POSIX-only and is not
+  run on the Windows CI job.
+- **`routing_golden`**: A 35-case shell harness pinning command dispatch and
+  routing contracts through the built binary in a hermetic workspace with zero
+  outbound requests.
+- **`tool_loop_golden`**: A 131-case shell harness exercising the model-driven
+  tool-call loop against a hermetic mock provider (`mock_tool_provider.py`).
+  Verifies JSON parsing, turn caps, mutating tool refusals, model-disabled
+  commands, path containment, secrets protection, variant sweeps, and consent
+  denials.
 
 ### Sandbox Tests
 
@@ -123,10 +169,9 @@ Seven sandbox test areas exercise Docker-isolated command execution:
 | `SandboxResultTest` | Result formatting: success, empty, failure, timeout |
 | `SandboxDockerTest` | End-to-end fake-docker routing: success, daemon failure, hang timeout |
 
-CI additionally runs a build matrix, coverage, lint, Docker end-to-end, and
-release jobs. Nothing in either target exercises the agent against a live
-model. The `e2e` job needs Docker; the `coverage` job needs its toolchain
-installed.
+CI additionally runs a build matrix (Ubuntu, macOS, Windows), coverage, linting,
+Docker end-to-end, and release jobs. The `e2e` job needs Docker; the `coverage`
+job needs its toolchain installed.
 
 ## Contributing
 
