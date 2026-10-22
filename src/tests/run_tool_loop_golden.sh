@@ -315,9 +315,31 @@ run_case "nested-arguments" \
   "grep for needle" "hello.txt"
 
 # 20. A closing brace inside a string value must not end the object.
+#     The pattern it carries, "needle}", is not a valid regular
+#     expression, so the search reports that instead of running. The case
+#     still proves the parse: the pattern arrives whole, and the error
+#     names it.
 run_case "brace-inside-string" \
   '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"needle}\",\"directory\":\".\"}}","Done."]' \
-  "grep for needle}" "brace.txt"
+  "grep for needle}" "invalid search pattern"
+
+# 20b. An unbalanced parenthesis is rejected the same way.
+run_case "invalid-pattern-unmatched-paren" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"needle(\",\"directory\":\".\"}}","Done."]' \
+  "grep for needle(" "invalid search pattern"
+
+# 20d. A pattern that passes the dialect check but that no regex engine
+#      accepts (an invalid quantifier range) is an error, not an empty
+#      result.
+run_case "invalid-pattern-quantifier" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"a{2,1}\",\"directory\":\".\"}}","Done."]' \
+  "grep for a{2,1}" "invalid search pattern"
+
+# 20c. A brace that is part of a valid quantifier is still a valid
+#      pattern, and the search runs.
+run_case "brace-valid-quantifier" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"needle{1}\",\"directory\":\".\"}}","Done."]' \
+  "grep for needle{1}" "hello.txt"
 
 # 21. Escaped quotes inside a string value must not end the object.
 run_case "escaped-quotes" \

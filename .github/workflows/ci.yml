@@ -176,6 +176,18 @@ jobs:
               build/bin/agentware-agent
           fi
 
+      - name: grep goldens without ripgrep
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          # The native search fallback is only used on hosts that lack
+          # ripgrep, so the runners never covered it: that is how a
+          # pattern the regex engine rejects could report "no matches"
+          # on one host and work on another. Run the grep cases with the
+          # fallback forced, so both backends are covered everywhere.
+          AGENTWARE_SEARCH_BACKEND=native \
+            bash src/tests/run_routing_golden.sh build/bin/agentware-agent
+
       - name: note windows probe coverage
         if: runner.os == 'Windows'
         shell: bash

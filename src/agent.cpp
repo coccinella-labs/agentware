@@ -614,7 +614,11 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
                           std::to_string(match.line_number) + ": " +
                           match.line_content);
         }
-        if (shown.empty()) {
+        if (!search_result.error.empty()) {
+          // A search that could not be run is not a search that found
+          // nothing. Say which one it was.
+          result = search_result.error;
+        } else if (shown.empty()) {
           result = "No matches found for pattern: " + pattern;
         } else {
           result = "Found " + std::to_string(shown.size()) +
