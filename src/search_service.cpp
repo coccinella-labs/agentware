@@ -177,10 +177,99 @@ std::string run_capture(const std::string &command, std::size_t max_bytes,
   return output;
 }
 
-// Compiles the pattern with the same grammar the native fallback uses.
-// A pattern the engine rejects is not an empty result: it is an error the
-// caller has to report, or the search silently lies.
-bool pattern_compiles(const std::string &pattern, std::string &why) {
+// The accepted pattern dialect, checked without the local regex engine.
+//
+// ripgrep and the native fallback do not accept the same patterns, and
+// the local engine is not the same on every host: libc++ rejects a lone
+// "}" while libstdc++ accepts it, and ripgrep accepts it on both.
+// Validating with the local engine therefore made the accepted dialect
+// depend on the host, which is the bug this replaces.
+//
+// The rules below are the ones the backends agree on, and they are
+// checked here by hand so the answer is the same everywhere:
+//   * brackets must balance, counting only unescaped brackets and
+//     ignoring the contents of a character class
+//   * a group may not carry inline flags: "(?" is only allowed for a
+//     non-capturing group "(?:" or a named group "(?<name>)"
+//   * there are no backreferences: ripgrep does not have them
+//   * the pattern may not end with an escape
+bool pattern_is_valid(const std::string &pattern, std::string &why) {
+  std::string openers;
+  bool in_class = false;
+  for (size_t i = 0; i < pattern.size(); ++i) {
+    const char c = pattern[i];
+    if (c == '\\') {
+      if (i + 1 >= pattern.size()) {
+        why = "the pattern ends with an escape";
+        return false;
+      }
+      const char escaped = pattern[i + 1];
+      if (!in_class && escaped >= '1' && escaped <= '9') {
+        why = "backreferences are not supported";
+        return false;
+      }
+      ++i;
+      continue;
+    }
+    if (in_class) {
+      // A POSIX class such as [:alpha:] is a class inside a class.
+      if (c == '[' && i + 1 < pattern.size() && pattern[i + 1] == ':') {
+        const size_t end = pattern.find(":]", i + 2);
+        if (end != std::string::npos) {
+          i = end + 1;
+          continue;
+        }
+      }
+      if (c == ']') {
+        in_class = false;
+      }
+      continue;
+    }
+    if (c == '[') {
+      in_class = true;
+      continue;
+    }
+    if (c == '(' || c == '{') {
+      openers += c;
+      continue;
+    }
+    if (c == ')' || c == '}' || c == ']') {
+      const char expected = (c == ')') ? '(' : (c == '}' ? '{' : '[');
+      if (openers.empty() || openers.back() != expected) {
+        why = std::string("unmatched '") + c + "'";
+        return false;
+      }
+      openers.pop_back();
+      continue;
+    }
+    if (c == '?' && i >= 1 && pattern[i - 1] == '(') {
+      const char next = (i + 1 < pattern.size()) ? pattern[i + 1] : '\0';
+      if (next != ':' && next != '<') {
+        why = "inline flags are not supported";
+        return false;
+      }
+      if (next == '<' && i + 2 < pattern.size() &&
+          (pattern[i + 2] == '=' || pattern[i + 2] == '!')) {
+        why = "look-around is not supported";
+        return false;
+      }
+    }
+  }
+  if (in_class) {
+    why = "unterminated character class";
+    return false;
+  }
+  if (!openers.empty()) {
+    why = std::string("unclosed '") + openers.back() + "'";
+    return false;
+  }
+  return true;
+}
+
+// Whether the local engine itself accepts the pattern. The dialect check
+// above is the one that decides; this only reports the local engine's
+// refusal, which is an error and not an empty result.
+bool engine_accepts_pattern(const std::string &pattern, std::string &why) {
   try {
     std::regex probe(pattern);
     (void)probe;
@@ -232,9 +321,11 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
 
   // Validate the pattern before either backend sees it, so that a
   // pattern the grammar rejects is an error on every host rather than
-  // an empty result on the hosts whose regex engine rejects it.
+  // an empty result on the hosts whose regex engine rejects it. The
+  // check does not use the local engine, because the local engine is
+  // not the same on every host.
   std::string why;
-  if (!pattern_compiles(options.pattern, why)) {
+  if (!pattern_is_valid(options.pattern, why)) {
     result.error = "invalid search pattern: " + options.pattern + " (" + why +
                    "). The pattern must be a valid regular expression.";
     return result;
@@ -315,6 +406,17 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
     }
     if (truncated)
       result.truncated = true;
+    return result;
+  }
+
+  // The native fallback gets the local engine's last word on the
+  // pattern it will compile. A refusal is an error, not an empty
+  // result.
+  std::string engine_why;
+  if (!engine_accepts_pattern(options.pattern, engine_why)) {
+    result.error = "invalid search pattern: " + options.pattern + " (" +
+                   engine_why +
+                   "). The pattern must be a valid regular expression.";
     return result;
   }
 
