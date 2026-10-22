@@ -90,8 +90,16 @@ jobs:
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            sudo apt update
-            sudo apt install -y nlohmann-json3-dev cmake build-essential \
+            # See the note in the lint job: the image's Microsoft apt
+            # source is not needed here and its 403s must not fail the
+            # job.
+            sudo sed -i '/packages\.microsoft\.com/d' \
+              /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
+              /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+            sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
+              /etc/apt/sources.list.d/microsoft-prod.sources
+            sudo apt-get update -o Acquire::Retries=3
+            sudo apt-get install -y nlohmann-json3-dev cmake build-essential \
               libcurl4-openssl-dev libpqxx-dev expect clang-tidy
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
             brew update
@@ -182,8 +190,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: |
-          sudo apt update
-          sudo apt install -y nlohmann-json3-dev cmake build-essential \
+          # See the note in the lint job: the image's Microsoft apt
+          # source is not needed here and its 403s must not fail the job.
+          sudo sed -i '/packages\.microsoft\.com/d' \
+            /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
+            /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
+            /etc/apt/sources.list.d/microsoft-prod.sources
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -y nlohmann-json3-dev cmake build-essential \
             libcurl4-openssl-dev libpqxx-dev lcov
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
           cmake --build build --target coverage
@@ -199,8 +214,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: |
-          sudo apt update
-          sudo apt install -y clang-tidy cmake build-essential \
+          # The runner image ships a Microsoft apt source that these
+          # jobs do not need. It answers 403 at times, and a failing
+          # "apt update" fails the job before a single line of the
+          # project is looked at. Drop every source that points at it.
+          # If the update still fails afterwards, the job fails: it
+          # needs these packages.
+          sudo sed -i '/packages\.microsoft\.com/d' \
+            /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
+            /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
+            /etc/apt/sources.list.d/microsoft-prod.sources
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -y clang-tidy cmake build-essential \
             libcurl4-openssl-dev nlohmann-json3-dev libpqxx-dev
           cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           echo "Running basic syntax check..."
