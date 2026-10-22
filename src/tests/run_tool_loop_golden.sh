@@ -328,6 +328,13 @@ run_case "invalid-pattern-unmatched-paren" \
   '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"needle(\",\"directory\":\".\"}}","Done."]' \
   "grep for needle(" "invalid search pattern"
 
+# 20d. A pattern that passes the dialect check but that no regex engine
+#      accepts (an invalid quantifier range) is an error, not an empty
+#      result.
+run_case "invalid-pattern-quantifier" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"a{2,1}\",\"directory\":\".\"}}","Done."]' \
+  "grep for a{2,1}" "invalid search pattern"
+
 # 20c. A brace that is part of a valid quantifier is still a valid
 #      pattern, and the search runs.
 run_case "brace-valid-quantifier" \

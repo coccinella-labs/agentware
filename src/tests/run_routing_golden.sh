@@ -130,6 +130,11 @@ expect "grep-capitalized" "Grep:needle:." "" 'Tool Grep("needle")'
 # and the error must be the same whether the host has ripgrep or not.
 expect "grep-invalid-pattern" "grep:needle(:" "" "invalid search pattern"
 expect "grep-invalid-brace" "grep:needle}:" "" "invalid search pattern"
+# These two pass the dialect check (their brackets balance) but no
+# regex engine accepts them: an invalid quantifier range and an invalid
+# character range. The tool must say so, not report no matches.
+expect "grep-invalid-quantifier" "grep:a{2,1}:." "" "invalid search pattern"
+expect "grep-invalid-char-range" "grep:[z-a]:." "" "invalid search pattern"
 # A brace that is part of a valid quantifier is still valid.
 expect "grep-valid-brace-quantifier" "grep:needle{1}:." "" "(via"
 

@@ -361,12 +361,14 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
     // that was killed by a signal decodes to -1, and a Windows backend
     // that crashed has a negative exit code; both are failures.
     if (!truncated && backend_status != 0 && backend_status != 1) {
-      result.error =
-          "the search backend (ripgrep) could not run this search (exit "
-          "status " +
-          std::to_string(backend_status) +
-          "); the pattern may use something ripgrep does not support: " +
-          options.pattern;
+      // ripgrep exits 2 when it cannot parse the pattern. That is the
+      // same failure the native fallback reports, so it gets the same
+      // message: a pattern nobody can use is an invalid pattern, not an
+      // empty result.
+      result.error = "invalid search pattern: " + options.pattern +
+                     " (the search backend rejected it, exit status " +
+                     std::to_string(backend_status) +
+                     "; it may use something ripgrep does not support)";
       return result;
     }
 
@@ -414,8 +416,8 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
   // result.
   std::string engine_why;
   if (!engine_accepts_pattern(options.pattern, engine_why)) {
-    result.error = "invalid search pattern: " + options.pattern + " (" +
-                   engine_why +
+    result.error = "invalid search pattern: " + options.pattern +
+                   " (the local regex engine rejected it: " + engine_why +
                    "). The pattern must be a valid regular expression.";
     return result;
   }
