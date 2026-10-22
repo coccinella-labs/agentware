@@ -25,6 +25,8 @@
 #include <cstdlib>
 #include <string>
 
+#include "startup_trace.h"
+
 namespace Utils {
 namespace Platform {
 
@@ -136,6 +138,7 @@ inline void unset_env(const char *name) {
 // user's Enter as a line break. When it is not, output code must supply the
 // newline itself or consecutive prompts run together on one line.
 inline bool stdin_is_tty() {
+  Utils::startup_trace("platform: checking whether stdin is a terminal");
 #ifdef _WIN32
   return _isatty(_fileno(stdin)) != 0;
 #else

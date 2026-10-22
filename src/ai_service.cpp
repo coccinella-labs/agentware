@@ -2,6 +2,7 @@
 #include "agent_mode.h"
 #include "config.h"
 #include "tool_registry.h"
+#include "startup_trace.h"
 #include "web_service.h"
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
@@ -244,8 +245,11 @@ std::string AIService::chat(const std::string &user_input,
            "internet connection.";
   }
 
+  Utils::startup_trace("ai: chat entered");
   auto payload = create_payload(user_input, context);
+  Utils::startup_trace("ai: payload built");
   auto url = get_api_url();
+  Utils::startup_trace("ai: endpoint resolved: " + url);
 
   try {
     // Set up headers
@@ -294,6 +298,8 @@ std::string AIService::chat(const std::string &user_input,
       // Fallback (should not happen)
       response = web_service.post_json(url, json_body, headers);
     }
+    Utils::startup_trace("ai: response received, status " +
+                         std::to_string(response.status_code));
 
     if (response.status_code != 200) {
       std::string error_content = response.content;
