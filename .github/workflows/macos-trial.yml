@@ -1,0 +1,170 @@
+name: macOS runner trial
+
+# An isolated measurement of one macOS runner. It is not part of the build
+# matrix, it is not a required check, and it changes nothing in ci.yml. It
+# exists to answer two separate questions with separate numbers, because a
+# faster environment does not necessarily mean a shorter queue:
+#
+#   1. Availability: how long does a job wait for a runner on this image?
+#      (The wait is visible as the gap between the run's creation and this
+#      job's first line, so the start time is printed as the first thing.)
+#   2. Cost: how long does the work take on this image? The tool-loop suite
+#      dominates, so the numbers that matter are the provider readiness and
+#      the readiness loop's cost, measured separately below.
+#
+# Dispatch it with the same image twice, in the same window, to compare.
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Runner image to measure.
+        required: true
+        default: macos-26
+        type: choice
+        options:
+          - macos-26
+          - macos-15
+
+permissions:
+  contents: read
+
+jobs:
+  trial:
+    name: trial (${{ inputs.image }})
+    runs-on: ${{ inputs.image }}
+    # Deliberately longer than the 30 minutes the build matrix gives macOS:
+    # this job exists to measure the full cost, not to enforce the budget.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Record the environment and the start time
+        run: |
+          {
+            echo "### macOS trial: ${{ inputs.image }}"
+            echo
+            echo "- job start (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- run created (UTC): ${{ github.event.repository.created_at }}"
+            echo "- uname: $(uname -a)"
+            echo "- sw_vers: $(sw_vers -productVersion 2>/dev/null || echo unknown)"
+            echo "- xcode: $(xcodebuild -version 2>/dev/null | head -1 || echo unknown)"
+            echo "- python3: $(python3 -VV 2>/dev/null | head -1 || echo unknown)"
+            echo "- python3 path: $(command -v python3 || echo none)"
+            echo "- cmake: $(cmake --version 2>/dev/null | head -1 || echo unknown)"
+            echo "- compiler: $(c++ --version 2>/dev/null | head -1 || echo unknown)"
+            echo "- expect: $(expect -v 2>/dev/null || echo unknown)"
+            echo "- cpus: $(sysctl -n hw.ncpu 2>/dev/null || echo unknown)"
+            echo "- memory: $(sysctl -n hw.memsize 2>/dev/null || echo unknown)"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Install the same dependencies as the build matrix
+        # Mirrors the macOS branch of the setup step in ci.yml, so the
+        # measurement is of the same environment the suites really run in.
+        run: |
+          brew update
+          brew install cmake nlohmann-json libpqxx expect llvm curl zlib
+
+      - name: Measure the interpreter and the mock readiness separately
+        # Three numbers, not one, because the 35 s per case the macOS runner
+        # shows is not one thing:
+        #   a) the interpreter's own startup
+        #   b) the mock provider's own readiness (spawn to the port file)
+        #   c) the cost of the harness's readiness loop, which is what its
+        #      200-iteration cap turns into on a loaded runner
+        run: |
+          set -u
+          SUMMARY="$GITHUB_STEP_SUMMARY"
+          now() { perl -MTime::HiRes -e 'printf "%.3f", Time::HiRes::time()'; }
+          {
+            echo "### measurement: startup and readiness"
+            echo
+            echo "#### a) interpreter startup (three runs)"
+            for i in 1 2 3; do
+              t0=$(now)
+              python3 -c pass
+              t1=$(now)
+              echo "- python3 -c pass: $(awk "BEGIN{printf \"%.3f\", $t1-$t0}")s"
+            done
+            echo
+            echo "#### b) the mock provider's own readiness"
+            PROV=$(mktemp -d)
+            echo '["ready"]' > "$PROV/replies.json"
+            MOCK_RESPONSES="$PROV/replies.json" \
+            MOCK_PROVIDER_PORT_FILE="$PROV/port" \
+            MOCK_PROVIDER_PID_FILE="$PROV/pids" \
+              python3 src/tests/mock_tool_provider.py > "$PROV/log" 2>&1 &
+            mock_pid=$!
+            t0=$(now)
+            portfile_at=""
+            probe_at=""
+            i=0
+            while [ $i -lt 200 ]; do
+              i=$((i + 1))
+              if [ -s "$PROV/port" ]; then
+                [ -z "$portfile_at" ] && portfile_at=$(now)
+                port=$(tr -cd '0-9' < "$PROV/port")
+                if [ -n "$port" ] && (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
+                  probe_at=$(now)
+                  break
+                fi
+              fi
+              kill -0 "$mock_pid" 2>/dev/null || break
+              sleep 0.1
+            done
+            t1=$(now)
+            echo "- spawn to the port file: $(awk "BEGIN{printf \"%.3f\", ${portfile_at:-0}-$t0}")s"
+            if [ -n "$probe_at" ]; then
+              echo "- port file to an accepted connect: $(awk "BEGIN{printf \"%.3f", $probe_at-${portfile_at:-0}}")s"
+            else
+              echo "- port file to an accepted connect: never accepted"
+            fi
+            echo "- total readiness wait: $(awk "BEGIN{printf \"%.3f\", $t1-$t0}")s in $i iterations"
+            echo "- mock said: $(head -1 "$PROV/log" 2>/dev/null || echo nothing)"
+            kill "$mock_pid" 2>/dev/null || true
+            wait "$mock_pid" 2>/dev/null || true
+            rm -rf "$PROV"
+            echo
+            echo "#### c) the cost of one readiness-loop iteration"
+            echo "- 200 iterations of the loop body are the harness's cap; the"
+            echo "  per-iteration cost is what turns that cap into a wait."
+            PROV2=$(mktemp -d)
+            t0=$(now)
+            i=0
+            while [ $i -lt 200 ]; do
+              i=$((i + 1))
+              if [ -s "$PROV2/port" ]; then
+                port=$(tr -cd '0-9' < "$PROV2/port")
+              fi
+              kill -0 $$ 2>/dev/null
+              sleep 0.1
+            done
+            t1=$(now)
+            echo "- 200 iterations: $(awk "BEGIN{printf \"%.3f\", $t1-$t0}")s ($(awk "BEGIN{printf \"%.3f\", ($t1-$t0)/200}")s per iteration)"
+            rm -rf "$PROV2"
+          } | tee -a "$SUMMARY"
+
+      - name: Build
+        run: |
+          set -e
+          t0=$(date +%s)
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/homebrew
+          cmake --build build -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+          echo "build seconds: $(( $(date +%s) - t0 ))" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Run the suites and time each one
+        run: |
+          set -u
+          for t in basic_tests cli_behavior routing_golden tool_loop_golden remediation_probes; do
+            t0=$(date +%s)
+            echo "=== $t ==="
+            ctest --test-dir build --output-on-failure -R "^${t}$" 2>&1 | tail -6
+            echo "$t seconds: $(( $(date +%s) - t0 ))" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Summarise
+        run: |
+          {
+            echo
+            echo "### end of trial (${{ inputs.image }})"
+            echo "- job end (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
