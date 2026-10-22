@@ -126,6 +126,12 @@ expect "grep-filtered" "grep:needle:.:*.md" "" "(via"
 expect "grep-no-match" "grep:noneedle-xyz9:." "" "No matches"
 expect "grep-empty-pattern" "grep::" "" "grep pattern cannot be empty"
 expect "grep-capitalized" "Grep:needle:." "" 'Tool Grep("needle")'
+# A pattern the regex engine rejects is an error, not an empty result,
+# and the error must be the same whether the host has ripgrep or not.
+expect "grep-invalid-pattern" "grep:needle(:" "" "invalid search pattern"
+expect "grep-invalid-brace" "grep:needle}:" "" "invalid search pattern"
+# A brace that is part of a valid quantifier is still valid.
+expect "grep-valid-brace-quantifier" "grep:needle{1}:." "" "(via"
 
 # 10-11. git routing, known + unknown subcommand.
 expect "git-status" "git:status" "" 'Tool Git("status")'

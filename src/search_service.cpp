@@ -153,12 +153,15 @@ std::string find_on_path_in(const std::string &path_env,
 // is built by this module from fixed flags plus shell-quoted arguments; it
 // never passes user text to a shell unquoted.
 std::string run_capture(const std::string &command, std::size_t max_bytes,
-                        bool &timed_out) {
+                        bool &timed_out, int *status = nullptr) {
   timed_out = false;
   std::string output;
   FILE *pipe = Utils::Platform::open_process(command.c_str(), "r");
-  if (!pipe)
+  if (!pipe) {
+    if (status != nullptr)
+      *status = -1;
     return output;
+  }
   char buffer[4096];
   while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
     output += buffer;
@@ -167,8 +170,24 @@ std::string run_capture(const std::string &command, std::size_t max_bytes,
       break;
     }
   }
-  Utils::Platform::close_process(pipe);
+  const int exit_status = Utils::Platform::close_process(pipe);
+  if (status != nullptr)
+    *status = exit_status;
   return output;
+}
+
+// Compiles the pattern with the same grammar the native fallback uses.
+// A pattern the engine rejects is not an empty result: it is an error the
+// caller has to report, or the search silently lies.
+bool pattern_compiles(const std::string &pattern, std::string &why) {
+  try {
+    std::regex probe(pattern);
+    (void)probe;
+    return true;
+  } catch (const std::regex_error &e) {
+    why = e.what();
+    return false;
+  }
 }
 
 } // namespace
@@ -182,6 +201,14 @@ SearchCapabilities
 detect_search_capabilities_from_path(const std::string &path_env) {
   SearchCapabilities caps;
   caps.has_ripgrep = !find_on_path_in(path_env, "rg").empty();
+  // A host that has ripgrep can still be asked to use the native
+  // fallback, so the fallback is exercised on every runner instead of
+  // only on the hosts that happen to lack ripgrep. Off unless the
+  // environment asks for it.
+  const char *backend = std::getenv("AGENTWARE_SEARCH_BACKEND");
+  if (backend != nullptr && std::string(backend) == "native") {
+    caps.has_ripgrep = false;
+  }
   std::string fd = find_on_path_in(path_env, "fd");
   if (fd.empty())
     fd = find_on_path_in(path_env, "fdfind");
@@ -202,6 +229,16 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
   if (options.pattern.empty())
     return result;
 
+  // Validate the pattern before either backend sees it, so that a
+  // pattern the grammar rejects is an error on every host rather than
+  // an empty result on the hosts whose regex engine rejects it.
+  std::string why;
+  if (!pattern_compiles(options.pattern, why)) {
+    result.error = "invalid search pattern: " + options.pattern + " (" + why +
+                   "). The pattern must be a valid regular expression.";
+    return result;
+  }
+
   if (caps.has_ripgrep) {
     result.backend_used = "ripgrep";
     // --vimgrep emits path:line:col:text, trivially parseable without a JSON
@@ -219,8 +256,18 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
                shell_quote(options.directory);
 
     bool truncated = false;
-    std::string output = run_capture(command, options.max_bytes, truncated);
+    int backend_status = 0;
+    std::string output =
+        run_capture(command, options.max_bytes, truncated, &backend_status);
     result.truncated = truncated;
+    // ripgrep rejects some patterns the standard library accepts (a
+    // backreference, for example). Its error text goes to stderr, so
+    // report the failure rather than an empty result.
+    if (!truncated && backend_status != 0 && output.empty()) {
+      result.error = "the search backend (ripgrep) rejected the pattern: " +
+                     options.pattern;
+      return result;
+    }
 
     std::size_t bytes = 0;
     std::istringstream stream(output);
