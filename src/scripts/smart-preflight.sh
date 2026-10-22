@@ -46,21 +46,27 @@ echo "Smart Preflight Detection"
 echo "Context: $CONTEXT"
 echo ""
 
+# The check has three speeds now, and the old QUICK and CI environment
+# variables no longer mean anything: the script takes NO_BUILD,
+# PREFLIGHT_CLEAN and PREFLIGHT_CLANG_TIDY instead.
 case $CONTEXT in
     "ci")
-        echo "Running CI/CD preflight..."
-        CI=true exec ./src/scripts/preflight.sh
+        # In CI the binary is built by the job, so the check does not
+        # build again.
+        echo "Running CI preflight..."
+        NO_BUILD=1 exec ./src/scripts/preflight.sh
         ;;
     "quick"|"dev-quick")
+        # Fast path: use the binary that is already there.
         echo "Running quick preflight..."
-        QUICK=true exec ./src/scripts/preflight.sh
+        NO_BUILD=1 exec ./src/scripts/preflight.sh
         ;;
     "comprehensive")
         echo "Running comprehensive preflight..."
         exec ./src/scripts/preflight.sh
         ;;
     *)
-        echo "❓ Unknown context, defaulting to comprehensive..."
+        echo "Unknown context, defaulting to comprehensive..."
         exec ./src/scripts/preflight.sh
         ;;
 esac
