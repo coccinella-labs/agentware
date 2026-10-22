@@ -260,12 +260,18 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
     std::string output =
         run_capture(command, options.max_bytes, truncated, &backend_status);
     result.truncated = truncated;
-    // ripgrep rejects some patterns the standard library accepts (a
-    // backreference, for example). Its error text goes to stderr, so
-    // report the failure rather than an empty result.
-    if (!truncated && backend_status != 0 && output.empty()) {
-      result.error = "the search backend (ripgrep) rejected the pattern: " +
-                     options.pattern;
+    // ripgrep exits 0 when it found something, 1 when it found nothing
+    // and 2 when it could not run the search at all. Only the last is a
+    // failure: a pattern ripgrep rejects (a backreference, for example)
+    // must not turn into an empty result. Its error text goes to stderr,
+    // so the exit status is all there is to go on.
+    if (!truncated && backend_status > 1) {
+      result.error =
+          "the search backend (ripgrep) could not run this search (exit "
+          "status " +
+          std::to_string(backend_status) +
+          "); the pattern may use something ripgrep does not support: " +
+          options.pattern;
       return result;
     }
 
