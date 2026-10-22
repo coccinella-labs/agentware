@@ -16,6 +16,8 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -109,10 +111,18 @@ protected:
 #ifdef _WIN32
     GTEST_SKIP() << "the driver uses a POSIX shell redirect";
 #endif
+    // The workspace name has to be unique per test and portable: getpid
+    // is a POSIX name that MSVC only provides as the deprecated _getpid,
+    // and the project builds with warnings as errors.
+    static std::atomic<unsigned> counter{0};
     const std::string name =
         std::string(::testing::UnitTest::GetInstance()->current_test_info()->name());
+    const auto stamp = std::chrono::steady_clock::now()
+                           .time_since_epoch()
+                           .count();
     dir_ = fs::temp_directory_path() /
-           ("agentware-cli-" + std::to_string(::getpid()) + "-" + name);
+           ("agentware-cli-" + std::to_string(stamp) + "-" +
+            std::to_string(counter++) + "-" + name);
     home_ = dir_ / "home";
     fs::remove_all(dir_);
     fs::create_directories(home_);
