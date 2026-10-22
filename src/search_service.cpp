@@ -153,12 +153,15 @@ std::string find_on_path_in(const std::string &path_env,
 // is built by this module from fixed flags plus shell-quoted arguments; it
 // never passes user text to a shell unquoted.
 std::string run_capture(const std::string &command, std::size_t max_bytes,
-                        bool &timed_out) {
+                        bool &timed_out, int *status = nullptr) {
   timed_out = false;
   std::string output;
   FILE *pipe = Utils::Platform::open_process(command.c_str(), "r");
-  if (!pipe)
+  if (!pipe) {
+    if (status != nullptr)
+      *status = -1;
     return output;
+  }
   char buffer[4096];
   while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
     output += buffer;
@@ -167,8 +170,114 @@ std::string run_capture(const std::string &command, std::size_t max_bytes,
       break;
     }
   }
-  Utils::Platform::close_process(pipe);
+  const int exit_status =
+      Utils::Platform::process_exit_code(Utils::Platform::close_process(pipe));
+  if (status != nullptr)
+    *status = exit_status;
   return output;
+}
+
+// The accepted pattern dialect, checked without the local regex engine.
+//
+// ripgrep and the native fallback do not accept the same patterns, and
+// the local engine is not the same on every host: libc++ rejects a lone
+// "}" while libstdc++ accepts it, and ripgrep accepts it on both.
+// Validating with the local engine therefore made the accepted dialect
+// depend on the host, which is the bug this replaces.
+//
+// The rules below are the ones the backends agree on, and they are
+// checked here by hand so the answer is the same everywhere:
+//   * brackets must balance, counting only unescaped brackets and
+//     ignoring the contents of a character class
+//   * a group may not carry inline flags: "(?" is only allowed for a
+//     non-capturing group "(?:" or a named group "(?<name>)"
+//   * there are no backreferences: ripgrep does not have them
+//   * the pattern may not end with an escape
+bool pattern_is_valid(const std::string &pattern, std::string &why) {
+  std::string openers;
+  bool in_class = false;
+  for (size_t i = 0; i < pattern.size(); ++i) {
+    const char c = pattern[i];
+    if (c == '\\') {
+      if (i + 1 >= pattern.size()) {
+        why = "the pattern ends with an escape";
+        return false;
+      }
+      const char escaped = pattern[i + 1];
+      if (!in_class && escaped >= '1' && escaped <= '9') {
+        why = "backreferences are not supported";
+        return false;
+      }
+      ++i;
+      continue;
+    }
+    if (in_class) {
+      // A POSIX class such as [:alpha:] is a class inside a class.
+      if (c == '[' && i + 1 < pattern.size() && pattern[i + 1] == ':') {
+        const size_t end = pattern.find(":]", i + 2);
+        if (end != std::string::npos) {
+          i = end + 1;
+          continue;
+        }
+      }
+      if (c == ']') {
+        in_class = false;
+      }
+      continue;
+    }
+    if (c == '[') {
+      in_class = true;
+      continue;
+    }
+    if (c == '(' || c == '{') {
+      openers += c;
+      continue;
+    }
+    if (c == ')' || c == '}' || c == ']') {
+      const char expected = (c == ')') ? '(' : (c == '}' ? '{' : '[');
+      if (openers.empty() || openers.back() != expected) {
+        why = std::string("unmatched '") + c + "'";
+        return false;
+      }
+      openers.pop_back();
+      continue;
+    }
+    if (c == '?' && i >= 1 && pattern[i - 1] == '(') {
+      const char next = (i + 1 < pattern.size()) ? pattern[i + 1] : '\0';
+      if (next != ':' && next != '<') {
+        why = "inline flags are not supported";
+        return false;
+      }
+      if (next == '<' && i + 2 < pattern.size() &&
+          (pattern[i + 2] == '=' || pattern[i + 2] == '!')) {
+        why = "look-around is not supported";
+        return false;
+      }
+    }
+  }
+  if (in_class) {
+    why = "unterminated character class";
+    return false;
+  }
+  if (!openers.empty()) {
+    why = std::string("unclosed '") + openers.back() + "'";
+    return false;
+  }
+  return true;
+}
+
+// Whether the local engine itself accepts the pattern. The dialect check
+// above is the one that decides; this only reports the local engine's
+// refusal, which is an error and not an empty result.
+bool engine_accepts_pattern(const std::string &pattern, std::string &why) {
+  try {
+    std::regex probe(pattern);
+    (void)probe;
+    return true;
+  } catch (const std::regex_error &e) {
+    why = e.what();
+    return false;
+  }
 }
 
 } // namespace
@@ -182,6 +291,14 @@ SearchCapabilities
 detect_search_capabilities_from_path(const std::string &path_env) {
   SearchCapabilities caps;
   caps.has_ripgrep = !find_on_path_in(path_env, "rg").empty();
+  // A host that has ripgrep can still be asked to use the native
+  // fallback, so the fallback is exercised on every runner instead of
+  // only on the hosts that happen to lack ripgrep. Off unless the
+  // environment asks for it.
+  const char *backend = std::getenv("AGENTWARE_SEARCH_BACKEND");
+  if (backend != nullptr && std::string(backend) == "native") {
+    caps.has_ripgrep = false;
+  }
   std::string fd = find_on_path_in(path_env, "fd");
   if (fd.empty())
     fd = find_on_path_in(path_env, "fdfind");
@@ -202,6 +319,18 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
   if (options.pattern.empty())
     return result;
 
+  // Validate the pattern before either backend sees it, so that a
+  // pattern the grammar rejects is an error on every host rather than
+  // an empty result on the hosts whose regex engine rejects it. The
+  // check does not use the local engine, because the local engine is
+  // not the same on every host.
+  std::string why;
+  if (!pattern_is_valid(options.pattern, why)) {
+    result.error = "invalid search pattern: " + options.pattern + " (" + why +
+                   "). The pattern must be a valid regular expression.";
+    return result;
+  }
+
   if (caps.has_ripgrep) {
     result.backend_used = "ripgrep";
     // --vimgrep emits path:line:col:text, trivially parseable without a JSON
@@ -219,8 +348,29 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
                shell_quote(options.directory);
 
     bool truncated = false;
-    std::string output = run_capture(command, options.max_bytes, truncated);
+    int backend_status = 0;
+    std::string output =
+        run_capture(command, options.max_bytes, truncated, &backend_status);
     result.truncated = truncated;
+    // ripgrep exits 0 when it found something, 1 when it found nothing
+    // and 2 when it could not run the search at all. Only a status that
+    // is neither 0 nor 1 is a failure: a pattern ripgrep rejects (a
+    // backreference, for example) must not turn into an empty result,
+    // and neither must a backend that died. Its error text goes to
+    // stderr, so the exit status is all there is to go on. A backend
+    // that was killed by a signal decodes to -1, and a Windows backend
+    // that crashed has a negative exit code; both are failures.
+    if (!truncated && backend_status != 0 && backend_status != 1) {
+      // ripgrep exits 2 when it cannot parse the pattern. That is the
+      // same failure the native fallback reports, so it gets the same
+      // message: a pattern nobody can use is an invalid pattern, not an
+      // empty result.
+      result.error = "invalid search pattern: " + options.pattern +
+                     " (the search backend rejected it, exit status " +
+                     std::to_string(backend_status) +
+                     "; it may use something ripgrep does not support)";
+      return result;
+    }
 
     std::size_t bytes = 0;
     std::istringstream stream(output);
@@ -258,6 +408,17 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
     }
     if (truncated)
       result.truncated = true;
+    return result;
+  }
+
+  // The native fallback gets the local engine's last word on the
+  // pattern it will compile. A refusal is an error, not an empty
+  // result.
+  std::string engine_why;
+  if (!engine_accepts_pattern(options.pattern, engine_why)) {
+    result.error = "invalid search pattern: " + options.pattern +
+                   " (the local regex engine rejected it: " + engine_why +
+                   "). The pattern must be a valid regular expression.";
     return result;
   }
 

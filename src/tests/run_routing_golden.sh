@@ -126,6 +126,24 @@ expect "grep-filtered" "grep:needle:.:*.md" "" "(via"
 expect "grep-no-match" "grep:noneedle-xyz9:." "" "No matches"
 expect "grep-empty-pattern" "grep::" "" "grep pattern cannot be empty"
 expect "grep-capitalized" "Grep:needle:." "" 'Tool Grep("needle")'
+# A pattern the regex engine rejects is an error, not an empty result,
+# and the error must be the same whether the host has ripgrep or not.
+expect "grep-invalid-pattern" "grep:needle(:" "" "invalid search pattern"
+expect "grep-invalid-brace" "grep:needle}:" "" "invalid search pattern"
+# This one passes the dialect check (its brackets balance) but no regex
+# engine accepts it: an invalid quantifier range. Every engine rejects
+# it, so the tool must say so on every host, not report no matches.
+#
+# The invalid character range "[z-a]" is deliberately not a case here:
+# the engines disagree about it. Ripgrep and the current libstdc++ and
+# libc++ reject it, but one libc++ version accepts it as a literal
+# range, so a golden for it would be host dependent. The portable
+# dialect check above rejects the constructs the engines disagree on
+# (an unmatched closing brace, for example), and this case covers the
+# engine refusal path.
+expect "grep-invalid-quantifier" "grep:a{2,1}:." "" "invalid search pattern"
+# A brace that is part of a valid quantifier is still valid.
+expect "grep-valid-brace-quantifier" "grep:needle{1}:." "" "(via"
 
 # 10-11. git routing, known + unknown subcommand.
 expect "git-status" "git:status" "" 'Tool Git("status")'
