@@ -34,6 +34,7 @@
 // After the project headers: on Windows this pulls in <windows.h>, which
 // defines ERROR as 0 and would break enums in the headers above.
 #include "platform.h"
+#include "startup_trace.h"
 
 #include <algorithm>
 #include <atomic>
@@ -102,12 +103,22 @@ static inline std::string trim_copy(const std::string &s) {
 static std::string execute_routed_command(const std::string &command);
 
 void Agent::run() {
+  Utils::startup_trace("agent: run entered");
   // One-time tool discovery: which external search binaries exist on PATH.
   // The flags live on the Agent for the whole session; every search and every
   // system prompt reads them instead of re-detecting or assuming.
   search_caps_ = Services::detect_search_capabilities();
+  // Which search backend the host has matters: the ripgrep path takes
+  // the pattern as a regex, the native fallback compiles it with
+  // std::regex and silently finds nothing for a pattern that std::regex
+  // rejects.
+  Utils::startup_trace(std::string("agent: search capabilities detected (") +
+                       "ripgrep=" + (search_caps_.has_ripgrep ? "yes" : "no") +
+                       ", fd=" + (search_caps_.has_fd ? "yes" : "no") +
+                       ", git=" + (search_caps_.has_git ? "yes" : "no") + ")");
 
   initialize_mode();
+  Utils::startup_trace("agent: mode and model chosen");
 
   // Data-driven model name mapping
   // Data-driven model name mapping
@@ -133,6 +144,7 @@ void Agent::run() {
   } else {
     Utils::UI::print_ready_interface(mode_name, model_name);
   }
+  Utils::startup_trace("agent: ready interface printed");
 
   while (true) {
     // Single input boundary: modal editing only when explicitly opted in
@@ -143,7 +155,9 @@ void Agent::run() {
     if (framed) {
       Utils::UI::print_input_frame_top();
     }
+    Utils::startup_trace("agent: reading a command line");
     Utils::Input::ReadResult read = Utils::Input::read_prompt_line("> ");
+    Utils::startup_trace("agent: read a command line");
     if (framed) {
       Utils::UI::print_input_frame_bottom();
     }
@@ -196,8 +210,10 @@ void Agent::initialize_mode() {
       {6, Agent::Mode::MODE_OPENAI, "OPENAI_API_KEY", "OpenAI"}};
 
   // Simplified mode selection with consistent numbering
+  Utils::startup_trace("agent: asking for the mode");
   int choice =
       get_user_choice("Mode [1=Online / 2=Offline] (default 2): ", {1, 2}, 2);
+  Utils::startup_trace("agent: mode answered");
 
   if (choice == 1) {
     // Online mode: pick provider
@@ -254,7 +270,9 @@ void Agent::initialize_mode() {
     for (const auto &m : models)
       valid_choices.push_back(m.choice);
 
+    Utils::startup_trace("agent: asking for the offline model");
     int model_choice = get_user_choice(prompt, valid_choices, 1);
+    Utils::startup_trace("agent: offline model answered");
 
     // Find and configure the selected model
     for (const auto &model : models) {
@@ -614,7 +632,11 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
                           std::to_string(match.line_number) + ": " +
                           match.line_content);
         }
-        if (shown.empty()) {
+        if (!search_result.error.empty()) {
+          // A search that could not be run is not a search that found
+          // nothing. Say which one it was.
+          result = search_result.error;
+        } else if (shown.empty()) {
           result = "No matches found for pattern: " + pattern;
         } else {
           result = "Found " + std::to_string(shown.size()) +
@@ -1163,7 +1185,9 @@ bool Agent::is_secrets_path(const std::string &path) {
 
 void Agent::handle_ai_chat(const std::string &input) {
   if (!ai_service_) {
+    Utils::startup_trace("agent: creating the AI service");
     ai_service_ = std::make_unique<Services::AIService>(mode_, api_key_);
+    Utils::startup_trace("agent: AI service created");
   }
 
   if (!ai_service_->is_available()) {

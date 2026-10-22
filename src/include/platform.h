@@ -25,6 +25,8 @@
 #include <cstdlib>
 #include <string>
 
+#include "startup_trace.h"
+
 namespace Utils {
 namespace Platform {
 
@@ -50,6 +52,24 @@ inline bool is_safe_shell_path(const std::string &path) {
 }
 
 inline int close_process(FILE *pipe) { return pclose(pipe); }
+
+// The exit code of a finished child.
+//
+// pclose returns the wait status, which encodes the exit code in its
+// low byte: a process that exited with 1 gives 256, not 1. Comparing
+// such a value against an exit code is a trap, so decode it here. On
+// Windows pclose already returns the exit code.
+inline int process_exit_code(int status) {
+#ifdef _WIN32
+  return status;
+#else
+  if (status == -1)
+    return -1;
+  if (WIFEXITED(status))
+    return WEXITSTATUS(status);
+  return -1; // killed by a signal, or not a normal exit
+#endif
+}
 
 // Cross-platform null device
 inline std::string get_null_device() { return NULL_DEVICE; }
@@ -118,6 +138,7 @@ inline void unset_env(const char *name) {
 // user's Enter as a line break. When it is not, output code must supply the
 // newline itself or consecutive prompts run together on one line.
 inline bool stdin_is_tty() {
+  Utils::startup_trace("platform: checking whether stdin is a terminal");
 #ifdef _WIN32
   return _isatty(_fileno(stdin)) != 0;
 #else

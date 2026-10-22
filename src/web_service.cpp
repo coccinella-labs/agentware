@@ -1,3 +1,4 @@
+#include "startup_trace.h"
 #include "web_service.h"
 #include "config.h"
 #include <algorithm>
@@ -522,6 +523,9 @@ WebResponse WebService::post_json(const std::string &url,
     // loopback interface and the request hangs until it times out.
     // Detect loopback and disable proxies for that request.
     const bool loopback = is_loopback_url(url);
+    Utils::startup_trace(std::string("web: post to ") + url +
+                         (loopback ? " (loopback, proxy disabled)"
+                                   : " (proxy from environment)"));
 
     // Make POST request
     cpr::Session session;
@@ -531,12 +535,15 @@ WebResponse WebService::post_json(const std::string &url,
     }
     session.SetBody(cpr::Body{json_body});
     session.SetTimeout(cpr::Timeout{std::chrono::seconds{default_network_timeout()}});
+    Utils::startup_trace("web: timeout set to " +
+                         std::to_string(default_network_timeout()) + "s");
     if (loopback) {
       // An explicit empty proxy disables the environment proxy for this
       // request.
       session.SetProxies(cpr::Proxies{{"http", ""}, {"https", ""}});
     }
     cpr::Response cpr_response = session.Post();
+    Utils::startup_trace("web: request finished");
 
     // Fill response
     response.status_code = static_cast<int>(cpr_response.status_code);

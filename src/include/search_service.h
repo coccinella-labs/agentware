@@ -44,6 +44,11 @@ struct CodeSearchResult {
   bool truncated = false;
   std::size_t files_scanned = 0;
   std::string backend_used; // "ripgrep" or "native"
+  // Set when the search could not be run at all, for example because the
+  // pattern is not a valid regular expression. An error is not an empty
+  // result: the caller must report it instead of saying that nothing
+  // matched.
+  std::string error;
 };
 
 // Content search with guardrails. Prefers rg --vimgrep when present, else a
@@ -51,6 +56,14 @@ struct CodeSearchResult {
 // .gitignore directory entries. Never returns more than max_matches or
 // max_bytes; sets truncated when output was cut so callers (and the model)
 // know the result is partial.
+//
+// The pattern is a regular expression in the C++ standard library's default
+// grammar (ECMAScript). The two backends do not agree on what that is:
+// ripgrep uses the Rust regex crate, which accepts a lone "}" as a literal,
+// while the native fallback compiles the pattern with std::regex, which
+// rejects it. The pattern is therefore validated once, here, before either
+// backend sees it, so both answer the same way: a pattern that does not
+// compile is an error, never an empty result.
 CodeSearchResult search_code(const SearchCapabilities &caps,
                              const SearchOptions &options);
 

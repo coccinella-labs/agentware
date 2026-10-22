@@ -11,18 +11,21 @@
 set -u
 
 BIN="${1:?usage: run_tool_loop_golden.sh <agentware-agent binary>}"
-PORT="${PORT:-0}"
-if [ "$PORT" = "0" ]; then
-  for p in 11499 11500 11501 11502 11503; do
-    if ! (exec 3<>/dev/tcp/127.0.0.1/$p) 2>/dev/null; then PORT=$p; break; fi
-  done
-fi
-: "${PORT:=11499}"
 BIN="$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")"
 MOCK_PROVIDER="${MOCK_PROVIDER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mock_tool_provider.py}"
+# Scratch directories the script creates. They are declared up front
+# because the EXIT trap removes them, and an interrupt can arrive
+# before the later ones are assigned: under 'set -u' an unset variable
+# would abort the trap itself, and the cleanup would be skipped.
+WORK=""
+PROV=""
+OUTSIDE=""
+ABS_OUT=""
+SPECIAL_DIR=""
 WORK="$(mktemp -d)"
 PROV="$(mktemp -d)"
-trap 'rm -rf "$WORK" "$PROV" "$OUTSIDE" "$ABS_OUT" "$SPECIAL_DIR"' EXIT
+PROVIDER_PID=""
+trap on_exit EXIT
 cd "$WORK" || exit 1
 
 export HOME="$WORK"
@@ -37,6 +40,50 @@ export ENV_SENTINEL
 FAILURES=0
 CASES=0
 
+# Every provider process this harness started records its own PID in
+# $PROV/pids. The record lives in the provider, not in the shell, so the
+# leak check below still works when the harness loses track of a PID.
+PROVIDER_PORT=""
+PROVIDER_PID=""
+
+# Startup trace. The agent writes it when AGENTWARE_STARTUP_TRACE points
+# at a file; only the first case enables it, so the file holds one
+# startup, and it is printed at the end of the suite because the scratch
+# directory is removed by the EXIT trap.
+STARTUP_TRACE="$PROV/startup_trace.log"
+
+# Harness trace. The agent's own trace says what the agent did; this one
+# says what the harness did around it, so the two can be told apart. A
+# case that takes 35 s is only interesting if it is known which half of
+# that time was the harness waiting for the provider and which was the
+# agent not making its first request.
+HARNESS_TRACE="$PROV/harness_trace.log"
+
+# Milliseconds since the epoch. macOS bash 3.2 has no EPOCHREALTIME and
+# its date has no %N, so perl does the work; perl is already needed by
+# this harness.
+now_ms() {
+    perl -MTime::HiRes -e 'printf "%.0f", Time::HiRes::time() * 1000'
+}
+
+# One line of harness trace: the time since the harness started, the
+# step, and the case it belongs to.
+harness_trace() {
+    local step="$1" case_name="${2:-}"
+    local elapsed
+    elapsed=$(( $(now_ms) - HARNESS_START_MS ))
+    printf '%s  harness: +%8dms  %s%s\n' \
+        "$(date '+%H:%M:%S')" "$elapsed" "$step" \
+        "${case_name:+ (${case_name})}" >> "$HARNESS_TRACE"
+}
+
+HARNESS_START_MS=$(now_ms)
+# Wall-clock bracket of the first case, filled in while the case runs.
+SPAWNED_AT=""
+FINISHED_AT=""
+
+harness_trace "workspace created"
+
 # Fixtures: a tiny tree so tool output is small and stable.
 printf 'golden needle alpha\nsecond line\n' > hello.txt
 printf 'notes file with needle words\n' > notes.md
@@ -46,19 +93,112 @@ mkdir -p tl_fixture
 printf 'one\n' > tl_fixture/one.txt
 printf 'two\n' > tl_fixture/two.txt
 printf 'needle} say "hi"\n' > tl_fixture/brace.txt
+harness_trace "fixtures created"
 
-# Waits until the mock provider accepts a connection on the port, so a slow
-# or failed provider start is reported as a failure instead of showing up as
-# an unrelated timeout inside the binary.
-provider_ready() {
-  local port="$1" i
-  for i in $(seq 1 100); do
-    if (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
-      return 0
+# Starts the mock provider and waits until it is actually serving.
+#
+# The provider takes an OS-assigned port and writes it to $PROV/port, so
+# two runs can never collide on a fixed port. The wait proves the port
+# accepts a connection before the agent is started: a provider that never
+# came up has to show up as a provider failure, not as an unrelated
+# timeout inside the binary.
+#
+# Sets PROVIDER_PORT and PROVIDER_PID as globals and returns 0, or
+# returns 1 if the provider never came up. It is called directly, never
+# in a command substitution: a command substitution runs it in a
+# subshell, and the backgrounded provider would then be orphaned when
+# that subshell exits, so the parent would never learn its PID and
+# could never kill it.
+start_provider() {
+  rm -f "$PROV/port" "$PROV/port.tmp"
+  MOCK_RESPONSES="$PROV/tl_replies.json" \
+  MOCK_PROVIDER_PORT_FILE="$PROV/port" \
+  MOCK_PROVIDER_PID_FILE="$PROV/pids" \
+    python3 "$MOCK_PROVIDER" >"$PROV/tl_prov.log" 2>&1 &
+  local pid=$!
+  PROVIDER_PID="$pid"
+  local i port
+  for i in $(seq 1 200); do
+    if [ -s "$PROV/port" ]; then
+      port=$(tr -cd '0-9' < "$PROV/port")
+      if [ -n "$port" ] && (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
+        PROVIDER_PORT="$port"
+        return 0
+      fi
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+      return 1
     fi
     sleep 0.1
   done
   return 1
+}
+
+stop_provider() {
+  [ -n "$PROVIDER_PID" ] || return 0
+  kill "$PROVIDER_PID" 2>/dev/null || true
+  wait "$PROVIDER_PID" 2>/dev/null || true
+  PROVIDER_PID=""
+}
+
+# Prints the PID of every provider this harness started that is still
+# alive. The PIDs come from the providers' own records, not from a
+# process search: a search would also match providers belonging to
+# another run, and it would not know which processes this run started.
+leaked_providers() {
+  local pid
+  [ -f "$PROV/pids" ] || return 0
+  while read -r pid; do
+    [ -n "$pid" ] || continue
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "$pid"
+    fi
+  done < "$PROV/pids"
+}
+
+# Fails the suite if any provider outlived its case.
+check_no_leaked_providers() {
+  local leaked
+  leaked=$(leaked_providers)
+  if [ -n "$leaked" ]; then
+    echo "LEAKED PROVIDERS (still alive after their case): $leaked"
+    return 1
+  fi
+  return 0
+}
+
+# The EXIT trap. It stops the provider that is still running, checks
+# that nothing leaked, and keeps the suite's exit status unless a leak
+# was found.
+on_exit() {
+  local status=$?
+  stop_provider
+  if ! check_no_leaked_providers; then
+    status=1
+  fi
+  local dir
+  for dir in "$WORK" "$PROV" "$OUTSIDE" "$ABS_OUT" "$SPECIAL_DIR"; do
+    [ -n "$dir" ] && rm -rf "$dir"
+  done
+  exit $status
+}
+
+# Prints the provider log under a failing case. Without it, "the provider
+# was never reachable" and "the provider was reached but never answered"
+# are indistinguishable from the outside, which is how a provider-side
+# failure once hid behind a wall of 30 s connect timeouts.
+dump_provider_log() {
+  echo "      | --- mock provider log ---"
+  sed 's/^/      | /' "$PROV/tl_prov.log" 2>/dev/null | head -30
+}
+
+# Reports a provider that never came up, and counts the case failed.
+provider_failed() {
+  local name="$1"
+  echo "FAIL  $name (mock provider never accepted a connection)"
+  dump_provider_log
+  stop_provider
+  FAILURES=$((FAILURES + 1))
 }
 
 run_case() {
@@ -66,30 +206,62 @@ run_case() {
   local tool_timeout="${TOOL_TIMEOUT_SEC:-}"
   CASES=$((CASES + 1))
   printf '%s' "$replies" > "$PROV/tl_replies.json"
-  MOCK_RESPONSES="$PROV/tl_replies.json" \
-    python3 "$MOCK_PROVIDER" "$PORT" >"$PROV/tl_prov.log" 2>&1 &
-  local ppid=$!
-  sleep 1
+  local case_started_ms provider_ready_ms
+  case_started_ms=$(now_ms)
+  harness_trace "provider starting" "$name"
+  if ! start_provider; then
+    provider_failed "$name"
+    return
+  fi
+  provider_ready_ms=$(now_ms)
+  harness_trace "provider ready" "$name"
   local stdin_lines actual
   stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
+  harness_trace "case start" "$name"
+  harness_trace "agent started" "$name"
+  local agent_started_ms agent_ended_ms
+  agent_started_ms=$(now_ms)
   local -a env_args=(
     AGENTWARE_TOOL_CALL_LOOP=1
     TEST_MODE=1
-    "TEST_OLLAMA_URL=http://127.0.0.1:${PORT}/api/chat"
+    no_proxy=127.0.0.1,localhost
+    NO_PROXY=127.0.0.1,localhost
+    # The agent appends the endpoint path to this variable itself, so
+    # this is a BASE url. Passing the full endpoint here produced the
+    # doubled path /api/chat/api/chat, which the mock answered anyway
+    # because it serves any POST path.
+    "TEST_OLLAMA_URL=http://127.0.0.1:${PROVIDER_PORT}"
+    # A stalled case must cost seconds, not the 30 s network default.
+    "AGENTWARE_NET_TIMEOUT_SEC=${NET_TIMEOUT_SEC:-5}"
   )
   if [ -n "$tool_timeout" ]; then
     env_args+=("AGENTWARE_TOOL_TIMEOUT_SEC=$tool_timeout")
   fi
+  if [ "$CASES" -eq 1 ]; then
+    env_args+=("AGENTWARE_STARTUP_TRACE=$STARTUP_TRACE")
+  fi
+  if [ "$CASES" -eq 1 ]; then
+    # Brackets the whole process, including the exec and anything that
+    # happens before main. The trace inside the agent cannot see that.
+    SPAWNED_AT=$(date '+%H:%M:%S')
+  fi
   actual=$(printf '%b' "$stdin_lines" | \
     env "${env_args[@]}" "$BIN" 2>&1 |
     perl -pe 's/\e\[[0-9;]*[mK]//g')
-  kill $ppid 2>/dev/null || true
-  wait $ppid 2>/dev/null || true
+  if [ "$CASES" -eq 1 ]; then
+    FINISHED_AT=$(date '+%H:%M:%S')
+  fi
+  agent_ended_ms=$(now_ms)
+  harness_trace "agent exited" "$name"
+  stop_provider
+  harness_trace "provider stopped" "$name"
+  harness_trace "timing: provider=$(( provider_ready_ms - case_started_ms ))ms agent=$(( agent_ended_ms - agent_started_ms ))ms" "$name"
   if echo "$actual" | grep -qF "$expect"; then
     echo "PASS  $name"
   else
     echo "FAIL  $name (expected '$expect')"
     echo "$actual" | sed 's/^/      | /' | head -14
+    dump_provider_log
     FAILURES=$((FAILURES + 1))
   fi
 }
@@ -101,37 +273,50 @@ expect_refused() {
   local name="$1" replies="$2" input="$3" success="$4" extra="${5:-}"
   CASES=$((CASES + 1))
   printf '%s' "$replies" > "$PROV/tl_replies.json"
-  MOCK_RESPONSES="$PROV/tl_replies.json" \
-    python3 "$MOCK_PROVIDER" "$PORT" >"$PROV/tl_prov.log" 2>&1 &
-  local ppid=$!
-  provider_ready "$PORT" || {
-    echo "FAIL  $name (mock provider never accepted a connection on port $PORT)"
-    sed 's/^/      | /' "$PROV/tl_prov.log" | head -10
-    kill "$ppid" 2>/dev/null || true
-    wait "$ppid" 2>/dev/null || true
-    FAILURES=$((FAILURES + 1))
+  local case_started_ms provider_ready_ms
+  case_started_ms=$(now_ms)
+  harness_trace "provider starting" "$name"
+  if ! start_provider; then
+    provider_failed "$name"
     return
-  }
+  fi
+  provider_ready_ms=$(now_ms)
+  harness_trace "provider ready" "$name"
   local stdin_lines actual
   stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
+  harness_trace "case start" "$name"
+  harness_trace "agent started" "$name"
+  local agent_started_ms agent_ended_ms
+  agent_started_ms=$(now_ms)
+  TRACE_ENV=""
+  if [ "$CASES" -eq 1 ]; then
+    TRACE_ENV="AGENTWARE_STARTUP_TRACE=$STARTUP_TRACE"
+  fi
   actual=$(printf '%b' "$stdin_lines" | \
     AGENTWARE_TOOL_CALL_LOOP=1 \
     TEST_MODE=1 \
     no_proxy=127.0.0.1,localhost \
     NO_PROXY=127.0.0.1,localhost \
-    TEST_OLLAMA_URL="http://127.0.0.1:${PORT}/api/chat" \
+    TEST_OLLAMA_URL="http://127.0.0.1:${PROVIDER_PORT}" \
+    AGENTWARE_NET_TIMEOUT_SEC="${NET_TIMEOUT_SEC:-5}" \
+    ${TRACE_ENV:-} \
     "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
-  kill $ppid 2>/dev/null || true
-  wait $ppid 2>/dev/null || true
+  agent_ended_ms=$(now_ms)
+  harness_trace "agent exited" "$name"
+  stop_provider
+  harness_trace "provider stopped" "$name"
+  harness_trace "timing: provider=$(( provider_ready_ms - case_started_ms ))ms agent=$(( agent_ended_ms - agent_started_ms ))ms" "$name"
   local refused=0
   echo "$actual" | grep -qE "unknown tool |not available in read-only mode|not available on the model surface|consent denied: no TTY" && refused=1
   if [ "$refused" -eq 0 ]; then
     echo "FAIL  $name (no refusal marker in output)"
     echo "$actual" | sed 's/^/      | /' | head -14
+    dump_provider_log
     FAILURES=$((FAILURES + 1))
   elif echo "$actual" | grep -qF "$success"; then
     echo "FAIL  $name (executed: found '$success')"
     echo "$actual" | sed 's/^/      | /' | head -14
+    dump_provider_log
     FAILURES=$((FAILURES + 1))
   else
     echo "PASS  $name"
@@ -143,31 +328,43 @@ expect_no() {
   local name="$1" replies="$2" input="$3" absent="$4" extra="${5:-}"
   CASES=$((CASES + 1))
   printf '%s' "$replies" > "$PROV/tl_replies.json"
-  MOCK_RESPONSES="$PROV/tl_replies.json" \
-    python3 "$MOCK_PROVIDER" "$PORT" >"$PROV/tl_prov.log" 2>&1 &
-  local ppid=$!
-  provider_ready "$PORT" || {
-    echo "FAIL  $name (mock provider never accepted a connection on port $PORT)"
-    sed 's/^/      | /' "$PROV/tl_prov.log" | head -10
-    kill "$ppid" 2>/dev/null || true
-    wait "$ppid" 2>/dev/null || true
-    FAILURES=$((FAILURES + 1))
+  local case_started_ms provider_ready_ms
+  case_started_ms=$(now_ms)
+  harness_trace "provider starting" "$name"
+  if ! start_provider; then
+    provider_failed "$name"
     return
-  }
+  fi
+  provider_ready_ms=$(now_ms)
+  harness_trace "provider ready" "$name"
   local stdin_lines actual
   stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
+  harness_trace "case start" "$name"
+  harness_trace "agent started" "$name"
+  local agent_started_ms agent_ended_ms
+  agent_started_ms=$(now_ms)
+  TRACE_ENV=""
+  if [ "$CASES" -eq 1 ]; then
+    TRACE_ENV="AGENTWARE_STARTUP_TRACE=$STARTUP_TRACE"
+  fi
   actual=$(printf '%b' "$stdin_lines" | \
     AGENTWARE_TOOL_CALL_LOOP=1 \
     TEST_MODE=1 \
     no_proxy=127.0.0.1,localhost \
     NO_PROXY=127.0.0.1,localhost \
-    TEST_OLLAMA_URL="http://127.0.0.1:${PORT}/api/chat" \
+    TEST_OLLAMA_URL="http://127.0.0.1:${PROVIDER_PORT}" \
+    AGENTWARE_NET_TIMEOUT_SEC="${NET_TIMEOUT_SEC:-5}" \
+    ${TRACE_ENV:-} \
     "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
-  kill $ppid 2>/dev/null || true
-  wait $ppid 2>/dev/null || true
+  agent_ended_ms=$(now_ms)
+  harness_trace "agent exited" "$name"
+  stop_provider
+  harness_trace "provider stopped" "$name"
+  harness_trace "timing: provider=$(( provider_ready_ms - case_started_ms ))ms agent=$(( agent_ended_ms - agent_started_ms ))ms" "$name"
   if echo "$actual" | grep -qF "$absent"; then
     echo "FAIL  $name (unexpected '$absent')"
     echo "$actual" | sed 's/^/      | /' | head -14
+    dump_provider_log
     FAILURES=$((FAILURES + 1))
   else
     echo "PASS  $name"
@@ -315,9 +512,31 @@ run_case "nested-arguments" \
   "grep for needle" "hello.txt"
 
 # 20. A closing brace inside a string value must not end the object.
+#     The pattern it carries, "needle}", is not a valid regular
+#     expression, so the search reports that instead of running. The case
+#     still proves the parse: the pattern arrives whole, and the error
+#     names it.
 run_case "brace-inside-string" \
   '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"needle}\",\"directory\":\".\"}}","Done."]' \
-  "grep for needle}" "brace.txt"
+  "grep for needle}" "invalid search pattern"
+
+# 20b. An unbalanced parenthesis is rejected the same way.
+run_case "invalid-pattern-unmatched-paren" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"needle(\",\"directory\":\".\"}}","Done."]' \
+  "grep for needle(" "invalid search pattern"
+
+# 20d. A pattern that passes the dialect check but that no regex engine
+#      accepts (an invalid quantifier range) is an error, not an empty
+#      result.
+run_case "invalid-pattern-quantifier" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"a{2,1}\",\"directory\":\".\"}}","Done."]' \
+  "grep for a{2,1}" "invalid search pattern"
+
+# 20c. A brace that is part of a valid quantifier is still a valid
+#      pattern, and the search runs.
+run_case "brace-valid-quantifier" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"needle{1}\",\"directory\":\".\"}}","Done."]' \
+  "grep for needle{1}" "hello.txt"
 
 # 21. Escaped quotes inside a string value must not end the object.
 run_case "escaped-quotes" \
@@ -569,5 +788,41 @@ print(json.dumps([json.dumps({'tool': 'fetch',
 run_case "fetch-file-url-refused" "$fetch_url" "fetch a file url" \
   "consent denied: no TTY"
 
+# No provider may outlive its case. This runs before the EXIT trap, and
+# the trap runs the same check again, so a leak is reported on both the
+# normal path and the interrupted one.
+if ! check_no_leaked_providers; then
+  FAILURES=$((FAILURES + 1))
+fi
+
+if [ -s "$HARNESS_TRACE" ]; then
+  echo ""
+  echo "--- harness trace (first 40 lines) ---"
+  sed 's/^/      | /' "$HARNESS_TRACE" | head -40
+  echo "--- harness timing, aggregate ---"
+  grep -oE "provider=[0-9]+ms agent=[0-9]+ms" "$HARNESS_TRACE" | \
+    sed 's/provider=//; s/ms agent=/ /; s/ms//' | \
+    awk '{p[NR]=$1/1000; a[NR]=$2/1000; sp+=$1/1000; sa+=$2/1000}
+         END {
+           if (NR==0) {print "      no timings"; exit}
+           n=NR
+           for (i=1;i<=n;i++) {pp[i]=p[i]; aa[i]=a[i]}
+           for (i=1;i<=n;i++) for (j=i+1;j<=n;j++) {
+             if (pp[j]<pp[i]) {t=pp[i]; pp[i]=pp[j]; pp[j]=t}
+             if (aa[j]<aa[i]) {t=aa[i]; aa[i]=aa[j]; aa[j]=t}
+           }
+           printf "      cases=%d  provider wait: mean %.2fs median %.2fs max %.2fs\n", n, sp/n, pp[int((n+1)/2)], pp[n]
+           printf "      cases=%d  agent time:   mean %.2fs median %.2fs max %.2fs\n", n, sa/n, aa[int((n+1)/2)], aa[n]
+         }'
+fi
+
+if [ -s "$STARTUP_TRACE" ]; then
+  echo ""
+  echo "--- startup trace (first case) ---"
+  echo "      | agent spawned at ${SPAWNED_AT}, finished at ${FINISHED_AT}"
+  sed 's/^/      | /' "$STARTUP_TRACE"
+fi
+
 printf '\n%d/%d tool-loop golden cases passed\n' "$((CASES - FAILURES))" "$CASES"
+
 if [ "$FAILURES" -ne 0 ]; then exit 1; fi
