@@ -108,7 +108,14 @@ void Agent::run() {
   // The flags live on the Agent for the whole session; every search and every
   // system prompt reads them instead of re-detecting or assuming.
   search_caps_ = Services::detect_search_capabilities();
-  Utils::startup_trace("agent: search capabilities detected");
+  // Which search backend the host has matters: the ripgrep path takes
+  // the pattern as a regex, the native fallback compiles it with
+  // std::regex and silently finds nothing for a pattern that std::regex
+  // rejects.
+  Utils::startup_trace(std::string("agent: search capabilities detected (") +
+                       "ripgrep=" + (search_caps_.has_ripgrep ? "yes" : "no") +
+                       ", fd=" + (search_caps_.has_fd ? "yes" : "no") +
+                       ", git=" + (search_caps_.has_git ? "yes" : "no") + ")");
 
   initialize_mode();
   Utils::startup_trace("agent: mode and model chosen");
