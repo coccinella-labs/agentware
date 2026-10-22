@@ -162,7 +162,8 @@ jobs:
 
   todo-management:
     if: >
-      github.event_name == 'issues' && contains(github.event.issue.body, 'TODO')
+      github.event_name == 'issues' && github.event.action == 'opened'
+      && contains(github.event.issue.body, 'TODO')
       && github.repository_owner == 'coccinella-labs'
     runs-on: ubuntu-latest
     steps:
