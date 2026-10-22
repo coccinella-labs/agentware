@@ -135,7 +135,7 @@ the Actions tab.
 cmake --build build --target test
 ```
 
-`ctest` runs four targets:
+`ctest` runs these targets:
 
 - **`basic_tests`**: Google Test suite with 130 cases across 42 suites. Covers
   command dispatch and redaction, file-access policy, project-root discovery,
@@ -154,6 +154,11 @@ cmake --build build --target test
   Verifies JSON parsing, turn caps, mutating tool refusals, model-disabled
   commands, path containment, secrets protection, variant sweeps, and consent
   denials.
+- **`provider_readiness`**: The wait the suite above uses to decide that a mock
+  provider is up. Pins prompt readiness, that the server does not resolve its
+  own bind address, that a bind error is still a bind error, and that a
+  provider which genuinely fails to start fails fast with a reason instead of
+  spending a deadline in silence.
 
 ### Sandbox Tests
 

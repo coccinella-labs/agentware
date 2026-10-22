@@ -688,6 +688,13 @@ add_test(NAME routing_golden
 add_test(NAME tool_loop_golden
   COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/run_tool_loop_golden.sh"
     "$<TARGET_FILE:agentware-agent>")
+# The readiness wait decides whether the provider is up before any case
+# runs, and it is where a provider that came up late used to be reported as
+# an unexplained failure. It is tested on its own: a healthy provider must
+# be ready promptly, a bind error must still be a bind error, and a provider
+# that genuinely fails must fail fast and say why.
+add_test(NAME provider_readiness
+  COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/provider_readiness_test.sh")
 
 # Set target properties for test executable
 set_target_properties(agentware-tests PROPERTIES

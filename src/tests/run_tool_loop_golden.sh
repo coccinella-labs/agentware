@@ -12,7 +12,12 @@ set -u
 
 BIN="${1:?usage: run_tool_loop_golden.sh <agentware-agent binary>}"
 BIN="$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")"
-MOCK_PROVIDER="${MOCK_PROVIDER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mock_tool_provider.py}"
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MOCK_PROVIDER="${MOCK_PROVIDER:-${TESTS_DIR}/mock_tool_provider.py}"
+# The readiness wait is shared with its regression test, so the code the
+# suite relies on is the code the test exercises.
+# shellcheck source=provider_readiness.sh
+. "${TESTS_DIR}/provider_readiness.sh"
 # Scratch directories the script creates. They are declared up front
 # because the EXIT trap removes them, and an interrupt can arrive
 # before the later ones are assigned: under 'set -u' an unset variable
@@ -97,11 +102,12 @@ harness_trace "fixtures created"
 
 # Starts the mock provider and waits until it is actually serving.
 #
-# The provider takes an OS-assigned port and writes it to $PROV/port, so
-# two runs can never collide on a fixed port. The wait proves the port
-# accepts a connection before the agent is started: a provider that never
-# came up has to show up as a provider failure, not as an unrelated
-# timeout inside the binary.
+# The provider waits for a port file that the provider itself writes after
+# it binds, so the file's existence means the socket is listening, not that
+# a wall clock elapsed. The wait is bounded by PROVIDER_READY_SEC, in
+# seconds: a hang has to show up as a provider failure with a reason, not as
+# an unrelated timeout inside the binary, and it must not cost more than
+# that bound per case.
 #
 # Sets PROVIDER_PORT and PROVIDER_PID as globals and returns 0, or
 # returns 1 if the provider never came up. It is called directly, never
@@ -115,23 +121,12 @@ start_provider() {
   MOCK_PROVIDER_PORT_FILE="$PROV/port" \
   MOCK_PROVIDER_PID_FILE="$PROV/pids" \
     python3 "$MOCK_PROVIDER" >"$PROV/tl_prov.log" 2>&1 &
-  local pid=$!
-  PROVIDER_PID="$pid"
-  local i port
-  for i in $(seq 1 200); do
-    if [ -s "$PROV/port" ]; then
-      port=$(tr -cd '0-9' < "$PROV/port")
-      if [ -n "$port" ] && (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
-        PROVIDER_PORT="$port"
-        return 0
-      fi
-    fi
-    if ! kill -0 "$pid" 2>/dev/null; then
-      return 1
-    fi
-    sleep 0.1
-  done
-  return 1
+  PROVIDER_PID=$!
+  if ! wait_for_provider "$PROVIDER_PID" "$PROV/port" "${PROVIDER_READY_SEC:-10}"; then
+    return 1
+  fi
+  PROVIDER_PORT="$WAIT_PORT"
+  return 0
 }
 
 stop_provider() {
@@ -193,12 +188,25 @@ dump_provider_log() {
 }
 
 # Reports a provider that never came up, and counts the case failed.
+# The reason and the provider's own state are printed, because "never
+# accepted a connection" alone cannot distinguish a dead process, a slow
+# start, a port that nothing listens on, and a resolver stall.
+#
+# If this happens on the first case, later cases cannot be meaningful: they
+# would repeat the same diagnosis 133 times and cost the deadline each. The
+# suite stops instead.
 provider_failed() {
   local name="$1"
-  echo "FAIL  $name (mock provider never accepted a connection)"
-  dump_provider_log
+  echo "FAIL  $name (mock provider did not come up)"
+  describe_provider_failure "$PROVIDER_PID" "$PROV/port" "$PROV/tl_prov.log"
   stop_provider
   FAILURES=$((FAILURES + 1))
+  if [ "$CASES" -eq 1 ]; then
+    echo
+    echo "The provider could not start for the first case, so the rest of"
+    echo "this suite cannot be meaningful. Stopping after one case."
+    exit 1
+  fi
 }
 
 run_case() {
