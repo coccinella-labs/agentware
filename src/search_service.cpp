@@ -170,7 +170,8 @@ std::string run_capture(const std::string &command, std::size_t max_bytes,
       break;
     }
   }
-  const int exit_status = Utils::Platform::close_process(pipe);
+  const int exit_status =
+      Utils::Platform::process_exit_code(Utils::Platform::close_process(pipe));
   if (status != nullptr)
     *status = exit_status;
   return output;
