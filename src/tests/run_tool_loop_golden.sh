@@ -51,9 +51,38 @@ PROVIDER_PID=""
 # startup, and it is printed at the end of the suite because the scratch
 # directory is removed by the EXIT trap.
 STARTUP_TRACE="$PROV/startup_trace.log"
+
+# Harness trace. The agent's own trace says what the agent did; this one
+# says what the harness did around it, so the two can be told apart. A
+# case that takes 35 s is only interesting if it is known which half of
+# that time was the harness waiting for the provider and which was the
+# agent not making its first request.
+HARNESS_TRACE="$PROV/harness_trace.log"
+
+# Milliseconds since the epoch. macOS bash 3.2 has no EPOCHREALTIME and
+# its date has no %N, so perl does the work; perl is already needed by
+# this harness.
+now_ms() {
+    perl -MTime::HiRes -e 'printf "%.0f", Time::HiRes::time() * 1000'
+}
+
+# One line of harness trace: the time since the harness started, the
+# step, and the case it belongs to.
+harness_trace() {
+    local step="$1" case_name="${2:-}"
+    local elapsed
+    elapsed=$(( $(now_ms) - HARNESS_START_MS ))
+    printf '%s  harness: +%8dms  %s%s\n' \
+        "$(date '+%H:%M:%S')" "$elapsed" "$step" \
+        "${case_name:+ (${case_name})}" >> "$HARNESS_TRACE"
+}
+
+HARNESS_START_MS=$(now_ms)
 # Wall-clock bracket of the first case, filled in while the case runs.
 SPAWNED_AT=""
 FINISHED_AT=""
+
+harness_trace "workspace created"
 
 # Fixtures: a tiny tree so tool output is small and stable.
 printf 'golden needle alpha\nsecond line\n' > hello.txt
@@ -64,6 +93,7 @@ mkdir -p tl_fixture
 printf 'one\n' > tl_fixture/one.txt
 printf 'two\n' > tl_fixture/two.txt
 printf 'needle} say "hi"\n' > tl_fixture/brace.txt
+harness_trace "fixtures created"
 
 # Starts the mock provider and waits until it is actually serving.
 #
@@ -176,12 +206,21 @@ run_case() {
   local tool_timeout="${TOOL_TIMEOUT_SEC:-}"
   CASES=$((CASES + 1))
   printf '%s' "$replies" > "$PROV/tl_replies.json"
+  local case_started_ms provider_ready_ms
+  case_started_ms=$(now_ms)
+  harness_trace "provider starting" "$name"
   if ! start_provider; then
     provider_failed "$name"
     return
   fi
+  provider_ready_ms=$(now_ms)
+  harness_trace "provider ready" "$name"
   local stdin_lines actual
   stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
+  harness_trace "case start" "$name"
+  harness_trace "agent started" "$name"
+  local agent_started_ms agent_ended_ms
+  agent_started_ms=$(now_ms)
   local -a env_args=(
     AGENTWARE_TOOL_CALL_LOOP=1
     TEST_MODE=1
@@ -212,7 +251,11 @@ run_case() {
   if [ "$CASES" -eq 1 ]; then
     FINISHED_AT=$(date '+%H:%M:%S')
   fi
+  agent_ended_ms=$(now_ms)
+  harness_trace "agent exited" "$name"
   stop_provider
+  harness_trace "provider stopped" "$name"
+  harness_trace "timing: provider=$(( provider_ready_ms - case_started_ms ))ms agent=$(( agent_ended_ms - agent_started_ms ))ms" "$name"
   if echo "$actual" | grep -qF "$expect"; then
     echo "PASS  $name"
   else
@@ -230,12 +273,21 @@ expect_refused() {
   local name="$1" replies="$2" input="$3" success="$4" extra="${5:-}"
   CASES=$((CASES + 1))
   printf '%s' "$replies" > "$PROV/tl_replies.json"
+  local case_started_ms provider_ready_ms
+  case_started_ms=$(now_ms)
+  harness_trace "provider starting" "$name"
   if ! start_provider; then
     provider_failed "$name"
     return
   fi
+  provider_ready_ms=$(now_ms)
+  harness_trace "provider ready" "$name"
   local stdin_lines actual
   stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
+  harness_trace "case start" "$name"
+  harness_trace "agent started" "$name"
+  local agent_started_ms agent_ended_ms
+  agent_started_ms=$(now_ms)
   TRACE_ENV=""
   if [ "$CASES" -eq 1 ]; then
     TRACE_ENV="AGENTWARE_STARTUP_TRACE=$STARTUP_TRACE"
@@ -249,7 +301,11 @@ expect_refused() {
     AGENTWARE_NET_TIMEOUT_SEC="${NET_TIMEOUT_SEC:-5}" \
     ${TRACE_ENV:-} \
     "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
+  agent_ended_ms=$(now_ms)
+  harness_trace "agent exited" "$name"
   stop_provider
+  harness_trace "provider stopped" "$name"
+  harness_trace "timing: provider=$(( provider_ready_ms - case_started_ms ))ms agent=$(( agent_ended_ms - agent_started_ms ))ms" "$name"
   local refused=0
   echo "$actual" | grep -qE "unknown tool |not available in read-only mode|not available on the model surface|consent denied: no TTY" && refused=1
   if [ "$refused" -eq 0 ]; then
@@ -272,12 +328,21 @@ expect_no() {
   local name="$1" replies="$2" input="$3" absent="$4" extra="${5:-}"
   CASES=$((CASES + 1))
   printf '%s' "$replies" > "$PROV/tl_replies.json"
+  local case_started_ms provider_ready_ms
+  case_started_ms=$(now_ms)
+  harness_trace "provider starting" "$name"
   if ! start_provider; then
     provider_failed "$name"
     return
   fi
+  provider_ready_ms=$(now_ms)
+  harness_trace "provider ready" "$name"
   local stdin_lines actual
   stdin_lines=$(printf '2\n1\n%s\n%s\nquit\n' "$input" "$extra")
+  harness_trace "case start" "$name"
+  harness_trace "agent started" "$name"
+  local agent_started_ms agent_ended_ms
+  agent_started_ms=$(now_ms)
   TRACE_ENV=""
   if [ "$CASES" -eq 1 ]; then
     TRACE_ENV="AGENTWARE_STARTUP_TRACE=$STARTUP_TRACE"
@@ -291,7 +356,11 @@ expect_no() {
     AGENTWARE_NET_TIMEOUT_SEC="${NET_TIMEOUT_SEC:-5}" \
     ${TRACE_ENV:-} \
     "$BIN" 2>&1 | perl -pe 's/\e\[[0-9;]*[mK]//g')
+  agent_ended_ms=$(now_ms)
+  harness_trace "agent exited" "$name"
   stop_provider
+  harness_trace "provider stopped" "$name"
+  harness_trace "timing: provider=$(( provider_ready_ms - case_started_ms ))ms agent=$(( agent_ended_ms - agent_started_ms ))ms" "$name"
   if echo "$actual" | grep -qF "$absent"; then
     echo "FAIL  $name (unexpected '$absent')"
     echo "$actual" | sed 's/^/      | /' | head -14
@@ -702,6 +771,27 @@ run_case "fetch-file-url-refused" "$fetch_url" "fetch a file url" \
 # normal path and the interrupted one.
 if ! check_no_leaked_providers; then
   FAILURES=$((FAILURES + 1))
+fi
+
+if [ -s "$HARNESS_TRACE" ]; then
+  echo ""
+  echo "--- harness trace (first 40 lines) ---"
+  sed 's/^/      | /' "$HARNESS_TRACE" | head -40
+  echo "--- harness timing, aggregate ---"
+  grep -oE "provider=[0-9]+ms agent=[0-9]+ms" "$HARNESS_TRACE" | \
+    sed 's/provider=//; s/ms agent=/ /; s/ms//' | \
+    awk '{p[NR]=$1/1000; a[NR]=$2/1000; sp+=$1/1000; sa+=$2/1000}
+         END {
+           if (NR==0) {print "      no timings"; exit}
+           n=NR
+           for (i=1;i<=n;i++) {pp[i]=p[i]; aa[i]=a[i]}
+           for (i=1;i<=n;i++) for (j=i+1;j<=n;j++) {
+             if (pp[j]<pp[i]) {t=pp[i]; pp[i]=pp[j]; pp[j]=t}
+             if (aa[j]<aa[i]) {t=aa[i]; aa[i]=aa[j]; aa[j]=t}
+           }
+           printf "      cases=%d  provider wait: mean %.2fs median %.2fs max %.2fs\n", n, sp/n, pp[int((n+1)/2)], pp[n]
+           printf "      cases=%d  agent time:   mean %.2fs median %.2fs max %.2fs\n", n, sa/n, aa[int((n+1)/2)], aa[n]
+         }'
 fi
 
 if [ -s "$STARTUP_TRACE" ]; then
