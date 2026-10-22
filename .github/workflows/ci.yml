@@ -172,6 +172,17 @@ jobs:
               build/bin/agentware-agent
           fi
 
+      - name: remediation probes
+        shell: bash
+        run: |
+          # The probes assert real output markers for the command
+          # surface and the path policy, which no other suite covers.
+          # They run on Linux only: they are a bash harness and the
+          # slowest of the suites.
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            ctest --test-dir build --output-on-failure -R remediation_probes
+          fi
+
       - name: grep goldens without ripgrep
         if: runner.os == 'Linux'
         shell: bash
