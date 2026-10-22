@@ -262,11 +262,14 @@ CodeSearchResult search_code(const SearchCapabilities &caps,
         run_capture(command, options.max_bytes, truncated, &backend_status);
     result.truncated = truncated;
     // ripgrep exits 0 when it found something, 1 when it found nothing
-    // and 2 when it could not run the search at all. Only the last is a
-    // failure: a pattern ripgrep rejects (a backreference, for example)
-    // must not turn into an empty result. Its error text goes to stderr,
-    // so the exit status is all there is to go on.
-    if (!truncated && backend_status > 1) {
+    // and 2 when it could not run the search at all. Only a status that
+    // is neither 0 nor 1 is a failure: a pattern ripgrep rejects (a
+    // backreference, for example) must not turn into an empty result,
+    // and neither must a backend that died. Its error text goes to
+    // stderr, so the exit status is all there is to go on. A backend
+    // that was killed by a signal decodes to -1, and a Windows backend
+    // that crashed has a negative exit code; both are failures.
+    if (!truncated && backend_status != 0 && backend_status != 1) {
       result.error =
           "the search backend (ripgrep) could not run this search (exit "
           "status " +
