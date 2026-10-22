@@ -139,7 +139,9 @@ jobs:
               sleep 0.1
             done
             t1=$(now)
-            echo "- 200 iterations: $(awk "BEGIN{printf \"%.3f\", $t1-$t0}")s ($(awk "BEGIN{printf \"%.3f\", ($t1-$t0)/200}")s per iteration)"
+            total=$(awk "BEGIN{printf \"%.3f\", $t1-$t0}")
+            each=$(awk "BEGIN{printf \"%.3f\", ($t1-$t0)/200}")
+            echo "- 200 iterations: ${total}s (${each}s per iteration)"
             rm -rf "$PROV2"
           } | tee -a "$SUMMARY"
 
