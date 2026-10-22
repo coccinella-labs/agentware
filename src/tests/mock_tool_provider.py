@@ -29,6 +29,7 @@ Usage:
 import http.server
 import json
 import os
+import socketserver
 import sys
 import threading
 import time
@@ -158,6 +159,23 @@ class Server(http.server.ThreadingHTTPServer):
     # dropped, so a slow client cannot turn into a connect timeout for
     # the next one.
     request_queue_size = 128
+
+    def server_bind(self):
+        # http.server.HTTPServer.server_bind resolves the address it has
+        # just bound to with socket.getfqdn(): a reverse DNS lookup, done
+        # before this constructor returns and therefore before the port
+        # file is written. For a loopback-only test fixture that lookup
+        # answers no question, and on a host whose resolver does not answer
+        # it blocks for the resolver's timeout. The harness then sees a
+        # provider that never published a port, pays the stall once per
+        # case, and reports a provider failure that looks like a bug in the
+        # binary. Bind through TCPServer.server_bind, which raises exactly
+        # as before when the port is taken or the address is unusable; only
+        # the name lookup is dropped.
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
 
 
 def main():
