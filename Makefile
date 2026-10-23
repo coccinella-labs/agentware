@@ -121,12 +121,15 @@ lint-all:
 # Run clang-tidy on source files
 clang-tidy: build
 	@echo "Running clang-tidy on source files..."
-	@if [ -f "build/compile_commands.json" ]; then \
-		CLANG_TIDY_EXTRA_ARGS="--extra-arg=-isystem/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1 --extra-arg=-isystem/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include --system-headers=0"; \
-		find src -name "*.cpp" -exec clang-tidy {} -p build $$CLANG_TIDY_EXTRA_ARGS \; ; \
-	else \
-		echo "Error: compile_commands.json not found. Run cmake with -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"; \
+	@if ! command -v clang-tidy >/dev/null 2>&1; then \
+		echo "Error: clang-tidy not found. Install clang-tidy to run this target."; \
+		exit 1; \
 	fi
+	@if [ ! -f "build/compile_commands.json" ]; then \
+		echo "Error: build/compile_commands.json not found."; \
+		exit 1; \
+	fi
+	@find src -name "*.cpp" -print0 | xargs -0 clang-tidy -p build
 
 # Show help
 help:
