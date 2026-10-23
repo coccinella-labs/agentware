@@ -104,7 +104,7 @@ if(AGENTWARE_USE_XOI_OLLAMA)
     FetchContent_Declare(
         agentware_xoi
         GIT_REPOSITORY https://github.com/coccinella-labs/xoi.git
-        GIT_TAG 2b7e78e9b4a80b44df6d9f517cebb29dc742d2a4
+        GIT_TAG d04fde073f43d30bdb32813eedb930611658e069
     )
     FetchContent_MakeAvailable(agentware_xoi)
     if(_agentware_build_testing_defined)

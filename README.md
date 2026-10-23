@@ -33,7 +33,7 @@ cmake -S . -B build -DAGENTWARE_USE_XOI_OLLAMA=ON
 
 The option is off by default, so normal builds do not fetch xoi and hosted
 providers are unchanged. The adapter uses xoi commit
-`2b7e78e9b4a80b44df6d9f517cebb29dc742d2a4`. Agentware continues to own its
+`d04fde073f43d30bdb32813eedb930611658e069`. Agentware continues to own its
 prompt, text-based tool loop, permissions, and safety checks. The adapter
 preserves the existing request timeout, disables xoi retries so Agentware owns
 the loop retry budget, bypasses proxies for local Ollama, and leaves
