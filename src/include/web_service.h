@@ -35,6 +35,7 @@ public:
   // via AGENTWARE_NET_TIMEOUT_SEC. Used to scope shorter timeouts to the
   // model path without changing user-typed behavior.
   static long default_network_timeout();
+
 private:
   static std::string extract_text_content(const std::string &html);
   static std::string sanitize_content(const std::string &content);
@@ -52,7 +53,8 @@ public:
                                         const HeaderMap &headers);
   static WebResponse post_json(const std::string &url,
                                const std::string &json_body,
-                               const HeaderMap &headers);
+                               const HeaderMap &headers,
+                               long timeout_seconds = 0);
   static bool is_valid_url(const std::string &url);
 };
 } // namespace Services

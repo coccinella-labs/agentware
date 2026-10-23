@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <limits>
 
 namespace Core {
 
@@ -110,13 +111,21 @@ bool canonicalize_tool_call(const std::string &raw_name,
     from_colon = rest;
   }
   if (canonical == "git:") {
-    from_args = out.args.value("subcommand", out.args.value("action",
-                             out.args.value("command", std::string(""))));
+    for (const char *name : {"subcommand", "action", "command"}) {
+      if (out.args.contains(name) && out.args[name].is_string()) {
+        from_args = out.args[name].get<std::string>();
+        break;
+      }
+    }
   } else if (canonical == "github:") {
     // github:params carries "repo:owner/name" style specs.
-    std::string params = out.args.value(
-        "params", out.args.value("query", out.args.value(
-                          "subcommand", std::string(""))));
+    std::string params;
+    for (const char *name : {"params", "query", "subcommand"}) {
+      if (out.args.contains(name) && out.args[name].is_string()) {
+        params = out.args[name].get<std::string>();
+        break;
+      }
+    }
     size_t c = params.find(':');
     from_args = (c == std::string::npos) ? params : params.substr(0, c);
   }
@@ -130,6 +139,146 @@ bool canonicalize_tool_call(const std::string &raw_name,
   }
   out.subcommand = from_colon.empty() ? from_args : from_colon;
   return true;
+}
+
+std::string validate_model_tool_arguments(const ToolCall &call) {
+  if (!call.subcommand.empty() && call.tool != "git:" && call.tool != "github:")
+    return "this tool does not take a colon-form subcommand";
+
+  auto string_arg = [&call](std::initializer_list<const char *> names,
+                            std::string &value) -> std::string {
+    for (const char *name : names) {
+      if (!call.args.contains(name))
+        continue;
+      if (!call.args[name].is_string())
+        return std::string("argument '") + name + "' must be a string";
+      value = call.args[name].get<std::string>();
+      return "";
+    }
+    value.clear();
+    return "";
+  };
+
+  std::vector<const char *> string_fields;
+  if (call.tool == "search:")
+    string_fields = {"query", "q"};
+  else if (call.tool == "grep:")
+    string_fields = {"pattern", "query",  "directory",  "dir",
+                     "path",    "filter", "file_filter"};
+  else if (call.tool == "read:")
+    string_fields = {"path", "filename", "file"};
+  else if (call.tool == "list:" || call.tool == "tree:" ||
+           call.tool == "components:" || call.tool == "analyze:" ||
+           call.tool == "todos:")
+    string_fields = {"path", "directory", "glob", "pattern"};
+  else if (call.tool == "git:")
+    string_fields = {"path", "directory", "subcommand", "action", "command"};
+  else if (call.tool == "github:")
+    string_fields = {"params", "query", "subcommand"};
+  else if (call.tool == "fetch:")
+    string_fields = {"url", "uri"};
+
+  for (const char *name : string_fields) {
+    if (call.args.contains(name) && !call.args[name].is_string())
+      return std::string("argument '") + name + "' must be a string";
+  }
+
+  if (call.tool == "read:") {
+    for (const char *name :
+         {"start", "start_line", "count", "line_count", "lines"}) {
+      if (call.args.contains(name) && !call.args[name].is_number_integer())
+        return std::string("argument '") + name + "' must be an integer";
+      if (call.args.contains(name)) {
+        const auto &number = call.args[name];
+        if (number.is_number_unsigned()) {
+          if (number.get<uint64_t>() >
+              static_cast<uint64_t>(std::numeric_limits<int>::max()))
+            return std::string("argument '") + name + "' is out of range";
+        } else {
+          const int64_t parsed = number.get<int64_t>();
+          if (parsed < std::numeric_limits<int>::min() ||
+              parsed > std::numeric_limits<int>::max())
+            return std::string("argument '") + name + "' is out of range";
+        }
+      }
+    }
+  }
+
+  std::string value;
+  std::string error;
+  if (call.tool == "search:") {
+    error = string_arg({"query", "q"}, value);
+    if (!error.empty())
+      return error;
+    if (trim_ascii(value).empty())
+      return "a search query is required";
+    if (ascii_lower(trim_ascii(value)).rfind("search:", 0) == 0)
+      return "do not include command syntax in a JSON argument";
+  } else if (call.tool == "grep:") {
+    error = string_arg({"pattern", "query"}, value);
+    if (!error.empty())
+      return error;
+    if (trim_ascii(value).empty())
+      return "a grep pattern is required";
+    const std::string lower_pattern = ascii_lower(trim_ascii(value));
+    if (lower_pattern.rfind("grep:", 0) == 0)
+      return "do not include command syntax in a JSON argument";
+  } else if (call.tool == "read:") {
+    error = string_arg({"path", "filename", "file"}, value);
+    if (!error.empty())
+      return error;
+    if (trim_ascii(value).empty())
+      return "a read path is required";
+  } else if (call.tool == "fetch:") {
+    error = string_arg({"url", "uri"}, value);
+    if (!error.empty())
+      return error;
+    if (trim_ascii(value).empty())
+      return "a fetch URL is required";
+  }
+
+  std::string path;
+  if (call.tool == "read:") {
+    path = call.args.value(
+        "path", call.args.value("filename", call.args.value("file", "")));
+  } else if (call.tool == "list:" || call.tool == "tree:" ||
+             call.tool == "components:" || call.tool == "analyze:" ||
+             call.tool == "todos:" || call.tool == "git:") {
+    error = string_arg({"path", "directory"}, path);
+    if (!error.empty())
+      return error;
+  } else if (call.tool == "grep:") {
+    error = string_arg({"directory", "dir", "path"}, path);
+    if (!error.empty())
+      return error;
+  }
+
+  std::string trimmed_path = trim_ascii(path);
+  std::string lower_path = ascii_lower(trimmed_path);
+  const bool validates_path =
+      call.tool == "read:" || call.tool == "list:" || call.tool == "tree:" ||
+      call.tool == "components:" || call.tool == "analyze:" ||
+      call.tool == "todos:" || call.tool == "git:" || call.tool == "grep:";
+  if (validates_path &&
+      (!path.empty() || call.args.contains("path") ||
+       call.args.contains("directory") || call.args.contains("dir") ||
+       call.args.contains("filename") || call.args.contains("file")) &&
+      trimmed_path.empty())
+    return "path must not be empty";
+  if (lower_path.rfind("error:", 0) == 0 ||
+      lower_path.rfind("path escapes", 0) == 0 ||
+      lower_path.rfind("refused:", 0) == 0 ||
+      lower_path.rfind("cannot resolve", 0) == 0) {
+    return "path contains an error message, not a path";
+  }
+  for (const char *prefix : {"read:", "list:", "grep:", "tree:", "components:",
+                             "analyze:", "search:"}) {
+    if (lower_path.rfind(prefix, 0) == 0) {
+      return "do not include command syntax in a JSON argument";
+    }
+  }
+
+  return "";
 }
 
 // The path a tool call reads, when it has one. Empty when the tool does

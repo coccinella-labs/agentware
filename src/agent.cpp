@@ -1052,7 +1052,9 @@ std::string Agent::extract_tool_call(const std::string &text,
   // Completion signals are not tool calls.
   if (j.contains("done") && j["done"].is_boolean() && j["done"].get<bool>()) {
     std::string summary;
-    if (j.contains("summary") && j["summary"].is_string()) {
+    if (j.contains("answer") && j["answer"].is_string()) {
+      summary = j["answer"].get<std::string>();
+    } else if (j.contains("summary") && j["summary"].is_string()) {
       summary = j["summary"].get<std::string>();
     }
     return summary.empty() ? "done" : "done: " + summary;
@@ -1235,7 +1237,97 @@ void Agent::handle_ai_chat(const std::string &input) {
   int turns = 0;
   int retries = 0;
   constexpr int kRetryBudget = 3;
+  constexpr int kRepeatLimit = 3;
+  int model_request_timeout_sec = 120;
+  if (loop_enabled) {
+    std::string timeout =
+        Utils::Config::get_env_var("AGENTWARE_MODEL_REQUEST_TIMEOUT_SEC", "");
+    if (!timeout.empty()) {
+      try {
+        model_request_timeout_sec = std::stoi(timeout);
+      } catch (...) {
+        model_request_timeout_sec = 120;
+      }
+      if (model_request_timeout_sec < 1)
+        model_request_timeout_sec = 120;
+      if (model_request_timeout_sec > 300)
+        model_request_timeout_sec = 300;
+    }
+  }
+  std::map<std::string, std::string> prior_tool_results;
+  std::map<std::string, int> repeat_counts;
+  std::vector<std::string> executed_tools;
   Core::ToolRunGate tool_gate;
+
+  auto submit_observation =
+      [&](const std::string &message, const Core::ToolCall *call,
+          const std::string &display, bool counts_as_retry,
+          const std::string &stop_message) {
+        const std::string observation = truncate_observation(message);
+        current_input = quote_observation(observation);
+        ++turns;
+        if (counts_as_retry)
+          ++retries;
+        if (call)
+          Utils::UI::print_tool_call(call->tool, display);
+        Utils::UI::print_tool_result(observation);
+        if (counts_as_retry && retries >= kRetryBudget) {
+          Utils::UI::print_warning(stop_message.empty()
+                                       ? "Retry budget (" +
+                                             std::to_string(kRetryBudget) +
+                                             ") exhausted; stopping."
+                                       : stop_message);
+          return false;
+        }
+        if (turns >= cap) {
+          Utils::UI::print_warning("Tool turn cap (" + std::to_string(cap) +
+                                   ") reached; stopping.");
+          return false;
+        }
+        return true;
+      };
+
+  auto teach_refusal = [](const std::string &message) {
+    if (message.find("Path escapes") != std::string::npos ||
+        message.find("Cannot resolve path") != std::string::npos) {
+      return message +
+             "\nTool paths must be relative to the working directory. "
+             "Use . for the working directory itself. Example: "
+             R"({"tool":"list","arguments":{"path":"."}})";
+    }
+    if (message.find("Refused: secrets path") != std::string::npos) {
+      return message +
+             "\nSecrets and credentials are not readable through this "
+             "surface. Choose a non-sensitive file instead.";
+    }
+    if (message.find("command syntax in a JSON argument") !=
+        std::string::npos) {
+      return message +
+             "\nPut the command name in the top-level tool field and pass "
+             "only argument values. Example: "
+             R"({"tool":"grep","arguments":{"pattern":"needle","directory":"."}})";
+    }
+    return message;
+  };
+
+  auto teach_argument_error = [](const std::string &message,
+                                 const Core::ToolCall &call) {
+    if (call.tool == "grep:") {
+      return "Invalid arguments: " + message +
+             ". A pattern is required and command syntax belongs in the "
+             "top-level tool field. Example: " +
+             R"({"tool":"grep","arguments":{"pattern":"needle","directory":"."}})";
+    }
+    if (call.tool == "search:") {
+      return "Invalid arguments: " + message +
+             ". A search query is required. Example: " +
+             R"({"tool":"search","arguments":{"query":"needle"}})";
+    }
+    return "Invalid arguments: " + message +
+           ". Tool paths are relative to the working directory; use . for "
+           "that directory. Example: " +
+           R"({"tool":"list","arguments":{"path":"."}})";
+  };
 
   while (true) {
     std::atomic<bool> done(false);
@@ -1243,7 +1335,9 @@ void Agent::handle_ai_chat(const std::string &input) {
         [&done]() { Utils::UI::spinner(done, "Contemplating..."); });
 
     const auto chat_started = std::chrono::steady_clock::now();
-    std::string response = ai_service_->chat(current_input, full_context);
+    std::string response =
+        ai_service_->chat(current_input, full_context,
+                          loop_enabled ? model_request_timeout_sec : 0);
 
     done = true;
     if (spin.joinable())
@@ -1266,6 +1360,33 @@ void Agent::handle_ai_chat(const std::string &input) {
       break;
     }
 
+    if (response.rfind("Error: model request timeout after ", 0) == 0) {
+      const auto elapsed_ms =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - chat_started)
+              .count();
+      const std::string obs =
+          "The model request timed out after " + std::to_string(elapsed_ms) +
+          " ms (configured request limit " +
+          std::to_string(model_request_timeout_sec) +
+          " s). No assistant response or tool result was received. Continue "
+          "the same task; do not claim a tool ran. Previous request "
+          "context:\n" +
+          quote_observation(current_input) + "\nTransport detail: " + response;
+      Utils::UI::print_warning(
+          "Model request timed out after " + std::to_string(elapsed_ms) +
+          " ms." +
+          (retries + 1 < kRetryBudget
+               ? " Retrying within the loop retry budget."
+               : " Retry budget is exhausted; no final answer was received."));
+      if (!submit_observation(obs, nullptr, "", true,
+                              "Model request timeout retry budget (" +
+                                  std::to_string(kRetryBudget) +
+                                  ") exhausted; no final answer was received."))
+        break;
+      continue;
+    }
+
     // Try to extract a tool call from the assistant reply.
     std::string tool_name;
     nlohmann::json args;
@@ -1278,7 +1399,7 @@ void Agent::handle_ai_chat(const std::string &input) {
                                std::chrono::steady_clock::now() - chat_started)
                                .count());
       Utils::UI::print_turn_status(elapsed);
-      Utils::UI::print_response(response);
+      Utils::UI::print_response("Model answer:\n" + response);
       record_interaction(*memory_, input, response);
       break;
     }
@@ -1295,42 +1416,28 @@ void Agent::handle_ai_chat(const std::string &input) {
                                .count());
       Utils::UI::print_turn_status(elapsed);
       if (!summary.empty()) {
-        Utils::UI::print_response(summary);
+        Utils::UI::print_response("Model answer:\n" + summary);
         record_interaction(*memory_, input, summary);
       } else {
-        Utils::UI::print_response(response);
+        Utils::UI::print_response("Model answer:\n" + response);
         record_interaction(*memory_, input, response);
       }
       break;
     }
     if (parse_result.rfind("needs_user_input: ", 0) == 0) {
       std::string question = parse_result.substr(18);
-      Utils::UI::print_response(question);
+      Utils::UI::print_response("Model question:\n" + question);
       record_interaction(*memory_, input, question);
       break;
     }
 
     if (!parse_result.empty()) {
-      // Malformed tool call: feed the error back as an observation.
       std::string obs = "Error: " + parse_result +
                         "\n"
                         "Available tools: " +
                         Core::ToolRegistry::instance().known_names();
-      obs = truncate_observation(obs);
-      current_input = quote_observation(obs);
-      ++turns;
-      ++retries;
-      Utils::UI::print_tool_result(obs);
-      if (retries >= kRetryBudget) {
-        Utils::UI::print_warning("Retry budget (" + std::to_string(kRetryBudget) +
-                                 ") exhausted; stopping.");
+      if (!submit_observation(obs, nullptr, "", true, ""))
         break;
-      }
-      if (turns >= cap) {
-        Utils::UI::print_warning("Tool turn cap (" + std::to_string(cap) +
-                                 ") reached; stopping.");
-        break;
-      }
       continue;
     }
 
@@ -1338,24 +1445,45 @@ void Agent::handle_ai_chat(const std::string &input) {
     // canonical form, never the raw string the model wrote.
     Core::ToolCall call;
     if (!Core::canonicalize_tool_call(tool_name, args, call)) {
-      // Unknown tool.
       std::string obs = "unknown tool " + tool_name + "; available: " +
                         Core::ToolRegistry::instance().known_names();
-      obs = truncate_observation(obs);
-      current_input = quote_observation(obs);
-      ++turns;
-      ++retries;
-      Utils::UI::print_tool_result(obs);
-      if (retries >= kRetryBudget) {
-        Utils::UI::print_warning("Retry budget (" + std::to_string(kRetryBudget) +
-                                 ") exhausted; stopping.");
+      if (!submit_observation(obs, nullptr, "", true, ""))
         break;
-      }
-      if (turns >= cap) {
-        Utils::UI::print_warning("Tool turn cap (" + std::to_string(cap) +
-                                 ") reached; stopping.");
+      continue;
+    }
+
+    const std::string argument_error =
+        Core::validate_model_tool_arguments(call);
+    if (!argument_error.empty()) {
+      if (!submit_observation(teach_argument_error(argument_error, call), &call,
+                              tool_name, true, ""))
         break;
-      }
+      continue;
+    }
+
+    const Core::ToolSpec *spec = Core::find_tool(call.tool);
+    std::string tool_input;
+    std::string call_key =
+        call.tool + "\n" + call.subcommand + "\n" + call.args.dump();
+    if (spec && spec->risk == Core::ToolRiskTier::ReadOnly) {
+      tool_input = Core::tool_call_to_input(call);
+      call_key = call.tool + "\n" + call.subcommand + "\n" + tool_input;
+    }
+    const auto prior_result = prior_tool_results.find(call_key);
+    if (prior_result != prior_tool_results.end()) {
+      const int repeats = ++repeat_counts[call_key];
+      const std::string obs =
+          "Repeated tool call was not re-executed. Earlier result:\n" +
+          prior_result->second +
+          "\nHint: use this result to answer, or choose a different tool call "
+          "with different arguments.";
+      const std::string limit_message =
+          repeats >= kRepeatLimit
+              ? "Repeat limit (" + std::to_string(kRepeatLimit) +
+                    ") reached for identical tool and arguments; stopping."
+              : "";
+      if (!submit_observation(obs, nullptr, "", true, limit_message))
+        break;
       continue;
     }
 
@@ -1370,40 +1498,32 @@ void Agent::handle_ai_chat(const std::string &input) {
       is_tty = isatty(fileno(stdin)) != 0;
 #endif
       if (!is_tty) {
-        std::string obs = "consent denied: no TTY";
-        obs = truncate_observation(obs);
-        current_input = quote_observation(obs);
-        ++turns;
-        Utils::UI::print_tool_call(call.tool, call.tool);
-        Utils::UI::print_tool_result(obs);
+        std::string obs = teach_refusal("consent denied: no TTY");
+        if (!submit_observation(obs, &call, call.tool, true, ""))
+          break;
         continue;
       }
-      std::string label =
-          (call.tool == "fetch:") ? "fetch: may exfiltrate data"
-                                   : "github: reads private repo data";
+      std::string label = (call.tool == "fetch:")
+                              ? "fetch: may exfiltrate data"
+                              : "github: reads private repo data";
       std::cout << "Tool " << call.tool << ": " << label
                 << ". Continue? (y/N): " << std::flush;
       std::string confirm;
       std::getline(std::cin, confirm);
       if (confirm != "y" && confirm != "Y") {
-        std::string obs = "Command cancelled by user";
-        obs = truncate_observation(obs);
-        current_input = quote_observation(obs);
-        ++turns;
-        Utils::UI::print_tool_call(call.tool, call.tool);
-        Utils::UI::print_tool_result(obs);
+        std::string obs = teach_refusal("Command cancelled by user");
+        if (!submit_observation(obs, &call, call.tool, true, ""))
+          break;
         continue;
       }
     }
 
     // Refuse new tool calls while a timed-out handler is still running.
     if (tool_gate.held()) {
-      std::string obs = "previous tool still running; refusing new call";
-      obs = truncate_observation(obs);
-      current_input = quote_observation(obs);
-      ++turns;
-      Utils::UI::print_tool_call(call.tool, call.tool);
-      Utils::UI::print_tool_result(obs);
+      std::string obs =
+          teach_refusal("previous tool still running; refusing new call");
+      if (!submit_observation(obs, &call, call.tool, true, ""))
+        break;
       continue;
     }
 
@@ -1412,58 +1532,38 @@ void Agent::handle_ai_chat(const std::string &input) {
     // An ambiguous call (the colon form and the subcommand argument
     // disagree) is refused before anything else looks at it.
     if (call.ambiguous) {
-      std::string obs = "ambiguous tool call: " + call.tool +
-                        " names two different subcommands";
-      obs = truncate_observation(obs);
-      current_input = quote_observation(obs);
-      ++turns;
-      ++retries;
-      Utils::UI::print_tool_call(call.tool, call.tool);
-      Utils::UI::print_tool_result(obs);
-      if (retries >= kRetryBudget) {
-        Utils::UI::print_warning("Retry budget (" + std::to_string(kRetryBudget) +
-                                 ") exhausted; stopping.");
+      std::string obs =
+          "ambiguous tool call: " + call.tool +
+          " names two different subcommands; send exactly one subcommand";
+      if (!submit_observation(obs, &call, call.tool, true, ""))
         break;
-      }
       continue;
     }
 
     if (Core::is_model_surface_disabled(call)) {
-      std::string obs = "tool " + call.tool +
-                        " is not available on the model surface in v1";
-      obs = truncate_observation(obs);
-      current_input = quote_observation(obs);
-      ++turns;
-      Utils::UI::print_tool_call(call.tool, call.tool);
-      Utils::UI::print_tool_result(obs);
+      std::string obs = teach_refusal("tool " + call.tool +
+                                      " is not available on the model surface");
+      if (!submit_observation(obs, &call, call.tool, true, ""))
+        break;
       continue;
     }
 
     // Read-only loop (PR 2): mutating tools are never callable from the
     // model surface. They are refused with a recoverable message and never
     // prompt, so a non-interactive run cannot be driven into a side effect.
-    const Core::ToolSpec *spec = Core::find_tool(call.tool);
     if (spec && spec->risk == Core::ToolRiskTier::Mutating) {
-      std::string obs = "mutating tool " + call.tool +
-                        " is not available in read-only mode; only read-only "
-                        "tools may run from the model loop.";
-      obs = truncate_observation(obs);
-      current_input = quote_observation(obs);
-      ++turns;
-      Utils::UI::print_tool_result(obs);
-      if (turns >= cap) {
-        Utils::UI::print_warning("Tool turn cap (" + std::to_string(cap) +
-                                 ") reached; stopping.");
+      std::string obs = teach_refusal(
+          "mutating tool " + call.tool +
+          " is not available in read-only mode; use a read-only tool or "
+          "perform the change manually.");
+      if (!submit_observation(obs, &call, call.tool, true, ""))
         break;
-      }
       continue;
     }
 
     // Convert JSON args to the tool's command-line input and execute via the
     // existing dispatch (consent, sandbox, validation) in silent mode so the
     // result is captured without double-printing.
-    std::string tool_input = Core::tool_call_to_input(call);
-
     // Scope a shorter network timeout to the model path for fetch:/github:
     // (does not change user-typed behavior).
     const bool net_scoped = Core::requires_consent(call);
@@ -1487,7 +1587,8 @@ void Agent::handle_ai_chat(const std::string &input) {
         if (!active)
           return;
 #ifdef _WIN32
-        _putenv_s("AGENTWARE_NET_TIMEOUT_SEC", prev.empty() ? "30" : prev.c_str());
+        _putenv_s("AGENTWARE_NET_TIMEOUT_SEC",
+                  prev.empty() ? "30" : prev.c_str());
 #else
         if (prev.empty())
           unsetenv("AGENTWARE_NET_TIMEOUT_SEC");
@@ -1503,15 +1604,15 @@ void Agent::handle_ai_chat(const std::string &input) {
       std::string check_path;
       if (call.tool == "read:") {
         check_path = call.args.value(
-            "path", call.args.value("filename", call.args.value(
-                          "file", std::string(""))));
+            "path", call.args.value("filename",
+                                    call.args.value("file", std::string(""))));
       } else if (call.tool == "list:") {
         check_path = call.args.value(
             "path", call.args.value("directory", std::string(".")));
       } else if (call.tool == "grep:") {
         check_path = call.args.value(
-            "directory", call.args.value("dir", call.args.value(
-                             "path", std::string("."))));
+            "directory",
+            call.args.value("dir", call.args.value("path", std::string("."))));
       } else if (call.tool == "analyze:" || call.tool == "components:" ||
                  call.tool == "todos:" || call.tool == "tree:") {
         check_path = call.args.value(
@@ -1537,12 +1638,9 @@ void Agent::handle_ai_chat(const std::string &input) {
             err = regular.error_message;
         }
         if (!err.empty()) {
-          std::string obs = err;
-          obs = truncate_observation(obs);
-          current_input = quote_observation(obs);
-          ++turns;
-          Utils::UI::print_tool_call(call.tool, tool_input);
-          Utils::UI::print_tool_result(obs);
+          std::string obs = teach_refusal(err);
+          if (!submit_observation(obs, &call, tool_input, true, ""))
+            break;
           continue;
         }
       }
@@ -1550,22 +1648,25 @@ void Agent::handle_ai_chat(const std::string &input) {
 
     int kToolTimeoutSec = 30;
     {
-      std::string ts = Utils::Config::get_env_var("AGENTWARE_TOOL_TIMEOUT_SEC", "");
+      std::string ts =
+          Utils::Config::get_env_var("AGENTWARE_TOOL_TIMEOUT_SEC", "");
       if (!ts.empty()) {
-        try { kToolTimeoutSec = std::stoi(ts); } catch (...) {}
-        if (kToolTimeoutSec < 1) kToolTimeoutSec = 30;
-        if (kToolTimeoutSec > 300) kToolTimeoutSec = 300;
+        try {
+          kToolTimeoutSec = std::stoi(ts);
+        } catch (...) {
+        }
+        if (kToolTimeoutSec < 1)
+          kToolTimeoutSec = 30;
+        if (kToolTimeoutSec > 300)
+          kToolTimeoutSec = 300;
       }
     }
     auto result_ptr = std::make_shared<std::string>();
     if (!tool_gate.try_acquire()) {
-      // Another handler is still running; refuse.
-      std::string obs = "previous tool still running; refusing new call";
-      obs = truncate_observation(obs);
-      current_input = quote_observation(obs);
-      ++turns;
-      Utils::UI::print_tool_call(call.tool, call.tool);
-      Utils::UI::print_tool_result(obs);
+      std::string obs =
+          teach_refusal("previous tool still running; refusing new call");
+      if (!submit_observation(obs, &call, tool_input, true, ""))
+        break;
       continue;
     }
     // The handler releases the gate itself, so a detached (timed-out)
@@ -1587,25 +1688,32 @@ void Agent::handle_ai_chat(const std::string &input) {
       // result_ptr may be partially written by the detached thread; do not
       // read it to avoid a data race.
     } else {
-      obs = result_ptr->empty() ? "Tool " + tool_name + " completed with no output."
-                                : *result_ptr;
+      obs = result_ptr->empty()
+                ? "Tool " + tool_name + " completed with no output."
+                : *result_ptr;
     }
     if (obs.empty())
       obs = "Tool " + tool_name + " completed with no output.";
     obs = truncate_observation(obs);
 
-
-    // Print the tool call/result in the activity format.
-    Utils::UI::print_tool_call(call.tool, tool_input);
-    Utils::UI::print_tool_result(obs);
-
-    current_input = quote_observation(obs);
-    ++turns;
-    if (turns >= cap) {
-      Utils::UI::print_warning("Tool turn cap (" + std::to_string(cap) +
-                               ") reached; stopping.");
+    executed_tools.push_back(tool_input);
+    prior_tool_results.emplace(call_key, obs);
+    if (!submit_observation(obs, &call, tool_input, timed_out, ""))
       break;
+  }
+
+  if (loop_enabled) {
+    std::cout << "Tools executed this turn: ";
+    if (executed_tools.empty()) {
+      std::cout << "none";
+    } else {
+      for (size_t i = 0; i < executed_tools.size(); ++i) {
+        if (i)
+          std::cout << ", ";
+        std::cout << executed_tools[i];
+      }
     }
+    std::cout << std::endl;
   }
 }
 

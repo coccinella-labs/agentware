@@ -36,9 +36,15 @@ struct ToolSpec {
   // line, so the generated prompt stays byte-identical to the hand-written
   // one for tools with multiple documented shapes (read:, git:).
   std::vector<std::string> prompt_lines;
+  // JSON argument names the model-callable prompt advertises.
+  std::vector<std::string> model_args;
 };
 
 // The registry. A process-wide singleton populated by register_all_tools().
+bool model_callable(const ToolSpec &tool);
+std::string render_model_system_prompt(const std::string &context,
+                                       bool tool_loop_enabled);
+
 class ToolRegistry {
 public:
   static ToolRegistry &instance();
@@ -49,9 +55,10 @@ public:
   // prefix of `input`. Returns nullptr when nothing matches.
   const ToolSpec *match_prefix(const std::string &input) const;
   const std::vector<ToolSpec> &tools() const { return tools_; }
-  // Render the system-prompt tool section from the registry, so ai_service
-  // never hand-maintains a parallel list.
+  // Render the model-callable JSON contract or the byte-compatible legacy
+  // command list, respectively.
   std::string render_prompt_section() const;
+  std::string render_legacy_prompt_section() const;
   // Names joined for the "Unknown command" recovery message.
   std::string known_names() const;
 

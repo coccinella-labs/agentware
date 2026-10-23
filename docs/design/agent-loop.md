@@ -138,14 +138,29 @@ or, when blocked on the user:
 ## Error and recovery budget
 
 - Unknown tool: reply with available names; do not execute anything.
-- Validation failure (path, pattern, args): observation states the
-  validator's message verbatim; the model may retry within the cap.
+- Validation failure (path, pattern, args): return a teaching observation
+  with the correction and one valid JSON example. Paths are relative to the
+  working directory; `.` denotes that directory. Empty search and grep
+  patterns, error text passed as a path, and command-colon syntax embedded in
+  JSON arguments are rejected before dispatch.
 - Cancelled consents: observation says so; no partial state.
+- Refusals are returned as quoted observations rather than becoming a turn's
+  answer. They consume the shared retry budget.
+- A canonical tool call with identical arguments is never executed twice in
+  one user turn. The loop returns the earlier result with a hint, counts the
+  repeat against the retry budget, and stops after three repeats for that
+  call.
 - Per-tool timeout: each tool call runs under a fixed timeout (default
   30s, configurable). When it trips, the tool is terminated, the
   partial output captured so far is returned as the observation, and the
   model is told `tool timed out after Ns; partial output above`. The
   model may retry or move on within the cap.
+- Model-request timeout: with the loop enabled, model HTTP requests have a
+  separate configurable timeout (`AGENTWARE_MODEL_REQUEST_TIMEOUT_SEC`,
+  default 120s, maximum 300s). A transport timeout is returned as an
+  observation and retried within the same three-error budget; it is never
+  rendered as the model's final answer. Loop-off requests retain the existing
+  network timeout.
 - Per-run observation budget: removed. The turn cap (8) times the
   per-turn truncation (4000 chars) bounds total observation size at
   32 KiB, so a separate per-run budget was redundant and unreachable
@@ -154,6 +169,9 @@ or, when blocked on the user:
   from the model; the UI renders the trace exactly like manual tool
   use (`Tool(args)` + result blocks), so engineering-loop output
   stays inspectable in context.
+- When enabled, the runtime prints `Tools executed this turn:` after the
+  loop, listing dispatched tool inputs in order or `none`. Refused calls and
+  repeat attempts are not listed as executions.
 
 ## Policies decided (2026-10-20)
 

@@ -6,6 +6,9 @@
 #include "web_service.h"
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
+#include <chrono>
+#include <algorithm>
+#include <cctype>
 #include <sstream>
 #include <stdexcept>
 
@@ -24,6 +27,14 @@ std::string test_endpoint(const char *variable, const char *path) {
                              std::string(variable));
   }
   return std::string(base_url) + path;
+}
+
+bool is_timeout_error(const std::string &message) {
+  std::string lower = message;
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return lower.find("timed out") != std::string::npos ||
+         lower.find("timeout") != std::string::npos;
 }
 
 } // namespace
@@ -109,32 +120,10 @@ nlohmann::json AIService::create_standard_payload(const std::string &model,
 
 nlohmann::json AIService::create_payload(const std::string &user_input,
                                          const std::string &context) {
-  Core::register_all_tools();
-  const std::string tool_section =
-      Core::ToolRegistry::instance().render_prompt_section();
-
-  std::string system_prompt =
-      "You are an advanced AI agent with comprehensive codebase analysis and "
-      "development capabilities.\n\n" +
-      tool_section + "\n" + "CAPABILITIES:\n" +
-      "- Understand codebase structure and relationships\n" +
-      "- Analyze git history and track changes\n" +
-      "- Find and prioritize task comments\n" +
-      "- Advanced text search and replacement with context validation\n" +
-      "- Structured memory system for facts and preferences\n" +
-      "- File operations with safety checks and path validation\n" +
-      "- Enhanced error handling and user feedback\n\n" +
-      "When users ask about codebase analysis, use analyze: or components: "
-      "commands.\n"
-      "For git-related questions, use git: commands.\n"
-      "For finding tasks or technical debt, use todos: command.\n"
-      "For complex file editing, use replace: instead of write: when modifying "
-      "existing content.\n"
-      "Use grep: to search for code patterns or text across multiple files.\n"
-      "Remember important user preferences and facts using remember:.\n"
-      "Be helpful, precise, and professional.\n\n"
-      "Conversation history:\n" +
-      context;
+  const std::string loop_setting =
+      Utils::Config::get_env_var("AGENTWARE_TOOL_CALL_LOOP", "0");
+  const std::string system_prompt = Core::render_model_system_prompt(
+      context, loop_setting == "1" || loop_setting == "true");
 
   switch (mode_) {
   case Core::AgentMode::MODE_TOGETHER: // Together AI
@@ -239,7 +228,8 @@ std::string safe_get_string(const nlohmann::json &j,
 }
 
 std::string AIService::chat(const std::string &user_input,
-                            const std::string &context) {
+                            const std::string &context,
+                            long request_timeout_seconds) {
   if (!is_available()) {
     return "Error: AI service is not available. Please check your API key and "
            "internet connection.";
@@ -293,15 +283,23 @@ std::string AIService::chat(const std::string &user_input,
         mode_ == Core::AgentMode::MODE_LLAMA_LATEST ||
         mode_ == Core::AgentMode::MODE_LLAMA_31) {
       // All providers use POST
-      response = web_service.post_json(url, json_body, headers);
+      response = web_service.post_json(url, json_body, headers,
+                                       request_timeout_seconds);
     } else {
       // Fallback (should not happen)
-      response = web_service.post_json(url, json_body, headers);
+      response = web_service.post_json(url, json_body, headers,
+                                       request_timeout_seconds);
     }
     Utils::startup_trace("ai: response received, status " +
                          std::to_string(response.status_code));
 
     if (response.status_code != 200) {
+      if (request_timeout_seconds > 0 && response.status_code == 0 &&
+          is_timeout_error(response.error_message)) {
+        return "Error: model request timeout after " +
+               std::to_string(request_timeout_seconds) +
+               "s (network timeout): " + response.error_message;
+      }
       std::string error_content = response.content;
       if (error_content.length() > 500) {
         error_content = error_content.substr(0, 500) + "...[truncated]";

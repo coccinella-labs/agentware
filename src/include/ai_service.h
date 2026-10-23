@@ -25,7 +25,8 @@ private:
 public:
   AIService(Core::AgentMode mode, const std::string &api_key = "");
 
-  std::string chat(const std::string &user_input, const std::string &context);
+  std::string chat(const std::string &user_input, const std::string &context,
+                   long request_timeout_seconds = 0);
   bool is_available();
 };
 } // namespace Services

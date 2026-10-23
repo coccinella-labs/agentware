@@ -47,6 +47,10 @@ struct ToolCall {
 bool canonicalize_tool_call(const std::string &raw_name,
                             const nlohmann::json &raw_args, ToolCall &out);
 
+// Validate model-supplied argument shapes and reject common command-syntax
+// confusion before converting JSON values into the legacy command form.
+std::string validate_model_tool_arguments(const ToolCall &call);
+
 // The registry entry for a canonical tool name, or nullptr.
 const ToolSpec *find_tool(const std::string &canonical_tool);
 

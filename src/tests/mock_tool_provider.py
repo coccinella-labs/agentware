@@ -130,8 +130,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.rfile.read(n)
         with LOCK:
             idx = INDEX["i"] % len(RESPONSES)
-            content = RESPONSES[idx]
+            item = RESPONSES[idx]
             INDEX["i"] += 1
+        if isinstance(item, dict):
+            content = item.get("content", "")
+            delay = float(item.get("delay_seconds", 0))
+        else:
+            content = item
+            delay = 0
+        if delay > 0:
+            print(
+                f"mock provider: delaying response by {delay:.3f}s "
+                f"at {stamp()}",
+                flush=True,
+            )
+            time.sleep(delay)
         reply = {
             "model": "mock",
             "created_at": "2023-09-23T00:00:00Z",
@@ -140,7 +153,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         }
         self._body = json.dumps(reply).encode()
         self._headers(self._body)
-        self.wfile.write(self._body)
+        try:
+            self.wfile.write(self._body)
+        except BrokenPipeError:
+            print(
+                f"mock provider: client disconnected before delayed response "
+                f"at {stamp()}",
+                flush=True,
+            )
+            return
         print(
             f"mock provider: response sent {len(self._body)} bytes at {stamp()} "
             f"({(time.monotonic() - received_mono) * 1000.0:.1f}ms after the "
