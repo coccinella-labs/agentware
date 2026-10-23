@@ -169,6 +169,11 @@ jobs:
             # it: a provider that comes up late or never comes up has to be
             # reported as that, not as an unrelated case failure.
             bash src/tests/provider_readiness_test.sh
+            # The daily report generator's shape contract: the report
+            # ends with exactly one newline and every section keeps the
+            # blank line ahead of it, for both heading paths (copied
+            # sections and NOT RUN stubs).
+            bash src/tests/maintenance_report_test.sh
             # Offline golden suites (Linux/macOS only; Windows excluded
             # because the bash harness needs shebang support).
             bash src/tests/run_routing_golden.sh build/bin/agentware-agent
