@@ -36,9 +36,20 @@ struct ToolSpec {
   // line, so the generated prompt stays byte-identical to the hand-written
   // one for tools with multiple documented shapes (read:, git:).
   std::vector<std::string> prompt_lines;
+  // Argument names the JSON tool call accepts for this tool, in the order
+  // they should be shown to the model. The model-callable prompt is
+  // generated from these, so a tool cannot be documented with an argument
+  // its dispatch path does not read.
+  std::vector<std::string> model_args;
 };
 
 // The registry. A process-wide singleton populated by register_all_tools().
+// True when the model surface policy allows offering this tool in the
+// prompt. Consent-gated tools are still offered: the model may ask for them
+// and the loop turns a missing consent into an observation. Mutating tools
+// and the tools disabled on the model surface are not offered.
+bool model_callable(const ToolSpec &tool);
+
 class ToolRegistry {
 public:
   static ToolRegistry &instance();
@@ -49,8 +60,10 @@ public:
   // prefix of `input`. Returns nullptr when nothing matches.
   const ToolSpec *match_prefix(const std::string &input) const;
   const std::vector<ToolSpec> &tools() const { return tools_; }
-  // Render the system-prompt tool section from the registry, so ai_service
-  // never hand-maintains a parallel list.
+  // Render the model-facing tool contract from the registry: the JSON call
+  // shape, the model-callable tools with their argument names, one worked
+  // example, and the refusals. ai_service never hand-maintains a parallel
+  // list, so a registered tool cannot drift from the prompt.
   std::string render_prompt_section() const;
   // Names joined for the "Unknown command" recovery message.
   std::string known_names() const;

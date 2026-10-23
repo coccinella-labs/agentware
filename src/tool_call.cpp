@@ -260,6 +260,9 @@ std::string tool_call_to_input(const ToolCall &call) {
     return "fetch:" +
            args.value("url", args.value("uri", std::string("")));
   }
+  // The bare memory verb has no arguments and no colon form in dispatch.
+  if (tool == "memory")
+    return "memory";
   // Unknown: pass through as-is (will be caught by dispatch)
   return tool + ":" + args.dump();
 }

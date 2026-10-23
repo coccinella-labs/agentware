@@ -1054,6 +1054,8 @@ std::string Agent::extract_tool_call(const std::string &text,
     std::string summary;
     if (j.contains("summary") && j["summary"].is_string()) {
       summary = j["summary"].get<std::string>();
+    } else if (j.contains("answer") && j["answer"].is_string()) {
+      summary = j["answer"].get<std::string>();
     }
     return summary.empty() ? "done" : "done: " + summary;
   }

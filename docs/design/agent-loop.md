@@ -73,8 +73,11 @@ from it so they cannot drift:
 
 1. the dispatch surface (user prefix routing stays as-is, so
    user-facing syntax and pipe-mode output are preserved), and
-2. the tool section of the system prompt in `src/ai_service.cpp`,
-   replacing the hand-maintained for list.
+2. the model-facing tool contract in `src/ai_service.cpp`: the JSON call
+   shape, the model-callable tools with their argument names, one worked
+   example, and the refusal line. The contract is rendered from the
+   registry and the model-surface policy, so a registered tool cannot
+   drift from the prompt.
 
 `list:` (read-only directory/file listing with glob support, built on
 the native walk in `search_service.cpp`) is the first registry-native
@@ -115,7 +118,7 @@ the UI distinguish "done" from "waiting on the user"), the assistant may
 emit a completion signal instead of a tool call:
 
 ```json
-{"done": true, "summary": "Found 3 callers of handle_ in src/."}
+{"done": true, "answer": "Found 3 callers of handle_ in src/."}
 ```
 
 or, when blocked on the user:
@@ -124,8 +127,9 @@ or, when blocked on the user:
 {"needs_user_input": "Which of the two matching files should I edit?"}
 ```
 
-- `done` ends the loop and records the summary; the model may still
-  narrate in the same reply.
+- `done` ends the loop and records the answer; the model may still
+  narrate in the same reply. `answer` is the documented key; the older
+  `summary` key is still accepted so existing callers keep working.
 - `needs_user_input` ends the loop and surfaces the question in the UI
   (and in pipe mode on stdout); the next user prompt resumes a fresh
   loop with the prior trace available as context.
