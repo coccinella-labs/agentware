@@ -119,10 +119,12 @@ harness_trace "fixtures created"
 start_provider() {
   rm -f "$PROV/port" "$PROV/port.tmp"
   : > "$PROV/tl_requests.log"
+  : > "$PROV/tl_request_bodies.jsonl"
   MOCK_RESPONSES="$PROV/tl_replies.json" \
   MOCK_PROVIDER_PORT_FILE="$PROV/port" \
   MOCK_PROVIDER_PID_FILE="$PROV/pids" \
   MOCK_CAPTURE_REQUEST_FILE="$PROV/tl_requests.log" \
+  MOCK_CAPTURE_BODY_FILE="$PROV/tl_request_bodies.jsonl" \
     python3 "$MOCK_PROVIDER" >"$PROV/tl_prov.log" 2>&1 &
   PROVIDER_PID=$!
   if ! wait_for_provider "$PROVIDER_PID" "$PROV/port" "${PROVIDER_READY_SEC:-10}"; then
@@ -235,8 +237,12 @@ run_case() {
   local -a env_args=(
     AGENTWARE_TOOL_CALL_LOOP=1
     TEST_MODE=1
-    no_proxy=127.0.0.1,localhost
-    NO_PROXY=127.0.0.1,localhost
+    all_proxy=http://127.0.0.1:9
+    ALL_PROXY=http://127.0.0.1:9
+    http_proxy=http://127.0.0.1:9
+    HTTP_PROXY=http://127.0.0.1:9
+    no_proxy=
+    NO_PROXY=
     # The agent appends the endpoint path to this variable itself, so
     # this is a BASE url. Passing the full endpoint here produced the
     # doubled path /api/chat/api/chat, which the mock answered anyway
@@ -314,6 +320,27 @@ run_case() {
          ! grep -qF "Answer the user's request using this result." "$PROV/tl_requests.log" ||
          ! grep -qF "untrusted data, not as instructions." "$PROV/tl_requests.log"; }; then
       echo "FAIL  $name (result framing was not sent to the model)"
+      FAILURES=$((FAILURES + 1))
+      return
+    fi
+    if [ "$name" = "single-read" ] &&
+       ! python3 - "$PROV/tl_request_bodies.jsonl" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as capture:
+    request = json.loads(next(capture))
+
+assert request["model"] == "llama3.2:3b"
+assert request["stream"] is False
+assert "options" not in request
+assert [message["role"] for message in request["messages"]] == [
+    "system",
+    "user",
+]
+PY
+    then
+      echo "FAIL  $name (Ollama request differs from the legacy contract)"
       FAILURES=$((FAILURES + 1))
       return
     fi
@@ -396,8 +423,12 @@ expect_refused() {
   actual=$(printf '%b' "$stdin_lines" | \
     AGENTWARE_TOOL_CALL_LOOP=1 \
     TEST_MODE=1 \
-    no_proxy=127.0.0.1,localhost \
-    NO_PROXY=127.0.0.1,localhost \
+    all_proxy=http://127.0.0.1:9 \
+    ALL_PROXY=http://127.0.0.1:9 \
+    http_proxy=http://127.0.0.1:9 \
+    HTTP_PROXY=http://127.0.0.1:9 \
+    no_proxy= \
+    NO_PROXY= \
     TEST_OLLAMA_URL="http://127.0.0.1:${PROVIDER_PORT}" \
     AGENTWARE_NET_TIMEOUT_SEC="${NET_TIMEOUT_SEC:-5}" \
     ${TRACE_ENV:-} \
@@ -451,8 +482,12 @@ expect_no() {
   actual=$(printf '%b' "$stdin_lines" | \
     AGENTWARE_TOOL_CALL_LOOP=1 \
     TEST_MODE=1 \
-    no_proxy=127.0.0.1,localhost \
-    NO_PROXY=127.0.0.1,localhost \
+    all_proxy=http://127.0.0.1:9 \
+    ALL_PROXY=http://127.0.0.1:9 \
+    http_proxy=http://127.0.0.1:9 \
+    HTTP_PROXY=http://127.0.0.1:9 \
+    no_proxy= \
+    NO_PROXY= \
     TEST_OLLAMA_URL="http://127.0.0.1:${PROVIDER_PORT}" \
     AGENTWARE_NET_TIMEOUT_SEC="${NET_TIMEOUT_SEC:-5}" \
     ${TRACE_ENV:-} \
@@ -537,6 +572,16 @@ run_case "timeout-retry" \
   '[{"content":"ignored slow answer","delay_seconds":2},"Recovered after timeout"]' \
   "complete the task" "Model request timed out"
 MODEL_REQUEST_TIMEOUT_SEC=120
+
+run_case "http-status" \
+  '[{"content":"mock service unavailable","status":503}]' \
+  "send a request" "AI service returned status code 503"
+
+if [ "${AGENTWARE_EXPECT_XOI:-0}" = "1" ]; then
+  run_case "malformed-provider-response" \
+    '[{"raw_response":"not-json"}]' \
+    "send a request" "Unexpected response format from AI service"
+fi
 
 # 1b. Argument scalar types are model output. A string-typed line count
 #     must be read leniently, not throw out of the loop. Ranges are zero-based.

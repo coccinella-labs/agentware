@@ -34,7 +34,7 @@ endif()
 project(AgentwareAgent VERSION ${PROJECT_VERSION} LANGUAGES CXX)
 
 option(AGENTWARE_USE_XOI_OLLAMA
-    "Use the installed xoi SDK for local Ollama requests (experimental)" OFF)
+    "Use the pinned xoi SDK for local Ollama requests (experimental)" OFF)
 
 # Configure version header
 configure_file(src/include/version.h.in include/version.h @ONLY)
@@ -89,7 +89,29 @@ endif()
 # Find dependencies
 find_package(Threads REQUIRED)
 if(AGENTWARE_USE_XOI_OLLAMA)
-    find_package(xoi CONFIG REQUIRED)
+    if(CMAKE_VERSION VERSION_LESS 3.20)
+        message(FATAL_ERROR
+            "AGENTWARE_USE_XOI_OLLAMA requires CMake 3.20 or newer")
+    endif()
+
+    if(DEFINED BUILD_TESTING)
+        set(_agentware_build_testing_defined TRUE)
+        set(_agentware_build_testing "${BUILD_TESTING}")
+    else()
+        set(_agentware_build_testing_defined FALSE)
+    endif()
+    set(BUILD_TESTING OFF)
+    FetchContent_Declare(
+        agentware_xoi
+        GIT_REPOSITORY https://github.com/coccinella-labs/xoi.git
+        GIT_TAG d04fde073f43d30bdb32813eedb930611658e069
+    )
+    FetchContent_MakeAvailable(agentware_xoi)
+    if(_agentware_build_testing_defined)
+        set(BUILD_TESTING "${_agentware_build_testing}")
+    else()
+        unset(BUILD_TESTING)
+    endif()
 endif()
 
 # Find zlib with platform-specific logic, fallback to FetchContent
@@ -459,6 +481,17 @@ if(NOT CPR_FOUND)
 
     FetchContent_MakeAvailable(cpr)
 
+    # CPR 1.10.5 incorrectly links stdc++fs for Homebrew Clang on macOS.
+    if(APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        get_target_property(_cpr_interface_libraries cpr
+            INTERFACE_LINK_LIBRARIES)
+        if(_cpr_interface_libraries)
+            list(REMOVE_ITEM _cpr_interface_libraries stdc++fs)
+            set_property(TARGET cpr PROPERTY INTERFACE_LINK_LIBRARIES
+                "${_cpr_interface_libraries}")
+        endif()
+    endif()
+
     # Add the include directory if it exists
     if(EXISTS "${CMAKE_BINARY_DIR}/_deps/cpr-src/include")
         target_include_directories(cpr PUBLIC "${CMAKE_BINARY_DIR}/_deps/cpr-src/include")
@@ -513,6 +546,11 @@ if(NOT TARGET gtest)
      set(BUILD_GTEST ON CACHE BOOL "" FORCE)
 
      FetchContent_MakeAvailable(googletest)
+
+     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+         # GoogleTest 1.14 triggers this warning in its char8_t printer.
+         target_compile_options(gtest PRIVATE -Wno-character-conversion)
+     endif()
 
     # Create an interface library for gtest to make it easier to link
     if(NOT TARGET gtest_all_tests)

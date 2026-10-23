@@ -83,8 +83,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             flush=True,
         )
 
-    def _headers(self, body):
-        self.send_response(200)
+    def _headers(self, body, status=200):
+        self.send_response(status)
         self.send_header("Content-type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Connection", "close")
@@ -128,9 +128,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         )
         n = int(self.headers.get("Content-Length", 0))
         request_body = self.rfile.read(n)
+        request = json.loads(request_body)
         capture_path = os.environ.get("MOCK_CAPTURE_REQUEST_FILE")
         if capture_path:
-            request = json.loads(request_body)
             user_messages = [
                 message
                 for message in request.get("messages", [])
@@ -138,6 +138,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ]
             with open(capture_path, "a") as capture:
                 capture.write(user_messages[-1]["content"] + "\n")
+        body_capture_path = os.environ.get("MOCK_CAPTURE_BODY_FILE")
+        if body_capture_path:
+            with open(body_capture_path, "a") as capture:
+                capture.write(json.dumps(request) + "\n")
         with LOCK:
             idx = INDEX["i"] % len(RESPONSES)
             item = RESPONSES[idx]
@@ -145,9 +149,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if isinstance(item, dict):
             content = item.get("content", "")
             delay = float(item.get("delay_seconds", 0))
+            status = int(item.get("status", 200))
+            raw_response = item.get("raw_response")
         else:
             content = item
             delay = 0
+            status = 200
+            raw_response = None
         if delay > 0:
             print(
                 f"mock provider: delaying response by {delay:.3f}s "
@@ -155,14 +163,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 flush=True,
             )
             time.sleep(delay)
-        reply = {
-            "model": "mock",
-            "created_at": "2023-09-23T00:00:00Z",
-            "message": {"role": "assistant", "content": content},
-            "done": True,
-        }
-        self._body = json.dumps(reply).encode()
-        self._headers(self._body)
+        if raw_response is not None:
+            self._body = raw_response.encode()
+        elif status < 200 or status >= 300:
+            self._body = json.dumps(
+                {"error": {"message": content}}
+            ).encode()
+        else:
+            reply = {
+                "model": "mock",
+                "created_at": "2023-09-23T00:00:00Z",
+                "message": {"role": "assistant", "content": content},
+                "done": True,
+            }
+            self._body = json.dumps(reply).encode()
+        self._headers(self._body, status)
         try:
             self.wfile.write(self._body)
         except BrokenPipeError:

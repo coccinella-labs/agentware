@@ -24,17 +24,23 @@ Each hosted mode needs its API key in the environment; see `.env.example` for
 the list. The three Llama modes and Offline run against a local Ollama server
 and need no key.
 
-An experimental adapter can route local Ollama requests through an installed
-xoi CMake package:
+An experimental adapter can route local Ollama requests through xoi. Enabling
+it fetches a public, pinned xoi commit during CMake configuration:
 
 ```bash
-cmake -S . -B build -DAGENTWARE_USE_XOI_OLLAMA=ON \
-  -DCMAKE_PREFIX_PATH=/path/to/xoi/install
+cmake -S . -B build -DAGENTWARE_USE_XOI_OLLAMA=ON
 ```
 
-The option is off by default and does not affect hosted providers. Agentware
-continues to own its prompt, tool loop, permissions, and safety checks; this
-adapter is a prototype, not a production-readiness claim.
+The option is off by default, so normal builds do not fetch xoi and hosted
+providers are unchanged. The adapter uses xoi commit
+`d04fde073f43d30bdb32813eedb930611658e069`. Agentware continues to own its
+prompt, text-based tool loop, permissions, and safety checks. The adapter
+preserves the existing request timeout, disables xoi retries so Agentware owns
+the loop retry budget, bypasses proxies for local Ollama, and leaves
+`num_predict` to Ollama as before. xoi rejects responses larger than 8 MiB.
+Native provider tool-call requests and other providers are not part of this
+spike. This is an experimental first-provider integration, not a
+production-readiness claim.
 
 ## What it does
 
