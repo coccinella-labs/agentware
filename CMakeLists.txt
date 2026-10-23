@@ -481,6 +481,17 @@ if(NOT CPR_FOUND)
 
     FetchContent_MakeAvailable(cpr)
 
+    # CPR 1.10.5 incorrectly links stdc++fs for Homebrew Clang on macOS.
+    if(APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        get_target_property(_cpr_interface_libraries cpr
+            INTERFACE_LINK_LIBRARIES)
+        if(_cpr_interface_libraries)
+            list(REMOVE_ITEM _cpr_interface_libraries stdc++fs)
+            set_property(TARGET cpr PROPERTY INTERFACE_LINK_LIBRARIES
+                "${_cpr_interface_libraries}")
+        endif()
+    endif()
+
     # Add the include directory if it exists
     if(EXISTS "${CMAKE_BINARY_DIR}/_deps/cpr-src/include")
         target_include_directories(cpr PUBLIC "${CMAKE_BINARY_DIR}/_deps/cpr-src/include")
@@ -535,6 +546,11 @@ if(NOT TARGET gtest)
      set(BUILD_GTEST ON CACHE BOOL "" FORCE)
 
      FetchContent_MakeAvailable(googletest)
+
+     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+         # GoogleTest 1.14 triggers this warning in its char8_t printer.
+         target_compile_options(gtest PRIVATE -Wno-character-conversion)
+     endif()
 
     # Create an interface library for gtest to make it easier to link
     if(NOT TARGET gtest_all_tests)
