@@ -127,7 +127,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             flush=True,
         )
         n = int(self.headers.get("Content-Length", 0))
-        self.rfile.read(n)
+        request_body = self.rfile.read(n)
+        capture_path = os.environ.get("MOCK_CAPTURE_REQUEST_FILE")
+        if capture_path:
+            request = json.loads(request_body)
+            user_messages = [
+                message
+                for message in request.get("messages", [])
+                if message.get("role") == "user"
+            ]
+            with open(capture_path, "a") as capture:
+                capture.write(user_messages[-1]["content"] + "\n")
         with LOCK:
             idx = INDEX["i"] % len(RESPONSES)
             item = RESPONSES[idx]
