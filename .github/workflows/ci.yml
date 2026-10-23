@@ -280,8 +280,11 @@ jobs:
               -DAGENTWARE_USE_XOI_OLLAMA=ON
           else
             FLAGS=""
-            [[ "$RUNNER_OS" == "macOS" ]] && \
+            if [[ "$RUNNER_OS" == "macOS" ]]; then
               FLAGS="-DCMAKE_PREFIX_PATH=/opt/homebrew"
+              FLAGS+=" -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++"
+              FLAGS+=" -DCMAKE_OSX_SYSROOT=$(xcrun --sdk macosx --show-sdk-path)"
+            fi
             cmake -S . -B build-xoi -DCMAKE_BUILD_TYPE=Debug \
               -DAGENTWARE_USE_XOI_OLLAMA=ON $FLAGS
           fi
