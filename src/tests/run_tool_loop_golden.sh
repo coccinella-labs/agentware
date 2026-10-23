@@ -332,7 +332,7 @@ run_case() {
       return
     fi
     if [ "$name" = "invalid-read-start-type" ] ||
-       [ "$name" = "invalid-read-start-zero" ]; then
+       [ "$name" = "invalid-read-start-negative" ]; then
       if ! grep -qF "0.1.7" <<< "$actual"; then
         echo "FAIL  $name (corrected read call did not return the file)"
         sed -n '1,20{s/^/      | /;p;}' <<< "$actual"
@@ -501,11 +501,11 @@ run_case "colon-syntax-teaches" \
 
 run_case "invalid-read-start-type" \
   '["{\"tool\":\"read\",\"arguments\":{\"path\":\"VERSION\",\"start\":\"first\",\"count\":1}}","{\"tool\":\"read\",\"arguments\":{\"path\":\"VERSION\"}}","Done."]' \
-  "read VERSION" "line numbers start at 1"
+  "read VERSION" "line ranges are zero-based"
 
-run_case "invalid-read-start-zero" \
-  '["{\"tool\":\"read\",\"arguments\":{\"path\":\"VERSION\",\"start\":0,\"count\":1}}","{\"tool\":\"read\",\"arguments\":{\"path\":\"VERSION\"}}","Done."]' \
-  "read VERSION" "line start must be at least 1"
+run_case "invalid-read-start-negative" \
+  '["{\"tool\":\"read\",\"arguments\":{\"path\":\"VERSION\",\"start\":-1,\"count\":1}}","{\"tool\":\"read\",\"arguments\":{\"path\":\"VERSION\",\"start\":0,\"count\":1}}","Done."]' \
+  "read VERSION" "line start must not be negative"
 
 # A previous path refusal is not accepted as a path argument on the next call.
 run_case "error-string-path-teaches" \
@@ -537,6 +537,12 @@ run_case "timeout-retry" \
   '[{"content":"ignored slow answer","delay_seconds":2},"Recovered after timeout"]' \
   "complete the task" "Model request timed out"
 MODEL_REQUEST_TIMEOUT_SEC=120
+
+# 1b. Argument scalar types are model output. A string-typed line count
+#     must be read leniently, not throw out of the loop. Ranges are zero-based.
+run_case "string-typed-number" \
+  '["{\"tool\":\"read\",\"arguments\":{\"path\":\"tl_fixture/brace.txt\",\"start\":\"0\",\"count\":\"1\"}}","Done."]' \
+  "read the first line" "needle}"
 
 # 2. Malformed JSON is a recoverable error, not a crash.
 run_case "malformed" \

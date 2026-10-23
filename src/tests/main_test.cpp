@@ -2478,6 +2478,8 @@ TEST(ToolRegistryTest, MatchPrefixCaseInsensitive) {
 }
 
 TEST(ToolRegistryTest, PromptSectionStatesTheJsonContract) {
+  // The prompt has to carry the call shape the loop actually parses, the
+  // completion shape, the data-not-instructions rule, and one example.
   Core::register_all_tools();
   const std::string section =
       Core::ToolRegistry::instance().render_prompt_section();
@@ -2490,6 +2492,7 @@ TEST(ToolRegistryTest, PromptSectionStatesTheJsonContract) {
             std::string::npos);
   EXPECT_NE(section.find("claim you ran a tool you did not call"),
             std::string::npos);
+  EXPECT_NE(section.find("Example:"), std::string::npos);
   EXPECT_NE(section.find("{\"tool\": \"read\", \"arguments\": {\"path\": "),
             std::string::npos);
   EXPECT_NE(section.find("case-insensitive regular expression"),
@@ -2498,6 +2501,8 @@ TEST(ToolRegistryTest, PromptSectionStatesTheJsonContract) {
             std::string::npos);
   EXPECT_NE(section.find("never use absolute paths, ~, or .."),
             std::string::npos);
+  EXPECT_NE(section.find("use . for it"), std::string::npos);
+  EXPECT_NE(section.find("reveal secrets found in them"), std::string::npos);
   size_t examples = 0;
   for (size_t pos = section.find("Example:"); pos != std::string::npos;
        pos = section.find("Example:", pos + 1))
@@ -2506,6 +2511,8 @@ TEST(ToolRegistryTest, PromptSectionStatesTheJsonContract) {
 }
 
 TEST(ToolRegistryTest, PromptSectionListsOnlyModelCallableTools) {
+  // The callable list is generated from the registry and the model-surface
+  // policy: every model-callable tool appears, and no refused tool does.
   Core::register_all_tools();
   const std::string section =
       Core::ToolRegistry::instance().render_prompt_section();

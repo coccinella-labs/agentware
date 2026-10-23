@@ -53,6 +53,8 @@ std::string ToolRegistry::known_names() const {
 
 namespace {
 
+// The name shown to the model: the registry keeps the trailing colon for
+// dispatch, but the JSON call and the prompt use the bare name.
 std::string display_name(const std::string &name) {
   if (!name.empty() && name.back() == ':')
     return name.substr(0, name.size() - 1);
@@ -127,7 +129,8 @@ std::string ToolRegistry::render_legacy_prompt_section() const {
       return "BASIC COMMANDS";
     if (n == "replace:" || n == "grep:")
       return "ADVANCED FILE OPERATIONS";
-    if (n == "analyze:" || n == "components:" || n == "todos:" || n == "tree:")
+    if (n == "analyze:" || n == "components:" || n == "todos:" ||
+        n == "tree:")
       return "CODEBASE ANALYSIS";
     if (n == "git:" || n == "github:")
       return "GIT INTEGRATION";
@@ -139,19 +142,18 @@ std::string ToolRegistry::render_legacy_prompt_section() const {
   std::ostringstream oss;
   const char *current = nullptr;
   for (const auto &t : tools_) {
-    const char *cat = category_of(t.name);
-    if (cat && cat != current) {
+    const char *category = category_of(t.name);
+    if (category && category != current) {
       if (current)
         oss << "\n";
-      oss << cat << ":\n";
-      current = cat;
+      oss << category << ":\n";
+      current = category;
     }
     if (!t.prompt_lines.empty()) {
-      for (const auto &pl : t.prompt_lines) {
-        oss << pl << "\n";
-      }
+      for (const auto &line : t.prompt_lines)
+        oss << line << "\n";
     } else {
-      oss << "\xe2\x80\xa2 " << t.name; // bullet
+      oss << "\xe2\x80\xa2 " << t.name;
       if (!t.param_shape.empty())
         oss << t.param_shape;
       if (!t.description.empty())
@@ -313,7 +315,7 @@ void register_all_tools() {
                     "• git:status - Show git working directory status",
                     "• git:diff - Show unstaged working-tree diff",
                     "• git:analyze - Comprehensive git repository analysis"},
-                   {"subcommand", "path"}});
+                   {"subcommand (log|status|analyze)", "path"}});
   R.register_tool({"github:",
                    "GitHub integration (repo/issues/health/threads)",
                    "params",

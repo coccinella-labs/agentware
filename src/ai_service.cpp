@@ -120,6 +120,7 @@ nlohmann::json AIService::create_standard_payload(const std::string &model,
 
 nlohmann::json AIService::create_payload(const std::string &user_input,
                                          const std::string &context) {
+  Core::register_all_tools();
   const std::string loop_setting =
       Utils::Config::get_env_var("AGENTWARE_TOOL_CALL_LOOP", "0");
   const std::string system_prompt = Core::render_model_system_prompt(
