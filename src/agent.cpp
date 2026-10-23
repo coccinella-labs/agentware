@@ -1056,6 +1056,8 @@ std::string Agent::extract_tool_call(const std::string &text,
       summary = j["answer"].get<std::string>();
     } else if (j.contains("summary") && j["summary"].is_string()) {
       summary = j["summary"].get<std::string>();
+    } else if (j.contains("answer") && j["answer"].is_string()) {
+      summary = j["answer"].get<std::string>();
     }
     return summary.empty() ? "done" : "done: " + summary;
   }
@@ -1326,7 +1328,7 @@ void Agent::handle_ai_chat(const std::string &input) {
     if (call.tool == "read:") {
       return "Invalid arguments: " + message +
              ". Supply a file path relative to the working directory; line "
-             "numbers start at 1. Example: " +
+             "ranges are zero-based. Example: " +
              R"({"tool":"read","arguments":{"path":"VERSION"}})";
     }
     if (call.tool == "fetch:") {

@@ -238,7 +238,8 @@ jobs:
             /etc/apt/sources.list.d/*.sources 2>/dev/null || true
           sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
             /etc/apt/sources.list.d/microsoft-prod.sources
-          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get update -o Acquire::http::Timeout=30 \
+            -o Acquire::Retries=3
           sudo apt-get install -y nlohmann-json3-dev cmake build-essential \
             libcurl4-openssl-dev libpqxx-dev lcov
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
