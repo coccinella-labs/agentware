@@ -1323,6 +1323,17 @@ void Agent::handle_ai_chat(const std::string &input) {
              ". A search query is required. Example: " +
              R"({"tool":"search","arguments":{"query":"needle"}})";
     }
+    if (call.tool == "read:") {
+      return "Invalid arguments: " + message +
+             ". Supply a file path relative to the working directory; line "
+             "numbers start at 1. Example: " +
+             R"({"tool":"read","arguments":{"path":"VERSION"}})";
+    }
+    if (call.tool == "fetch:") {
+      return "Invalid arguments: " + message +
+             ". Supply an HTTP or HTTPS URL. Example: " +
+             R"({"tool":"fetch","arguments":{"url":"https://example.com"}})";
+    }
     return "Invalid arguments: " + message +
            ". Tool paths are relative to the working directory; use . for "
            "that directory. Example: " +

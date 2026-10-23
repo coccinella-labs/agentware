@@ -190,16 +190,31 @@ std::string validate_model_tool_arguments(const ToolCall &call) {
         return std::string("argument '") + name + "' must be an integer";
       if (call.args.contains(name)) {
         const auto &number = call.args[name];
+        const int64_t parsed_value =
+            number.is_number_unsigned()
+                ? static_cast<int64_t>(std::min<uint64_t>(
+                      number.get<uint64_t>(),
+                      static_cast<uint64_t>(
+                          std::numeric_limits<int64_t>::max())))
+                : number.get<int64_t>();
         if (number.is_number_unsigned()) {
           if (number.get<uint64_t>() >
               static_cast<uint64_t>(std::numeric_limits<int>::max()))
             return std::string("argument '") + name + "' is out of range";
         } else {
-          const int64_t parsed = number.get<int64_t>();
-          if (parsed < std::numeric_limits<int>::min() ||
-              parsed > std::numeric_limits<int>::max())
+          if (parsed_value < std::numeric_limits<int>::min() ||
+              parsed_value > std::numeric_limits<int>::max())
             return std::string("argument '") + name + "' is out of range";
         }
+        if ((std::string(name) == "start" ||
+             std::string(name) == "start_line") &&
+            parsed_value < 1)
+          return "line start must be at least 1";
+        if ((std::string(name) == "count" ||
+             std::string(name) == "line_count" ||
+             std::string(name) == "lines") &&
+            parsed_value < 0)
+          return "line count must not be negative";
       }
     }
   }

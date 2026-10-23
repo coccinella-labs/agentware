@@ -92,6 +92,7 @@ harness_trace "workspace created"
 # Fixtures: a tiny tree so tool output is small and stable.
 printf 'golden needle alpha\nsecond line\n' > hello.txt
 printf 'notes file with needle words\n' > notes.md
+printf '0.1.7\n' > VERSION
 printf 'API_KEY=supersecret\n' > .env
 printf 'API_KEY=supersecret\n' > id_rsa
 mkdir -p tl_fixture
@@ -320,6 +321,15 @@ run_case() {
       FAILURES=$((FAILURES + 1))
       return
     fi
+    if [ "$name" = "invalid-read-start-type" ] ||
+       [ "$name" = "invalid-read-start-zero" ]; then
+      if ! grep -qF "0.1.7" <<< "$actual"; then
+        echo "FAIL  $name (corrected read call did not return the file)"
+        sed -n '1,20{s/^/      | /;p;}' <<< "$actual"
+        FAILURES=$((FAILURES + 1))
+        return
+      fi
+    fi
     if [ "$name" = "error-string-path-teaches" ] &&
        ! grep -qF "Tools executed this turn: none" <<< "$actual"; then
       echo "FAIL  $name (error-string path reached dispatch)"
@@ -478,6 +488,14 @@ run_case "empty-search-teaches" \
 run_case "colon-syntax-teaches" \
   '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"grep:needle:.\",\"directory\":\".\"}}","{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"needle\",\"directory\":\".\"}}","Done."]' \
   "search for needle" "command syntax belongs in the top-level tool field"
+
+run_case "invalid-read-start-type" \
+  '["{\"tool\":\"read\",\"arguments\":{\"path\":\"VERSION\",\"start\":\"first\",\"count\":1}}","{\"tool\":\"read\",\"arguments\":{\"path\":\"VERSION\"}}","Done."]' \
+  "read VERSION" "line numbers start at 1"
+
+run_case "invalid-read-start-zero" \
+  '["{\"tool\":\"read\",\"arguments\":{\"path\":\"VERSION\",\"start\":0,\"count\":1}}","{\"tool\":\"read\",\"arguments\":{\"path\":\"VERSION\"}}","Done."]' \
+  "read VERSION" "line start must be at least 1"
 
 # A previous path refusal is not accepted as a path argument on the next call.
 run_case "error-string-path-teaches" \
