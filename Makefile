@@ -27,7 +27,7 @@ test: build
 # Run E2E tests locally
 test-e2e: build
 	@echo "Running E2E tests locally..."
-	@BINARY_PATH="$(CURDIR)/build/bin/agentware-agent" ./src/tests/run_e2e_tests.sh
+	@./src/tests/run_e2e_tests.sh
 
 # Run E2E tests in Docker
 test-e2e-docker:
