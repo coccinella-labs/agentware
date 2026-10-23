@@ -384,6 +384,12 @@ run_case "single-read" \
   '["{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","Done."]' \
   "list the fixture directory" "one.txt"
 
+# 1b. Argument scalar types are model output. A string-typed line count
+#     must be read leniently, not throw out of the loop. Ranges are zero-based.
+run_case "string-typed-number" \
+  '["{\"tool\":\"read\",\"arguments\":{\"path\":\"tl_fixture/brace.txt\",\"start\":\"0\",\"count\":\"1\"}}","Done."]' \
+  "read the first line" "needle}"
+
 # 2. Malformed JSON is a recoverable error, not a crash.
 run_case "malformed" \
   '["{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"","Done."]' \

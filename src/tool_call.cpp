@@ -1,11 +1,80 @@
 #include "tool_call.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cctype>
+#include <cmath>
+#include <limits>
 
 namespace Core {
 
 namespace {
+
+// Tool arguments are model output, so their JSON types are not trusted.
+// A model that sends "count": "3" or "path": null must get an observation,
+// not an exception that kills the loop. These readers accept the scalar
+// types a model plausibly emits and fall back to the default otherwise.
+std::string json_string(const nlohmann::json &args,
+                        std::initializer_list<const char *> keys,
+                        const std::string &fallback = "") {
+  for (const char *key : keys) {
+    auto it = args.find(key);
+    if (it == args.end())
+      continue;
+    if (it->is_string())
+      return it->get<std::string>();
+    if (it->is_number_unsigned())
+      return std::to_string(it->get<unsigned long long>());
+    if (it->is_number_integer())
+      return std::to_string(it->get<long long>());
+    if (it->is_number_float())
+      return it->dump();
+    if (it->is_boolean())
+      return it->get<bool>() ? "true" : "false";
+  }
+  return fallback;
+}
+
+int json_int(const nlohmann::json &args,
+             std::initializer_list<const char *> keys, int fallback) {
+  for (const char *key : keys) {
+    auto it = args.find(key);
+    if (it == args.end())
+      continue;
+    if (it->is_number_unsigned()) {
+      const auto value = it->get<unsigned long long>();
+      return value > static_cast<unsigned long long>(std::numeric_limits<int>::max())
+                 ? fallback
+                 : static_cast<int>(value);
+    }
+    if (it->is_number_integer()) {
+      const auto value = it->get<long long>();
+      return value < std::numeric_limits<int>::min() ||
+                     value > std::numeric_limits<int>::max()
+                 ? fallback
+                 : static_cast<int>(value);
+    }
+    if (it->is_number_float()) {
+      const double value = it->get<double>();
+      return !std::isfinite(value) ||
+                     value < std::numeric_limits<int>::min() ||
+                     value > std::numeric_limits<int>::max()
+                 ? fallback
+                 : static_cast<int>(value);
+    }
+    if (it->is_string()) {
+      const std::string &value = it->get_ref<const std::string &>();
+      int parsed = 0;
+      const auto result =
+          std::from_chars(value.data(), value.data() + value.size(), parsed);
+      return result.ec == std::errc{} &&
+                     result.ptr == value.data() + value.size()
+                 ? parsed
+                 : fallback;
+    }
+  }
+  return fallback;
+}
 
 // Trim ASCII whitespace.
 std::string trim_ascii(const std::string &s) {
@@ -163,18 +232,17 @@ std::string tool_call_to_input(const ToolCall &call) {
   const std::string &tool = call.tool;
 
   if (tool == "search:") {
-    return "search:" + args.value("query", args.value("q", std::string("")));
+    return "search:" + json_string(args, {"query", "q"});
   }
   if (tool == "cmd:") {
-    return "cmd:" + args.value("command", args.value("cmd", std::string("")));
+    return "cmd:" + json_string(args, {"command", "cmd"});
   }
   if (tool == "read:") {
-    std::string path = args.value(
-        "path", args.value("filename", args.value("file", std::string(""))));
+    std::string path = json_string(args, {"path", "filename", "file"});
     if (args.contains("start") || args.contains("count") ||
         args.contains("lines")) {
-      int start = args.value("start", args.value("start_line", 1));
-      int count = args.value("count", args.value("line_count", 0));
+      int start = json_int(args, {"start", "start_line"}, 1);
+      int count = json_int(args, {"count", "line_count", "lines"}, 0);
       if (count > 0) {
         return "read:" + path + ":" + std::to_string(start) + ":" +
                std::to_string(count);
@@ -186,79 +254,61 @@ std::string tool_call_to_input(const ToolCall &call) {
     return "read:" + path;
   }
   if (tool == "write:") {
-    std::string path = args.value(
-        "path", args.value("filename", args.value("file", std::string(""))));
-    std::string content =
-        args.value("content", args.value("text", std::string("")));
+    std::string path = json_string(args, {"path", "filename", "file"});
+    std::string content = json_string(args, {"content", "text"});
     return "write:" + path + " " + content;
   }
   if (tool == "replace:") {
-    std::string path = args.value(
-        "path", args.value("filename", args.value("file", std::string(""))));
-    std::string old_text = args.value(
-        "old", args.value("old_text", args.value("search", std::string(""))));
-    std::string new_text = args.value(
-        "new", args.value("new_text", args.value("replacement", std::string(""))));
-    int count = args.value("count", args.value("expected_count", 0));
+    std::string path = json_string(args, {"path", "filename", "file"});
+    std::string old_text = json_string(args, {"old", "old_text", "search"});
+    std::string new_text = json_string(args, {"new", "new_text", "replacement"});
+    int count = json_int(args, {"count", "expected_count"}, 0);
     std::string input = "replace:" + path + ":" + old_text + ":" + new_text;
     if (count > 0)
       input += ":" + std::to_string(count);
     return input;
   }
   if (tool == "grep:") {
-    std::string pattern =
-        args.value("pattern", args.value("query", std::string("")));
-    std::string dir = args.value(
-        "directory", args.value("dir", args.value("path", std::string("."))));
+    std::string pattern = json_string(args, {"pattern", "query"});
+    std::string dir = json_string(args, {"directory", "dir", "path"}, ".");
     std::string filter =
-        args.value("filter", args.value("file_filter", std::string("*")));
+        json_string(args, {"filter", "file_filter"}, "*");
     std::string input = "grep:" + pattern + ":" + dir;
     if (filter != "*")
       input += ":" + filter;
     return input;
   }
   if (tool == "remember:") {
-    return "remember:" +
-           args.value("fact", args.value("text", args.value("content",
-                                                            std::string(""))));
+    return "remember:" + json_string(args, {"fact", "text", "content"});
   }
   if (tool == "analyze:") {
-    return "analyze:" +
-           args.value("path", args.value("directory", std::string(".")));
+    return "analyze:" + json_string(args, {"path", "directory"}, ".");
   }
   if (tool == "components:") {
-    return "components:" +
-           args.value("path", args.value("directory", std::string(".")));
+    return "components:" + json_string(args, {"path", "directory"}, ".");
   }
   if (tool == "todos:") {
-    return "todos:" +
-           args.value("path", args.value("directory", std::string(".")));
+    return "todos:" + json_string(args, {"path", "directory"}, ".");
   }
   if (tool == "tree:") {
-    return "tree:" +
-           args.value("path", args.value("directory", std::string(".")));
+    return "tree:" + json_string(args, {"path", "directory"}, ".");
   }
   if (tool == "git:") {
     std::string sub = call.subcommand.empty() ? std::string("status")
                                                : call.subcommand;
-    std::string path =
-        args.value("path", args.value("directory", std::string(".")));
+    std::string path = json_string(args, {"path", "directory"}, ".");
     return "git:" + sub + (path != "." ? " " + path : "");
   }
   if (tool == "github:") {
-    return "github:" +
-           args.value("params", args.value("query", std::string("")));
+    return "github:" + json_string(args, {"params", "query"});
   }
   if (tool == "list:") {
-    std::string path =
-        args.value("path", args.value("directory", std::string(".")));
-    std::string glob =
-        args.value("glob", args.value("pattern", std::string("*")));
+    std::string path = json_string(args, {"path", "directory"}, ".");
+    std::string glob = json_string(args, {"glob", "pattern"}, "*");
     return "list:" + path + ":" + glob;
   }
   if (tool == "fetch:") {
-    return "fetch:" +
-           args.value("url", args.value("uri", std::string("")));
+    return "fetch:" + json_string(args, {"url", "uri"});
   }
   // The bare memory verb has no arguments and no colon form in dispatch.
   if (tool == "memory")
