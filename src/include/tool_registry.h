@@ -50,6 +50,9 @@ struct ToolSpec {
 // and the tools disabled on the model surface are not offered.
 bool model_callable(const ToolSpec &tool);
 
+std::string render_model_system_prompt(const std::string &context,
+                                       bool tool_loop_enabled);
+
 class ToolRegistry {
 public:
   static ToolRegistry &instance();
@@ -65,6 +68,9 @@ public:
   // example, and the refusals. ai_service never hand-maintains a parallel
   // list, so a registered tool cannot drift from the prompt.
   std::string render_prompt_section() const;
+  // Render the pre-tool-loop prompt section unchanged for compatibility
+  // when the autonomous loop is disabled.
+  std::string render_legacy_prompt_section() const;
   // Names joined for the "Unknown command" recovery message.
   std::string known_names() const;
 

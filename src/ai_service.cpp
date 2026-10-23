@@ -110,16 +110,10 @@ nlohmann::json AIService::create_standard_payload(const std::string &model,
 nlohmann::json AIService::create_payload(const std::string &user_input,
                                          const std::string &context) {
   Core::register_all_tools();
-  const std::string tool_section =
-      Core::ToolRegistry::instance().render_prompt_section();
-
-  std::string system_prompt =
-      "You are an advanced AI agent working inside a codebase.\n\n" +
-      tool_section + "\n" +
-      "Ask for consent when a tool requires it, and do not call a tool that "
-      "is refused. Prefer an observed result over a guessed one.\n\n"
-      "Conversation history:\n" +
-      context;
+  const std::string loop_setting =
+      Utils::Config::get_env_var("AGENTWARE_TOOL_CALL_LOOP", "0");
+  const std::string system_prompt = Core::render_model_system_prompt(
+      context, loop_setting == "1" || loop_setting == "true");
 
   switch (mode_) {
   case Core::AgentMode::MODE_TOGETHER: // Together AI
