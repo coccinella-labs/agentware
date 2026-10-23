@@ -44,12 +44,15 @@ std::string chat_with_xoi_ollama(const nlohmann::json &payload,
   config.provider = xoi::Provider::Ollama;
   config.base_url =
       chat_url.substr(0, chat_url.size() - endpoint_suffix.size());
-  config.timeout_sec =
-      request_timeout_seconds > 0
-          ? static_cast<int>((std::min)(
-                request_timeout_seconds,
-                static_cast<long>(std::numeric_limits<int>::max())))
-          : 60;
+  const long timeout = request_timeout_seconds > 0
+                           ? request_timeout_seconds
+                           : WebService::default_network_timeout();
+  config.timeout_sec = static_cast<int>(
+      (std::clamp)(timeout, 1L,
+                   static_cast<long>(std::numeric_limits<int>::max())));
+  config.proxy_url = "";
+  config.ollama_send_num_predict = false;
+  config.max_response_bytes = std::size_t{8} * 1024U * 1024U;
   config.max_retries = 0;
 
   const auto &messages = payload.at("messages");
@@ -57,10 +60,8 @@ std::string chat_with_xoi_ollama(const nlohmann::json &payload,
       !messages[0].is_object() || !messages[1].is_object() ||
       messages[0].value("role", "") != "system" ||
       messages[1].value("role", "") != "user" ||
-      !messages[0].contains("content") ||
-      !messages[0]["content"].is_string() ||
-      !messages[1].contains("content") ||
-      !messages[1]["content"].is_string()) {
+      !messages[0].contains("content") || !messages[0]["content"].is_string() ||
+      !messages[1].contains("content") || !messages[1]["content"].is_string()) {
     return "Error: xoi Ollama adapter received an unexpected request shape.";
   }
 
@@ -73,14 +74,25 @@ std::string chat_with_xoi_ollama(const nlohmann::json &payload,
   xoi::Client client(std::move(config));
   const auto result = client.send(request);
   if (!result) {
-    if (request_timeout_seconds > 0 &&
-        (result.error().transport_failure == xoi::TransportFailure::Timeout ||
-         is_timeout_error(result.error().message))) {
-      return "Error: model request timeout after " +
-             std::to_string(request_timeout_seconds) +
-             "s (network timeout): " + result.error().message;
+    const auto &error = result.error();
+    if (error.transport_failure == xoi::TransportFailure::Timeout ||
+        is_timeout_error(error.message)) {
+      return "Error: model request timeout after " + std::to_string(timeout) +
+             "s (network timeout): " + error.message;
     }
-    return "Error: AI service request failed: " + result.error().message;
+    if (error.kind == xoi::ErrorKind::Http) {
+      return "Error: AI service returned status code " +
+             std::to_string(error.status) + " - " + error.message +
+             " | Error: HTTP error " + std::to_string(error.status);
+    }
+    if (error.kind == xoi::ErrorKind::Protocol) {
+      return "Error: Unexpected response format from AI service: " +
+             error.message;
+    }
+    if (error.kind == xoi::ErrorKind::ResponseTooLarge) {
+      return "Error: AI service response exceeded the configured size limit.";
+    }
+    return "Error: AI service request failed: " + error.message;
   }
 
   std::string text;

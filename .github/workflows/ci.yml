@@ -228,6 +228,78 @@ jobs:
             build/bin/agentware-agent*
             build/bin/Release/agentware-agent.exe
 
+  xoi-ollama-adapter:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            os_short: ubuntu
+          - os: macos-15
+            os_short: macos
+          - os: windows-latest
+            os_short: windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - name: install Ubuntu dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo sed -i '/packages\.microsoft\.com/d' \
+            /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
+            /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
+            /etc/apt/sources.list.d/microsoft-prod.sources
+          sudo apt-get update -o Acquire::http::Timeout=30 \
+            -o Acquire::Retries=3
+          sudo apt-get install -y nlohmann-json3-dev cmake build-essential \
+            libcurl4-openssl-dev libpqxx-dev expect
+      - name: install macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install cmake nlohmann-json libpqxx expect llvm curl zlib
+      - name: install Windows dependencies
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force;
+          iwr https://chocolatey.org/install.ps1 -UseBasicParsing | iex;
+          choco install -y cmake --no-progress;
+          git clone https://github.com/microsoft/vcpkg.git C:\vcpkg;
+          C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics;
+          C:\vcpkg\vcpkg.exe integrate install;
+          C:\vcpkg\vcpkg.exe install cpr nlohmann-json libpqxx curl --triplet x64-windows
+      - name: configure opt-in xoi adapter
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cmake -S . -B build-xoi \
+              -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake \
+              -DAGENTWARE_USE_XOI_OLLAMA=ON
+          else
+            FLAGS=""
+            [[ "$RUNNER_OS" == "macOS" ]] && \
+              FLAGS="-DCMAKE_PREFIX_PATH=/opt/homebrew"
+            cmake -S . -B build-xoi -DCMAKE_BUILD_TYPE=Debug \
+              -DAGENTWARE_USE_XOI_OLLAMA=ON $FLAGS
+          fi
+      - name: build opt-in xoi adapter
+        shell: bash
+        run: cmake --build build-xoi --config Debug --parallel 2
+      - name: test opt-in xoi adapter
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            ctest --test-dir build-xoi -C Debug --output-on-failure \
+              -R 'basic_tests|cli_behavior'
+          else
+            AGENTWARE_EXPECT_XOI=1 \
+              ctest --test-dir build-xoi --output-on-failure \
+                -R 'basic_tests|cli_behavior|remediation_probes|routing_golden|tool_loop_golden|provider_readiness'
+          fi
+
   coverage:
     runs-on: ubuntu-24.04
     needs: build

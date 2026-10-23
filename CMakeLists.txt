@@ -34,7 +34,7 @@ endif()
 project(AgentwareAgent VERSION ${PROJECT_VERSION} LANGUAGES CXX)
 
 option(AGENTWARE_USE_XOI_OLLAMA
-    "Use the installed xoi SDK for local Ollama requests (experimental)" OFF)
+    "Use the pinned xoi SDK for local Ollama requests (experimental)" OFF)
 
 # Configure version header
 configure_file(src/include/version.h.in include/version.h @ONLY)
@@ -89,7 +89,29 @@ endif()
 # Find dependencies
 find_package(Threads REQUIRED)
 if(AGENTWARE_USE_XOI_OLLAMA)
-    find_package(xoi CONFIG REQUIRED)
+    if(CMAKE_VERSION VERSION_LESS 3.20)
+        message(FATAL_ERROR
+            "AGENTWARE_USE_XOI_OLLAMA requires CMake 3.20 or newer")
+    endif()
+
+    if(DEFINED BUILD_TESTING)
+        set(_agentware_build_testing_defined TRUE)
+        set(_agentware_build_testing "${BUILD_TESTING}")
+    else()
+        set(_agentware_build_testing_defined FALSE)
+    endif()
+    set(BUILD_TESTING OFF)
+    FetchContent_Declare(
+        agentware_xoi
+        GIT_REPOSITORY https://github.com/coccinella-labs/xoi.git
+        GIT_TAG 2b7e78e9b4a80b44df6d9f517cebb29dc742d2a4
+    )
+    FetchContent_MakeAvailable(agentware_xoi)
+    if(_agentware_build_testing_defined)
+        set(BUILD_TESTING "${_agentware_build_testing}")
+    else()
+        unset(BUILD_TESTING)
+    endif()
 endif()
 
 # Find zlib with platform-specific logic, fallback to FetchContent
