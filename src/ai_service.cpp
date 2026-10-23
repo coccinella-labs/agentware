@@ -469,7 +469,6 @@ std::string AIService::chat(const std::string &user_input,
   } catch (const std::exception &e) {
     return "Error: " + std::string(e.what());
   }
-  return "Error: Unknown error occurred in AI service";
 }
 
 } // namespace Services
