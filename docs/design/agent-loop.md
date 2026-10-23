@@ -148,6 +148,9 @@ or, when blocked on the user:
   patterns, error text passed as a path, and command-colon syntax embedded in
   JSON arguments are rejected before dispatch.
 - Cancelled consents: observation says so; no partial state.
+- Tool results are sent as a named `Result of <tool and arguments>` block,
+  followed by an instruction to answer the user's request from that result.
+  The result remains explicitly marked as untrusted data, not instructions.
 - Refusals are returned as quoted observations rather than becoming a turn's
   answer. They consume the shared retry budget.
 - A canonical tool call with identical arguments is never executed twice in
