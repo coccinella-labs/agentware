@@ -110,31 +110,10 @@ nlohmann::json AIService::create_standard_payload(const std::string &model,
 nlohmann::json AIService::create_payload(const std::string &user_input,
                                          const std::string &context) {
   Core::register_all_tools();
-  const std::string tool_section =
-      Core::ToolRegistry::instance().render_prompt_section();
-
-  std::string system_prompt =
-      "You are an advanced AI agent with comprehensive codebase analysis and "
-      "development capabilities.\n\n" +
-      tool_section + "\n" + "CAPABILITIES:\n" +
-      "- Understand codebase structure and relationships\n" +
-      "- Analyze git history and track changes\n" +
-      "- Find and prioritize task comments\n" +
-      "- Advanced text search and replacement with context validation\n" +
-      "- Structured memory system for facts and preferences\n" +
-      "- File operations with safety checks and path validation\n" +
-      "- Enhanced error handling and user feedback\n\n" +
-      "When users ask about codebase analysis, use analyze: or components: "
-      "commands.\n"
-      "For git-related questions, use git: commands.\n"
-      "For finding tasks or technical debt, use todos: command.\n"
-      "For complex file editing, use replace: instead of write: when modifying "
-      "existing content.\n"
-      "Use grep: to search for code patterns or text across multiple files.\n"
-      "Remember important user preferences and facts using remember:.\n"
-      "Be helpful, precise, and professional.\n\n"
-      "Conversation history:\n" +
-      context;
+  const std::string loop_setting =
+      Utils::Config::get_env_var("AGENTWARE_TOOL_CALL_LOOP", "0");
+  const std::string system_prompt = Core::render_model_system_prompt(
+      context, loop_setting == "1" || loop_setting == "true");
 
   switch (mode_) {
   case Core::AgentMode::MODE_TOGETHER: // Together AI
