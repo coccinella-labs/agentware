@@ -11,6 +11,13 @@
 #include <cctype>
 #include <sstream>
 #include <stdexcept>
+#ifdef AGENTWARE_USE_XOI_OLLAMA
+#include <xoi/client.hpp>
+#include <limits>
+#include <string_view>
+#include <utility>
+#include <variant>
+#endif
 
 // Use the HeaderMap from web_service.h
 
@@ -19,6 +26,89 @@
 namespace Services {
 
 namespace {
+
+bool is_timeout_error(const std::string &message);
+
+#ifdef AGENTWARE_USE_XOI_OLLAMA
+std::string chat_with_xoi_ollama(const nlohmann::json &payload,
+                                 const std::string &chat_url,
+                                 long request_timeout_seconds) {
+  constexpr std::string_view endpoint_suffix = "/api/chat";
+  if (chat_url.size() <= endpoint_suffix.size() ||
+      chat_url.compare(chat_url.size() - endpoint_suffix.size(),
+                       endpoint_suffix.size(), endpoint_suffix) != 0) {
+    return "Error: xoi Ollama adapter received an unexpected endpoint.";
+  }
+
+  xoi::Config config;
+  config.provider = xoi::Provider::Ollama;
+  config.base_url =
+      chat_url.substr(0, chat_url.size() - endpoint_suffix.size());
+  config.timeout_sec =
+      request_timeout_seconds > 0
+          ? static_cast<int>((std::min)(
+                request_timeout_seconds,
+                static_cast<long>(std::numeric_limits<int>::max())))
+          : 60;
+  config.max_retries = 0;
+
+  const auto &messages = payload.at("messages");
+  if (!messages.is_array() || messages.size() != 2 ||
+      !messages[0].is_object() || !messages[1].is_object() ||
+      messages[0].value("role", "") != "system" ||
+      messages[1].value("role", "") != "user" ||
+      !messages[0].contains("content") ||
+      !messages[0]["content"].is_string() ||
+      !messages[1].contains("content") ||
+      !messages[1]["content"].is_string()) {
+    return "Error: xoi Ollama adapter received an unexpected request shape.";
+  }
+
+  xoi::Request request;
+  request.model = payload.at("model").get<std::string>();
+  request.system = messages[0]["content"].get<std::string>();
+  request.messages.push_back(
+      {"user", {xoi::Text{messages[1]["content"].get<std::string>()}}});
+
+  xoi::Client client(std::move(config));
+  const auto result = client.send(request);
+  if (!result) {
+    if (request_timeout_seconds > 0 &&
+        (result.error().transport_failure == xoi::TransportFailure::Timeout ||
+         is_timeout_error(result.error().message))) {
+      return "Error: model request timeout after " +
+             std::to_string(request_timeout_seconds) +
+             "s (network timeout): " + result.error().message;
+    }
+    return "Error: AI service request failed: " + result.error().message;
+  }
+
+  std::string text;
+  const xoi::ToolUse *tool_call = nullptr;
+  for (const auto &block : result.value().content) {
+    if (const auto *plain_text = std::get_if<xoi::Text>(&block)) {
+      text += plain_text->text;
+    } else if (const auto *call = std::get_if<xoi::ToolUse>(&block)) {
+      if (tool_call != nullptr) {
+        return "Error: xoi Ollama returned multiple native tool calls; "
+               "Agentware accepts one tool call per model turn.";
+      }
+      tool_call = call;
+    }
+  }
+
+  if (tool_call != nullptr) {
+    return nlohmann::json{{"tool", tool_call->name},
+                          {"arguments", tool_call->input}}
+        .dump();
+  }
+  if (text.empty()) {
+    return "Error: Unexpected response format from AI service: "
+           "xoi returned no content.";
+  }
+  return text;
+}
+#endif
 
 std::string test_endpoint(const char *variable, const char *path) {
   const char *base_url = std::getenv(variable);
@@ -243,6 +333,14 @@ std::string AIService::chat(const std::string &user_input,
   Utils::startup_trace("ai: endpoint resolved: " + url);
 
   try {
+#ifdef AGENTWARE_USE_XOI_OLLAMA
+    if (mode_ == Core::AgentMode::MODE_LLAMA_3B ||
+        mode_ == Core::AgentMode::MODE_LLAMA_LATEST ||
+        mode_ == Core::AgentMode::MODE_LLAMA_31) {
+      return chat_with_xoi_ollama(payload, url, request_timeout_seconds);
+    }
+#endif
+
     // Set up headers
     HeaderMap headers = {{"Content-Type", "application/json"},
                          {"Accept", "text/event-stream"}};

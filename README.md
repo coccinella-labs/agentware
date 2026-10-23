@@ -24,6 +24,18 @@ Each hosted mode needs its API key in the environment; see `.env.example` for
 the list. The three Llama modes and Offline run against a local Ollama server
 and need no key.
 
+An experimental adapter can route local Ollama requests through an installed
+xoi CMake package:
+
+```bash
+cmake -S . -B build -DAGENTWARE_USE_XOI_OLLAMA=ON \
+  -DCMAKE_PREFIX_PATH=/path/to/xoi/install
+```
+
+The option is off by default and does not affect hosted providers. Agentware
+continues to own its prompt, tool loop, permissions, and safety checks; this
+adapter is a prototype, not a production-readiness claim.
+
 ## What it does
 
 Around twenty services behind one binary: agent orchestration, AI provider calls, auth, checkpoints, codebase search, command execution, configuration, context tracking, a database layer, file and multi-file operations, git and GitHub integration, an MCP client module, memory management, sandboxing, theming, input validation, and a web service.

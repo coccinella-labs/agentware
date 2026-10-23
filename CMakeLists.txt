@@ -33,6 +33,9 @@ endif()
 
 project(AgentwareAgent VERSION ${PROJECT_VERSION} LANGUAGES CXX)
 
+option(AGENTWARE_USE_XOI_OLLAMA
+    "Use the installed xoi SDK for local Ollama requests (experimental)" OFF)
+
 # Configure version header
 configure_file(src/include/version.h.in include/version.h @ONLY)
 
@@ -85,6 +88,9 @@ endif()
 
 # Find dependencies
 find_package(Threads REQUIRED)
+if(AGENTWARE_USE_XOI_OLLAMA)
+    find_package(xoi CONFIG REQUIRED)
+endif()
 
 # Find zlib with platform-specific logic, fallback to FetchContent
 set(zlib_is_found FALSE)
@@ -623,6 +629,10 @@ target_link_libraries(agentware_lib PRIVATE
     Threads::Threads
     $<$<BOOL:${HAVE_PQXX}>:${PQXX_LIBRARY}>
 )
+if(AGENTWARE_USE_XOI_OLLAMA)
+    target_compile_definitions(agentware_lib PRIVATE AGENTWARE_USE_XOI_OLLAMA)
+    target_link_libraries(agentware_lib PRIVATE xoi::xoi)
+endif()
 
 # Set additional linker flags for macOS
 if(APPLE)
