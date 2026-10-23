@@ -63,11 +63,12 @@ std::string display_name(const std::string &name) {
 
 } // namespace
 
-bool model_callable(const ToolSpec &t) {
+bool model_callable(const ToolSpec &tool) {
   ToolCall probe;
-  probe.tool = t.name;
+  probe.tool = tool.name;
   probe.resolved = true;
-  return t.risk != ToolRiskTier::Mutating && !is_model_surface_disabled(probe);
+  return tool.risk != ToolRiskTier::Mutating &&
+         !is_model_surface_disabled(probe);
 }
 
 std::string ToolRegistry::render_prompt_section() const {
@@ -86,21 +87,21 @@ std::string ToolRegistry::render_prompt_section() const {
 
   oss << "Model-callable tools:\n";
   std::vector<std::string> refused;
-  for (const auto &t : tools_) {
-    if (!model_callable(t)) {
-      refused.push_back(display_name(t.name));
+  for (const auto &tool : tools_) {
+    if (!model_callable(tool)) {
+      refused.push_back(display_name(tool.name));
       continue;
     }
     ToolCall probe;
-    probe.tool = t.name;
+    probe.tool = tool.name;
     probe.resolved = true;
-    oss << "- " << display_name(t.name);
-    if (!t.model_args.empty()) {
+    oss << "- " << display_name(tool.name);
+    if (!tool.model_args.empty()) {
       oss << ": ";
-      for (size_t i = 0; i < t.model_args.size(); ++i) {
+      for (size_t i = 0; i < tool.model_args.size(); ++i) {
         if (i)
           oss << ", ";
-        oss << t.model_args[i];
+        oss << tool.model_args[i];
       }
     }
     if (requires_consent(probe))
@@ -192,7 +193,6 @@ std::string render_model_system_prompt(const std::string &context,
            "Conversation history:\n" +
            context;
   }
-
   return "You are an advanced AI agent working inside a codebase.\n\n" +
          registry.render_prompt_section() + "\n" +
          "Ask for consent when a tool requires it, and do not call a tool "

@@ -6,6 +6,9 @@
 #include "web_service.h"
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
+#include <chrono>
+#include <algorithm>
+#include <cctype>
 #include <sstream>
 #include <stdexcept>
 
@@ -24,6 +27,14 @@ std::string test_endpoint(const char *variable, const char *path) {
                              std::string(variable));
   }
   return std::string(base_url) + path;
+}
+
+bool is_timeout_error(const std::string &message) {
+  std::string lower = message;
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return lower.find("timed out") != std::string::npos ||
+         lower.find("timeout") != std::string::npos;
 }
 
 } // namespace
@@ -218,7 +229,8 @@ std::string safe_get_string(const nlohmann::json &j,
 }
 
 std::string AIService::chat(const std::string &user_input,
-                            const std::string &context) {
+                            const std::string &context,
+                            long request_timeout_seconds) {
   if (!is_available()) {
     return "Error: AI service is not available. Please check your API key and "
            "internet connection.";
@@ -272,15 +284,23 @@ std::string AIService::chat(const std::string &user_input,
         mode_ == Core::AgentMode::MODE_LLAMA_LATEST ||
         mode_ == Core::AgentMode::MODE_LLAMA_31) {
       // All providers use POST
-      response = web_service.post_json(url, json_body, headers);
+      response = web_service.post_json(url, json_body, headers,
+                                       request_timeout_seconds);
     } else {
       // Fallback (should not happen)
-      response = web_service.post_json(url, json_body, headers);
+      response = web_service.post_json(url, json_body, headers,
+                                       request_timeout_seconds);
     }
     Utils::startup_trace("ai: response received, status " +
                          std::to_string(response.status_code));
 
     if (response.status_code != 200) {
+      if (request_timeout_seconds > 0 && response.status_code == 0 &&
+          is_timeout_error(response.error_message)) {
+        return "Error: model request timeout after " +
+               std::to_string(request_timeout_seconds) +
+               "s (network timeout): " + response.error_message;
+      }
       std::string error_content = response.content;
       if (error_content.length() > 500) {
         error_content = error_content.substr(0, 500) + "...[truncated]";

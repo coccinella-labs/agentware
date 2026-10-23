@@ -92,6 +92,7 @@ harness_trace "workspace created"
 # Fixtures: a tiny tree so tool output is small and stable.
 printf 'golden needle alpha\nsecond line\n' > hello.txt
 printf 'notes file with needle words\n' > notes.md
+printf '0.1.7\n' > VERSION
 printf 'API_KEY=supersecret\n' > .env
 printf 'API_KEY=supersecret\n' > id_rsa
 mkdir -p tl_fixture
@@ -241,6 +242,7 @@ run_case() {
     "TEST_OLLAMA_URL=http://127.0.0.1:${PROVIDER_PORT}"
     # A stalled case must cost seconds, not the 30 s network default.
     "AGENTWARE_NET_TIMEOUT_SEC=${NET_TIMEOUT_SEC:-5}"
+    "AGENTWARE_MODEL_REQUEST_TIMEOUT_SEC=${MODEL_REQUEST_TIMEOUT_SEC:-120}"
   )
   if [ -n "$tool_timeout" ]; then
     env_args+=("AGENTWARE_TOOL_TIMEOUT_SEC=$tool_timeout")
@@ -264,7 +266,88 @@ run_case() {
   stop_provider
   harness_trace "provider stopped" "$name"
   harness_trace "timing: provider=$(( provider_ready_ms - case_started_ms ))ms agent=$(( agent_ended_ms - agent_started_ms ))ms" "$name"
-  if echo "$actual" | grep -qF "$expect"; then
+  if grep -qF "$expect" <<< "$actual"; then
+    if [ "$name" = "timeout-retry" ]; then
+      local requests
+      requests=$(grep -c "mock provider: request received" "$PROV/tl_prov.log" || true)
+      if [ "$requests" -lt 2 ] ||
+         ! grep -qF "Recovered after timeout" <<< "$actual"; then
+        echo "FAIL  $name (timed-out request was not retried to a usable response)"
+        echo "$actual" | sed 's/^/      | /' | head -14
+        dump_provider_log
+        FAILURES=$((FAILURES + 1))
+        return
+      fi
+      if ! grep -qF "configured request limit 1 s" <<< "$actual" ||
+         ! grep -qF "network timeout" <<< "$actual"; then
+        echo "FAIL  $name (timeout source or configured limit was not reported)"
+        echo "$actual" | sed -n '1,14p'
+        FAILURES=$((FAILURES + 1))
+        return
+      fi
+    fi
+    if [ "$name" = "repeat-limit" ]; then
+      local repeat_calls
+      repeat_calls=$(grep -c '^Tool list:' <<< "$actual" || true)
+      local requests
+      requests=$(grep -c "mock provider: request received" "$PROV/tl_prov.log" || true)
+      if [ "$repeat_calls" -ne 1 ] || [ "$requests" -ne 4 ] ||
+         ! grep -qF "Earlier result:" <<< "$actual" ||
+         ! grep -qF "Hint: use this result" <<< "$actual" ||
+         ! grep -qF "Repeat limit (3)" <<< "$actual"; then
+        echo "FAIL  $name (repeat was executed again or not bounded)"
+        echo "$actual" | sed 's/^/      | /' | head -14
+        FAILURES=$((FAILURES + 1))
+        return
+      fi
+    fi
+    if [ "$name" = "single-read" ] &&
+       ! grep -qF "Tools executed this turn: list:tl_fixture:*" <<< "$actual"; then
+      echo "FAIL  $name (executed tool summary is missing or inaccurate)"
+      FAILURES=$((FAILURES + 1))
+      return
+    fi
+    if [ "$name" = "empty-grep-teaches" ] ||
+       [ "$name" = "colon-syntax-teaches" ]; then
+      if ! grep -qF "hello.txt" <<< "$actual"; then
+        echo "FAIL  $name (corrected tool call did not run)"
+        FAILURES=$((FAILURES + 1))
+        return
+      fi
+    fi
+    if [ "$name" = "absolute-path-teaches" ] &&
+       ! grep -qF "Entries in ." <<< "$actual"; then
+      echo "FAIL  $name (corrected relative path did not run)"
+      FAILURES=$((FAILURES + 1))
+      return
+    fi
+    if [ "$name" = "invalid-read-start-type" ] ||
+       [ "$name" = "invalid-read-start-negative" ]; then
+      if ! grep -qF "0.1.7" <<< "$actual"; then
+        echo "FAIL  $name (corrected read call did not return the file)"
+        sed -n '1,20{s/^/      | /;p;}' <<< "$actual"
+        FAILURES=$((FAILURES + 1))
+        return
+      fi
+    fi
+    if [ "$name" = "error-string-path-teaches" ] &&
+       ! grep -qF "Tools executed this turn: none" <<< "$actual"; then
+      echo "FAIL  $name (error-string path reached dispatch)"
+      FAILURES=$((FAILURES + 1))
+      return
+    fi
+    if [ "$name" = "refused-write-not-executed" ] &&
+       [ -e "$WORK/claimed.txt" ]; then
+      echo "FAIL  $name (refused write changed the fixture)"
+      FAILURES=$((FAILURES + 1))
+      return
+    fi
+    if [ "$name" = "refused-write-not-executed" ] &&
+       ! grep -qF "Model answer:" <<< "$actual"; then
+      echo "FAIL  $name (model-authored answer was not labeled)"
+      FAILURES=$((FAILURES + 1))
+      return
+    fi
     echo "PASS  $name"
   else
     echo "FAIL  $name (expected '$expect')"
@@ -315,13 +398,13 @@ expect_refused() {
   harness_trace "provider stopped" "$name"
   harness_trace "timing: provider=$(( provider_ready_ms - case_started_ms ))ms agent=$(( agent_ended_ms - agent_started_ms ))ms" "$name"
   local refused=0
-  echo "$actual" | grep -qE "unknown tool |not available in read-only mode|not available on the model surface|consent denied: no TTY" && refused=1
+  grep -qE "unknown tool |not available in read-only mode|not available on the model surface|consent denied: no TTY" <<< "$actual" && refused=1
   if [ "$refused" -eq 0 ]; then
     echo "FAIL  $name (no refusal marker in output)"
     echo "$actual" | sed 's/^/      | /' | head -14
     dump_provider_log
     FAILURES=$((FAILURES + 1))
-  elif echo "$actual" | grep -qF "$success"; then
+  elif grep -qF "$success" <<< "$actual"; then
     echo "FAIL  $name (executed: found '$success')"
     echo "$actual" | sed 's/^/      | /' | head -14
     dump_provider_log
@@ -369,7 +452,7 @@ expect_no() {
   stop_provider
   harness_trace "provider stopped" "$name"
   harness_trace "timing: provider=$(( provider_ready_ms - case_started_ms ))ms agent=$(( agent_ended_ms - agent_started_ms ))ms" "$name"
-  if echo "$actual" | grep -qF "$absent"; then
+  if grep -qF "$absent" <<< "$actual"; then
     echo "FAIL  $name (unexpected '$absent')"
     echo "$actual" | sed 's/^/      | /' | head -14
     dump_provider_log
@@ -383,6 +466,67 @@ expect_no() {
 run_case "single-read" \
   '["{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","Done."]' \
   "list the fixture directory" "one.txt"
+
+# An exact repeat, including a case-variant tool alias, returns the earlier
+# observation and stops after the third retry without re-running the tool.
+MODEL_REQUEST_TIMEOUT_SEC=5
+run_case "repeat-limit" \
+  '["{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"LIST:\",\"arguments\":{\"path\":\"tl_fixture\",\"glob\":\"*\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\",\"glob\":\"*\"}}","Done."]' \
+  "list the fixture directory" "Repeat limit (3)"
+
+# The model receives a teaching observation, corrects the empty pattern,
+# and the corrected read-only call executes.
+run_case "empty-grep-teaches" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"\",\"directory\":\".\"}}","{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"needle\",\"directory\":\".\"}}","Done."]' \
+  "search for needle" "A pattern is required"
+
+run_case "empty-search-teaches" \
+  '["{\"tool\":\"search\",\"arguments\":{\"query\":\" \"}}","Done."]' \
+  "search the web" "A search query is required"
+
+# Legacy colon syntax embedded in a JSON argument is rejected before dispatch.
+run_case "colon-syntax-teaches" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"grep:needle:.\",\"directory\":\".\"}}","{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"needle\",\"directory\":\".\"}}","Done."]' \
+  "search for needle" "command syntax belongs in the top-level tool field"
+
+run_case "invalid-read-start-type" \
+  '["{\"tool\":\"read\",\"arguments\":{\"path\":\"VERSION\",\"start\":\"first\",\"count\":1}}","{\"tool\":\"read\",\"arguments\":{\"path\":\"VERSION\"}}","Done."]' \
+  "read VERSION" "line ranges are zero-based"
+
+run_case "invalid-read-start-negative" \
+  '["{\"tool\":\"read\",\"arguments\":{\"path\":\"VERSION\",\"start\":-1,\"count\":1}}","{\"tool\":\"read\",\"arguments\":{\"path\":\"VERSION\",\"start\":0,\"count\":1}}","Done."]' \
+  "read VERSION" "line start must not be negative"
+
+# A previous path refusal is not accepted as a path argument on the next call.
+run_case "error-string-path-teaches" \
+  '["{\"tool\":\"list\",\"arguments\":{\"path\":\"Path escapes the permitted root (cwd): /tmp\"}}","Done."]' \
+  "list the permitted directory" "path contains an error message"
+
+# Absolute path refusal teaches cwd-relative paths and the working-directory
+# example; the corrected call runs.
+ABS_OUT="$(mktemp -d)"
+replies=$(python3 -c "
+import json, sys
+print(json.dumps([
+  json.dumps({'tool':'list','arguments':{'path':sys.argv[1]}}),
+  json.dumps({'tool':'list','arguments':{'path':'.'}}),
+  'Done.']))
+" "$ABS_OUT")
+run_case "absolute-path-teaches" "$replies" \
+  "list outside" "relative to the working directory"
+
+# A mutating model call stays refused, the loop-generated summary reports no
+# execution, and the target remains absent even if the model later claims it.
+run_case "refused-write-not-executed" \
+  '["{\"tool\":\"write\",\"arguments\":{\"filename\":\"claimed.txt\",\"content\":\"pwned\"}}","I wrote claimed.txt successfully."]' \
+  "write a file" "Tools executed this turn: none"
+
+# A model-request timeout is an observation and the next request can finish.
+MODEL_REQUEST_TIMEOUT_SEC=1
+run_case "timeout-retry" \
+  '[{"content":"ignored slow answer","delay_seconds":2},"Recovered after timeout"]' \
+  "complete the task" "Model request timed out"
+MODEL_REQUEST_TIMEOUT_SEC=120
 
 # 1b. Argument scalar types are model output. A string-typed line count
 #     must be read leniently, not throw out of the loop. Ranges are zero-based.
@@ -420,6 +564,10 @@ run_case "mutating-refused" \
 run_case "done-signal" \
   '["{\"done\":true,\"summary\":\"all good\"}"]' \
   "summarize" "all good"
+
+run_case "done-answer" \
+  '["{\"done\":true,\"answer\":\"answer field works\"}"]' \
+  "summarize" "answer field works"
 
 # 8. Completion signal needs_user_input surfaces the question.
 run_case "needs-input" \
@@ -498,9 +646,9 @@ run_case "symlink-escape" \
   '["{\"tool\":\"read\",\"arguments\":{\"filename\":\"escape_link/secret.txt\"}}","Done."]' \
   "read escaped" "Path escapes the permitted root"
 
-# 16. Per-turn cap (8) trips on the 9th consecutive tool call.
+# 16. Per-turn cap (8) trips on the 9th distinct tool call.
 run_case "turn-cap-trip" \
-  '["{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\"}}","Done."]' \
+  '["{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\",\"glob\":\"one.txt\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\",\"glob\":\"two.txt\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\",\"glob\":\"brace.txt\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\",\"glob\":\"*.txt\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\",\"glob\":\"*.md\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\",\"glob\":\"one*\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\",\"glob\":\"two*\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\",\"glob\":\"brace*\"}}","{\"tool\":\"list\",\"arguments\":{\"path\":\"tl_fixture\",\"glob\":\"missing\"}}","Done."]' \
   "list many" "Tool turn cap (8) reached"
 
 # 17. grep must not leak secrets from a secrets file even when it matches.

@@ -502,7 +502,8 @@ bool is_loopback_url(const std::string &url) {
 
 WebResponse WebService::post_json(const std::string &url,
                                   const std::string &json_body,
-                                  const HeaderMap &headers) {
+                                  const HeaderMap &headers,
+                                  long timeout_seconds) {
   WebResponse response;
   response.success = false;
 
@@ -534,9 +535,11 @@ WebResponse WebService::post_json(const std::string &url,
       session.SetHeader(cpr::Header{{kv.first, kv.second}});
     }
     session.SetBody(cpr::Body{json_body});
-    session.SetTimeout(cpr::Timeout{std::chrono::seconds{default_network_timeout()}});
+    const long request_timeout =
+        timeout_seconds > 0 ? timeout_seconds : default_network_timeout();
+    session.SetTimeout(cpr::Timeout{std::chrono::seconds{request_timeout}});
     Utils::startup_trace("web: timeout set to " +
-                         std::to_string(default_network_timeout()) + "s");
+                         std::to_string(request_timeout) + "s");
     if (loopback) {
       // An explicit empty proxy disables the environment proxy for this
       // request.
