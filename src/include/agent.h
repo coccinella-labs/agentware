@@ -53,8 +53,8 @@ public:
   // last_command_result_. Used by the model tool-call loop to avoid
   // data races when a tool times out and its thread is detached.
   void handle_direct_command(const std::string &input, bool silent = false,
-                            std::string *out_result = nullptr,
-                            bool record = true);
+                             std::string *out_result = nullptr,
+                             bool record = true);
   void handle_ai_chat(const std::string &input);
   // PR-3 tool-call seam helpers (flag-gated, default off).
   // Extracts a single JSON tool call from assistant text. Returns

@@ -30,6 +30,7 @@ struct WebResponse {
 class WebService {
 private:
   static std::string get_api_key();
+
 public:
   // Network timeout (seconds) for WebService calls. Defaults to 30; overridable
   // via AGENTWARE_NET_TIMEOUT_SEC. Used to scope shorter timeouts to the

@@ -70,8 +70,8 @@ inline bool run_with_timeout(std::function<void()> fn, int timeout_sec) {
     fn();
     done = true;
   });
-  auto deadline = std::chrono::steady_clock::now() +
-                  std::chrono::seconds(timeout_sec);
+  auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(timeout_sec);
   while (!done.load() && std::chrono::steady_clock::now() < deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }

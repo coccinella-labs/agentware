@@ -38,8 +38,8 @@ inline void startup_trace(const std::string &step) {
   const auto now = std::chrono::steady_clock::now();
   const double elapsed_ms =
       std::chrono::duration<double, std::milli>(now - start).count();
-  const auto wall = std::chrono::system_clock::to_time_t(
-      std::chrono::system_clock::now());
+  const auto wall =
+      std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   std::tm parts{};
 #if defined(_WIN32)
   localtime_s(&parts, &wall);

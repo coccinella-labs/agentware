@@ -43,7 +43,8 @@ int json_int(const nlohmann::json &args,
       continue;
     if (it->is_number_unsigned()) {
       const auto value = it->get<unsigned long long>();
-      return value > static_cast<unsigned long long>(std::numeric_limits<int>::max())
+      return value > static_cast<unsigned long long>(
+                         std::numeric_limits<int>::max())
                  ? fallback
                  : static_cast<int>(value);
     }
@@ -56,8 +57,7 @@ int json_int(const nlohmann::json &args,
     }
     if (it->is_number_float()) {
       const double value = it->get<double>();
-      return !std::isfinite(value) ||
-                     value < std::numeric_limits<int>::min() ||
+      return !std::isfinite(value) || value < std::numeric_limits<int>::min() ||
                      value > std::numeric_limits<int>::max()
                  ? fallback
                  : static_cast<int>(value);
@@ -262,20 +262,18 @@ std::string validate_model_tool_arguments(const ToolCall &call) {
         int64_t parsed_value = 0;
         if (number.is_string()) {
           const auto &text = number.get_ref<const std::string &>();
-          const auto result =
-              std::from_chars(text.data(), text.data() + text.size(),
-                              parsed_value);
+          const auto result = std::from_chars(
+              text.data(), text.data() + text.size(), parsed_value);
           if (result.ec != std::errc{} ||
               result.ptr != text.data() + text.size())
             return std::string("argument '") + name + "' must be an integer";
         } else {
-          parsed_value =
-              number.is_number_unsigned()
-                  ? static_cast<int64_t>(std::min<uint64_t>(
-                        number.get<uint64_t>(),
-                        static_cast<uint64_t>(
-                            std::numeric_limits<int64_t>::max())))
-                  : number.get<int64_t>();
+          parsed_value = number.is_number_unsigned()
+                             ? static_cast<int64_t>(std::min<uint64_t>(
+                                   number.get<uint64_t>(),
+                                   static_cast<uint64_t>(
+                                       std::numeric_limits<int64_t>::max())))
+                             : number.get<int64_t>();
         }
         if (number.is_number_unsigned()) {
           if (number.get<uint64_t>() >
@@ -380,8 +378,9 @@ std::string validate_model_tool_arguments(const ToolCall &call) {
 // not take a path.
 std::string tool_call_path(const ToolCall &call) {
   if (call.tool == "read:") {
-    return call.args.value("path", call.args.value("filename",
-                           call.args.value("file", std::string(""))));
+    return call.args.value(
+        "path",
+        call.args.value("filename", call.args.value("file", std::string(""))));
   }
   return "";
 }
@@ -436,7 +435,8 @@ std::string tool_call_to_input(const ToolCall &call) {
   if (tool == "replace:") {
     std::string path = json_string(args, {"path", "filename", "file"});
     std::string old_text = json_string(args, {"old", "old_text", "search"});
-    std::string new_text = json_string(args, {"new", "new_text", "replacement"});
+    std::string new_text =
+        json_string(args, {"new", "new_text", "replacement"});
     int count = json_int(args, {"count", "expected_count"}, 0);
     std::string input = "replace:" + path + ":" + old_text + ":" + new_text;
     if (count > 0)
@@ -446,8 +446,7 @@ std::string tool_call_to_input(const ToolCall &call) {
   if (tool == "grep:") {
     std::string pattern = json_string(args, {"pattern", "query"});
     std::string dir = json_string(args, {"directory", "dir", "path"}, ".");
-    std::string filter =
-        json_string(args, {"filter", "file_filter"}, "*");
+    std::string filter = json_string(args, {"filter", "file_filter"}, "*");
     std::string input = "grep:" + pattern + ":" + dir;
     if (filter != "*")
       input += ":" + filter;
@@ -469,8 +468,8 @@ std::string tool_call_to_input(const ToolCall &call) {
     return "tree:" + json_string(args, {"path", "directory"}, ".");
   }
   if (tool == "git:") {
-    std::string sub = call.subcommand.empty() ? std::string("status")
-                                               : call.subcommand;
+    std::string sub =
+        call.subcommand.empty() ? std::string("status") : call.subcommand;
     std::string path = json_string(args, {"path", "directory"}, ".");
     return "git:" + sub + (path != "." ? " " + path : "");
   }
