@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.8] - 2026-10-16
+
+*
+
 <!-- Unreleased records user-visible changes on main between releases. Move entries into a version section when that version is tagged. -->
 
 ## [Unreleased]
