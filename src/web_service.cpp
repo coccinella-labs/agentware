@@ -487,10 +487,10 @@ namespace {
 
 // True when the URL names a loopback host (127.0.0.0/8, ::1, localhost).
 bool is_loopback_url(const std::string &url) {
-  static const std::string hosts[] = {"http://127.", "https://127.",
-                                      "http://[::1]", "https://[::1]",
+  static const std::string hosts[] = {"http://127.",      "https://127.",
+                                      "http://[::1]",     "https://[::1]",
                                       "http://localhost", "https://localhost",
-                                      "http://0.0.0.0", "https://0.0.0.0"};
+                                      "http://0.0.0.0",   "https://0.0.0.0"};
   for (const auto &h : hosts) {
     if (url.rfind(h, 0) == 0)
       return true;

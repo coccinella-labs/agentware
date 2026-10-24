@@ -2407,7 +2407,8 @@ TEST(ToolRegistrySnapshotTest, MatchesCheckedInSnapshot) {
   const std::string actual = Core::tool_registry_dump();
   if (expected != actual) {
     std::cerr << "tool registry snapshot mismatch\n--- expected ---\n"
-              << expected << "--- actual ---\n" << actual;
+              << expected << "--- actual ---\n"
+              << actual;
   }
   EXPECT_EQ(actual, expected)
       << "tool registry changed; update src/tests/tool_registry_snapshot.txt "
@@ -2453,7 +2454,8 @@ TEST(TimeoutUtilTest, FastCompletes) {
 }
 
 TEST(TimeoutUtilTest, SlowTimesOut) {
-  EXPECT_FALSE(Core::run_with_timeout([]() { std::this_thread::sleep_for(std::chrono::seconds(2)); }, 1));
+  EXPECT_FALSE(Core::run_with_timeout(
+      []() { std::this_thread::sleep_for(std::chrono::seconds(2)); }, 1));
 }
 
 TEST(ToolRegistryTest, RegisterAndFind) {

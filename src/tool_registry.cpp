@@ -129,8 +129,7 @@ std::string ToolRegistry::render_legacy_prompt_section() const {
       return "BASIC COMMANDS";
     if (n == "replace:" || n == "grep:")
       return "ADVANCED FILE OPERATIONS";
-    if (n == "analyze:" || n == "components:" || n == "todos:" ||
-        n == "tree:")
+    if (n == "analyze:" || n == "components:" || n == "todos:" || n == "tree:")
       return "CODEBASE ANALYSIS";
     if (n == "git:" || n == "github:")
       return "GIT INTEGRATION";

@@ -1,8 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
 <!-- Unreleased records user-visible changes on main between releases. Move entries into a version section when that version is tagged. -->
 
-## [Unreleased]
+## [0.1.8] - 2026-10-16
 
 * Model-driven tool-call loop: opt-in autonomous agent execution (`AGENTWARE_TOOL_CALL_LOOP=1`) allowing models to propose JSON tool calls that the runtime validates, executes, and feeds back as observations across multiple turns.
 * Central `ToolRegistry`: a single source of truth for tool definitions, capability classifications (read-only vs mutating), model-surface dispatch metadata, and interactive consent policies.
