@@ -306,10 +306,10 @@ jobs:
             --base main \
             --head "$BRANCH" \
             --title "Daily maintenance report $(date -u +%F)" \
-            --body "Automated daily repository health report. The checks are read-only; anything the
+            --body "Automated daily repository health report. The checks are read-only; anything the \
           report finds wrong is fixed by a human through the normal pull request process.
 
-          Each run adds one dated report to this branch and updates this pull request. It is merged
+          Each run adds one dated report to this branch and updates this pull request. It is merged \
           through the merge queue like any other change, so the required checks apply.
 
           Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
@@ -352,8 +352,7 @@ jobs:
             echo ""
             echo "1. Approves the held workflow runs on this pull request."
             echo "2. Waits for lint, build (ubuntu, debug) and build (windows, release) to pass."
-            echo "3. Dispatches the \"Enqueue report for merge\" workflow with expected_sha"
-            printf '   set to `%s`.\n' "$head_oid"
+            printf '3. Dispatches the "Enqueue report for merge" workflow with expected_sha set to `%s`.\n' "$head_oid"
           } > "$body_file"
 
           ids=$(gh api "repos/$GITHUB_REPOSITORY/issues/$pr_number/comments?per_page=100" \
