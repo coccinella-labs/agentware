@@ -109,7 +109,8 @@ std::string ToolRegistry::render_prompt_section() const {
     oss << "\n";
   }
   oss << "\ngrep takes a case-insensitive regular expression in the "
-         "documented dialect (no backreferences, no look-around).\n";
+         "documented dialect (no backreferences, no look-around). Pass "
+         "case_sensitive=true to match case exactly.\n";
   oss << "\nExample: {\"tool\": \"read\", \"arguments\": {\"path\": "
          "\"README.md\"}}\n\n";
   oss << "Refused on this surface: ";
@@ -270,7 +271,7 @@ void register_all_tools() {
                    {"• grep:pattern[:directory[:file_filter]] - Search for "
                     "patterns in files "
                     "and directories"},
-                   {"pattern", "directory", "filter"}});
+                   {"pattern", "directory", "filter", "case_sensitive"}});
   // CODEBASE ANALYSIS
   R.register_tool(
       {"analyze:",

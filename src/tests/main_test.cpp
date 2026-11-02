@@ -1625,6 +1625,62 @@ TEST(RipgrepBackend, CaseInsensitiveByDefault) {
   std::filesystem::remove_all(dir);
 }
 
+TEST(NativeSearch, CaseSensitiveOptIn) {
+  auto dir = fresh_temp_dir("native_case");
+  {
+    std::ofstream f(dir / "match.txt");
+    f << "line with Zzq-Mixed-Case in it\n";
+  }
+
+  Services::SearchCapabilities caps; // force native backend
+  Services::SearchOptions options;
+  options.directory = dir.string();
+  options.pattern = "zzq-mixed-case";
+  auto insensitive = Services::search_code(caps, options);
+  ASSERT_EQ(insensitive.matches.size(), 1u);
+
+  // Same pattern, wrong case, case-sensitive: no match.
+  options.case_sensitive = true;
+  auto sensitive_miss = Services::search_code(caps, options);
+  EXPECT_TRUE(sensitive_miss.matches.empty());
+
+  // Exact case, case-sensitive: match.
+  options.pattern = "Zzq-Mixed-Case";
+  auto sensitive_hit = Services::search_code(caps, options);
+  ASSERT_EQ(sensitive_hit.matches.size(), 1u);
+
+  std::filesystem::remove_all(dir);
+}
+
+TEST(RipgrepBackend, CaseSensitiveOptIn) {
+  auto live = Services::detect_search_capabilities();
+  if (!live.has_ripgrep) {
+    GTEST_SKIP() << "ripgrep not on PATH";
+  }
+
+  auto dir = fresh_temp_dir("rg_case_sensitive");
+  {
+    std::ofstream f(dir / "match.txt");
+    f << "line with Zzq-Mixed-Case in it\n";
+  }
+
+  Services::SearchOptions options;
+  options.directory = dir.string();
+  options.pattern = "zzq-mixed-case";
+  options.case_sensitive = true;
+
+  auto miss = Services::search_code(live, options);
+  EXPECT_EQ(miss.backend_used, "ripgrep");
+  EXPECT_TRUE(miss.matches.empty());
+
+  options.pattern = "Zzq-Mixed-Case";
+  auto hit = Services::search_code(live, options);
+  EXPECT_EQ(hit.backend_used, "ripgrep");
+  ASSERT_EQ(hit.matches.size(), 1u);
+
+  std::filesystem::remove_all(dir);
+}
+
 TEST(FindFiles, RespectsSkipDirs) {
   auto dir = fresh_temp_dir("find_files");
   auto write = [&](const std::string &rel) {

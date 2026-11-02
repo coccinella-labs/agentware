@@ -281,6 +281,17 @@ probe "R-06 grep traversal escape refused" 0 "Path escapes the permitted root" \
   "2" "1" "grep:secret:.." "exit"
 probe "R-06 grep inside root still works" 0 "alpha" \
   "2" "1" "grep:alpha:." "exit"
+# Case sensitivity is opt-in and must not disturb the default. The search
+# is scoped to its own directory: a bare "." would also match the
+# interaction log, which records the pattern itself in data/memory.txt.
+mkdir -p mixed_dir
+printf 'Zzq-Mixed-Case\n' > mixed_dir/case.txt
+probe "R-08 grep default stays case-insensitive" 0 "Zzq-Mixed-Case" \
+  "2" "1" "grep:zzq-mixed-case:mixed_dir" "exit"
+probe "R-08 grep case-sensitive misses wrong case" 0 "No matches found" \
+  "2" "1" "grep:--case-sensitive:zzq-mixed-case:mixed_dir" "exit"
+probe "R-08 grep case-sensitive matches exact case" 0 "Zzq-Mixed-Case" \
+  "2" "1" "grep:--case-sensitive:Zzq-Mixed-Case:mixed_dir" "exit"
 probe "R-06 todos traversal escape refused" 0 "Path escapes the permitted root" \
   "2" "1" "todos:.." "exit"
 probe "R-06 analyze traversal escape refused" 0 "Path escapes the permitted root" \
