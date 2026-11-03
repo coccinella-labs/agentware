@@ -251,6 +251,13 @@ std::string validate_model_tool_arguments(const ToolCall &call) {
       return std::string("argument '") + name + "' must be a string";
   }
 
+  if (call.tool == "grep:") {
+    for (const char *name : {"case_sensitive", "caseSensitive"}) {
+      if (call.args.contains(name) && !call.args[name].is_boolean())
+        return std::string("argument '") + name + "' must be a boolean";
+    }
+  }
+
   if (call.tool == "read:") {
     for (const char *name :
          {"start", "start_line", "count", "line_count", "lines"}) {
@@ -447,7 +454,17 @@ std::string tool_call_to_input(const ToolCall &call) {
     std::string pattern = json_string(args, {"pattern", "query"});
     std::string dir = json_string(args, {"directory", "dir", "path"}, ".");
     std::string filter = json_string(args, {"filter", "file_filter"}, "*");
-    std::string input = "grep:" + pattern + ":" + dir;
+    bool case_sensitive = false;
+    for (const char *name : {"case_sensitive", "caseSensitive"}) {
+      if (args.contains(name) && args[name].is_boolean()) {
+        case_sensitive = args[name].get<bool>();
+        break;
+      }
+    }
+    std::string input = "grep:";
+    if (case_sensitive)
+      input += "--case-sensitive:";
+    input += pattern + ":" + dir;
     if (filter != "*")
       input += ":" + filter;
     return input;

@@ -99,6 +99,9 @@ mkdir -p tl_fixture
 printf 'one\n' > tl_fixture/one.txt
 printf 'two\n' > tl_fixture/two.txt
 printf 'needle} say "hi"\n' > tl_fixture/brace.txt
+# Separate directory so these files do not change the tl_fixture listings.
+mkdir -p tl_case
+printf 'Zzq-Mixed-Case\n' > tl_case/case.txt
 harness_trace "fixtures created"
 
 # Starts the mock provider and waits until it is actually serving.
@@ -712,6 +715,21 @@ run_case "turn-cap-trip" \
 run_case "grep-no-secret-leak" \
   '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"API_KEY\",\"directory\":\".\"}}","Done."]' \
   "grep api key" "No matches found"
+
+# 17b. The model-surface case_sensitive boolean reaches the search, and
+#      omitting it keeps the historical case-insensitive default.
+run_case "grep-model-default-insensitive" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"zzq-mixed-case\",\"directory\":\"tl_case\"}}","Done."]' \
+  "grep for the mixed case marker" "Zzq-Mixed-Case"
+run_case "grep-model-case-sensitive-miss" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"zzq-mixed-case\",\"directory\":\"tl_case\",\"case_sensitive\":true}}","Done."]' \
+  "grep the marker, wrong case, case sensitive" "No matches found"
+run_case "grep-model-case-sensitive-hit" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"Zzq-Mixed-Case\",\"directory\":\"tl_case\",\"case_sensitive\":true}}","Done."]' \
+  "grep the marker, exact case, case sensitive" "Zzq-Mixed-Case"
+run_case "grep-model-alias-precedence" \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"zzq-mixed-case\",\"directory\":\"tl_case\",\"case_sensitive\":false,\"caseSensitive\":true}}","Done."]' \
+  "grep with conflicting case sensitivity aliases" "Zzq-Mixed-Case"
 
 # 18-19. Meta/slash/bang commands are not tools: unknown tool + available list.
 for t in '/auth' '/chat save' '/checkpoint' '/mcp' '/sandbox' '!echo'; do

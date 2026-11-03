@@ -586,9 +586,17 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
       result = "Usage: replace:filename:old_text:new_text[:expected_count]";
     }
   } else if (Core::has_prefix_ci(input, "grep:")) {
-    // Format: grep:pattern[:directory[:file_filter]]
+    // Format: grep:[--case-sensitive:]pattern[:directory[:file_filter]]
+    // The marker is opt-in: without it the search stays case-insensitive,
+    // which is the behavior every existing caller and script relies on.
     tool = "Grep";
     std::string params = input.substr(5);
+    bool case_sensitive = false;
+    static const char kCaseFlag[] = "--case-sensitive:";
+    if (params.rfind(kCaseFlag, 0) == 0) {
+      case_sensitive = true;
+      params = params.substr(sizeof(kCaseFlag) - 1);
+    }
     std::vector<std::string> parts;
     size_t pos = 0;
     size_t colon_pos;
@@ -607,8 +615,8 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
     // actual cause. An explicitly empty directory ("grep:x:") still means
     // the current directory.
     if (pattern.empty()) {
-      result = "Error: grep pattern cannot be empty. "
-               "Use grep:pattern[:directory[:file_filter]]";
+      result = "Error: grep pattern cannot be empty. Use "
+               "grep:[--case-sensitive:]pattern[:directory[:file_filter]]";
     }
     std::string directory =
         (parts.size() > 1 && !parts[1].empty()) ? parts[1] : ".";
@@ -625,6 +633,7 @@ void Agent::handle_direct_command(const std::string &input, bool silent,
         search_options.directory = directory;
         search_options.pattern = pattern;
         search_options.file_filter = filter;
+        search_options.case_sensitive = case_sensitive;
         auto search_result =
             Services::search_code(search_caps_, search_options);
 
@@ -2142,6 +2151,8 @@ void Agent::show_available_tools() {
   std::cout << "    replace:file:old:new        - Replace text in file"
             << std::endl;
   std::cout << "    grep:pattern[:dir[:filter]]  - Search in files"
+            << std::endl;
+  std::cout << "      grep:--case-sensitive:p[:dir]  - Match case exactly"
             << std::endl;
   std::cout << "  Project Analysis:" << std::endl;
   std::cout << "    analyze:[path]              - Analyze project structure"
