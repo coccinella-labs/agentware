@@ -456,8 +456,10 @@ std::string tool_call_to_input(const ToolCall &call) {
     std::string filter = json_string(args, {"filter", "file_filter"}, "*");
     bool case_sensitive = false;
     for (const char *name : {"case_sensitive", "caseSensitive"}) {
-      if (args.contains(name) && args[name].is_boolean())
+      if (args.contains(name) && args[name].is_boolean()) {
         case_sensitive = args[name].get<bool>();
+        break;
+      }
     }
     std::string input = "grep:";
     if (case_sensitive)
