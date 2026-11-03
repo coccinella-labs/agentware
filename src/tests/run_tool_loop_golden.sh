@@ -728,7 +728,7 @@ run_case "grep-model-case-sensitive-hit" \
   '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"Zzq-Mixed-Case\",\"directory\":\"tl_case\",\"case_sensitive\":true}}","Done."]' \
   "grep the marker, exact case, case sensitive" "Zzq-Mixed-Case"
 run_case "grep-model-alias-precedence" \
-  '["{\\"tool\\":\\"grep\\",\\"arguments\\":{\\"pattern\\":\\"zzq-mixed-case\\",\\"directory\\":\\"tl_case\\",\\"case_sensitive\\":false,\\"caseSensitive\\":true}}","Done."]' \
+  '["{\"tool\":\"grep\",\"arguments\":{\"pattern\":\"zzq-mixed-case\",\"directory\":\"tl_case\",\"case_sensitive\":false,\"caseSensitive\":true}}","Done."]' \
   "grep with conflicting case sensitivity aliases" "Zzq-Mixed-Case"
 
 # 18-19. Meta/slash/bang commands are not tools: unknown tool + available list.
