@@ -6,32 +6,163 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
+#include <cstdint>
 #include <regex>
+#include <string>
+#include <vector>
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#include <sys/stat.h>
+#else
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace Services {
 static const std::size_t MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB limit
 
+namespace {
+
+// Describes the file type an opened descriptor actually names. The read path
+// verifies the descriptor, not the path, so a path swapped for a FIFO or a
+// device between the caller's check and the open is still refused.
+std::string non_regular_description(
+#ifdef _WIN32
+    const struct _stat64 &st
+#else
+    const struct stat &st
+#endif
+) {
+#ifdef _WIN32
+  if ((st.st_mode & _S_IFDIR) != 0)
+    return "a directory";
+  return "a non-regular file";
+#else
+  if (S_ISDIR(st.st_mode))
+    return "a directory";
+  if (S_ISFIFO(st.st_mode))
+    return "a FIFO";
+  if (S_ISCHR(st.st_mode) || S_ISBLK(st.st_mode))
+    return "a device";
+  if (S_ISSOCK(st.st_mode))
+    return "a socket";
+  return "a non-regular file";
+#endif
+}
+
+void close_fd(int fd) {
+#ifdef _WIN32
+  _close(fd);
+#else
+  ::close(fd);
+#endif
+}
+
+// Opens a regular file for reading and verifies its type on the opened
+// descriptor. O_NONBLOCK keeps a FIFO from blocking the open, and O_NOFOLLOW
+// refuses a final-component symlink on POSIX. Returns an empty string and
+// fills `content` on success; returns a user-facing error otherwise.
+std::string read_regular_file(const std::string &filename,
+                              std::string &content) {
+#ifndef _WIN32
+  const int fd =
+      ::open(filename.c_str(), O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+#else
+  const int fd = _open(filename.c_str(), _O_RDONLY | _O_BINARY | _O_NOINHERIT);
+#endif
+  if (fd < 0) {
+#ifndef _WIN32
+    if (errno == ENOENT)
+      return "Error: File '" + filename + "' does not exist";
+    if (errno == ELOOP)
+      return "Refusing to read a symbolic link: " + filename;
+#endif
+    return "Error: Could not open file '" + filename + "'";
+  }
+
+  std::uintmax_t reported_size = 0;
+#ifdef _WIN32
+  struct _stat64 st{};
+  const bool stat_ok = _fstat64(fd, &st) == 0;
+#else
+  struct stat st{};
+  const bool stat_ok = fstat(fd, &st) == 0;
+#endif
+  if (!stat_ok) {
+    close_fd(fd);
+    return "Error: Could not inspect file '" + filename + "'";
+  }
+#ifdef _WIN32
+  const bool is_regular = (st.st_mode & _S_IFREG) != 0;
+#else
+  const bool is_regular = S_ISREG(st.st_mode);
+#endif
+  if (!is_regular) {
+    const std::string what = non_regular_description(st);
+    close_fd(fd);
+    return "Refusing to read " + what + ": " + filename;
+  }
+  if (st.st_size > 0)
+    reported_size = static_cast<std::uintmax_t>(st.st_size);
+  if (reported_size > MAX_FILE_SIZE) {
+    close_fd(fd);
+    return "Error: File too large to read (" + std::to_string(reported_size) +
+           " bytes)";
+  }
+
+  content.clear();
+  char buffer[65536];
+  while (content.size() <= MAX_FILE_SIZE) {
+    const std::size_t want =
+        std::min(sizeof(buffer), MAX_FILE_SIZE + 1 - content.size());
+#ifdef _WIN32
+    const int n = _read(fd, buffer, static_cast<unsigned int>(want));
+#else
+    const ssize_t n = ::read(fd, buffer, want);
+#endif
+    if (n < 0) {
+#ifndef _WIN32
+      if (errno == EINTR)
+        continue;
+#endif
+      close_fd(fd);
+      return "Error reading file '" + filename + "'";
+    }
+    if (n == 0)
+      break;
+    content.append(buffer, static_cast<std::size_t>(n));
+  }
+  close_fd(fd);
+  if (content.size() > MAX_FILE_SIZE)
+    return "Error: File too large to read";
+  return "";
+}
+
+std::vector<std::string> split_lines(const std::string &content) {
+  std::vector<std::string> lines;
+  std::istringstream in(content);
+  std::string line;
+  while (std::getline(in, line)) {
+    // The read is binary so the byte count is exact; a range read still
+    // strips the CR of a CRLF file, matching the old text-mode line range.
+    if (!line.empty() && line.back() == '\r')
+      line.pop_back();
+    lines.push_back(line);
+  }
+  return lines;
+}
+
+} // namespace
+
 std::string FileService::read_file(const std::string &filename) {
   try {
-    if (!file_exists(filename)) {
-      return "Error: File '" + filename + "' does not exist";
-    }
-
-    std::ifstream file(filename, std::ios::binary | std::ios::ate);
-    if (!file.is_open()) {
-      return "Error: Could not open file '" + filename + "'";
-    }
-
-    auto size = file.tellg();
-    if (size > static_cast<std::streampos>(MAX_FILE_SIZE)) {
-      return "Error: File too large to read (" + std::to_string(size) +
-             " bytes)";
-    }
-    file.seekg(0);
-
-    std::ostringstream buffer;
-    buffer << file.rdbuf();
-    return buffer.str();
+    std::string content;
+    const std::string error = read_regular_file(filename, content);
+    return error.empty() ? content : error;
   } catch ([[maybe_unused]] const std::exception &e) {
     return std::string("Error reading file: ") + e.what();
   }
@@ -40,21 +171,12 @@ std::string FileService::read_file(const std::string &filename) {
 std::string FileService::read_file_range(const std::string &filename,
                                          int start_line, int line_count) {
   try {
-    if (!file_exists(filename)) {
-      return "Error: File '" + filename + "' does not exist";
-    }
+    std::string content;
+    const std::string error = read_regular_file(filename, content);
+    if (!error.empty())
+      return error;
 
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-      return "Error: Could not open file '" + filename + "'";
-    }
-
-    std::vector<std::string> lines;
-    std::string line;
-    while (std::getline(file, line)) {
-      lines.push_back(line);
-    }
-
+    const std::vector<std::string> lines = split_lines(content);
     if (start_line < 0 || start_line >= static_cast<int>(lines.size())) {
       return "Error: Start line out of range";
     }
