@@ -75,9 +75,9 @@ std::string read_regular_file(const std::string &filename,
   const int fd = _open(filename.c_str(), _O_RDONLY | _O_BINARY | _O_NOINHERIT);
 #endif
   if (fd < 0) {
-#ifndef _WIN32
     if (errno == ENOENT)
       return "Error: File '" + filename + "' does not exist";
+#ifndef _WIN32
     if (errno == ELOOP)
       return "Refusing to read a symbolic link: " + filename;
 #endif

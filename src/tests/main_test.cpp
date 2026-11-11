@@ -2689,7 +2689,9 @@ TEST(FileReadSafety, ReadsRegularFile) {
   auto dir = fresh_temp_dir("read_regular");
   auto file = dir / "plain.txt";
   {
-    std::ofstream out(file);
+    // Binary write: text mode would translate LF to CRLF on Windows and
+    // make the byte comparison platform-dependent.
+    std::ofstream out(file, std::ios::binary);
     out << "alpha\nbeta\n";
   }
   EXPECT_EQ(Services::FileService::read_file(file.string()), "alpha\nbeta\n");
