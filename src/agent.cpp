@@ -102,7 +102,7 @@ static inline std::string trim_copy(const std::string &s) {
 // Routes an agent-requested shell command (defined below use sites).
 static std::string execute_routed_command(const std::string &command);
 
-void Agent::run() {
+void Agent::run(const StartupOptions &options) {
   Utils::startup_trace("agent: run entered");
   // One-time tool discovery: which external search binaries exist on PATH.
   // The flags live on the Agent for the whole session; every search and every
@@ -117,7 +117,11 @@ void Agent::run() {
                        ", fd=" + (search_caps_.has_fd ? "yes" : "no") +
                        ", git=" + (search_caps_.has_git ? "yes" : "no") + ")");
 
-  initialize_mode();
+  if (!initialize_mode(options)) {
+    std::cout << Utils::Color::DIM << "Goodbye\n" << Utils::Color::RESET;
+    Utils::startup_trace("agent: startup cancelled at a boot prompt");
+    return;
+  }
   Utils::startup_trace("agent: mode and model chosen");
 
   // Data-driven model name mapping
@@ -192,7 +196,7 @@ void Agent::run() {
   std::cout << Utils::Color::DIM << "Goodbye\n" << Utils::Color::RESET;
 }
 
-void Agent::initialize_mode() {
+bool Agent::initialize_mode(const StartupOptions &options) {
   // Data-driven provider configuration
   struct ProviderInfo {
     int choice;
@@ -209,32 +213,83 @@ void Agent::initialize_mode() {
       {5, Agent::Mode::MODE_DEEPSEEK, "DEEPSEEK_API_KEY", "DeepSeek"},
       {6, Agent::Mode::MODE_OPENAI, "OPENAI_API_KEY", "OpenAI"}};
 
-  // Simplified mode selection with consistent numbering
-  Utils::startup_trace("agent: asking for the mode");
-  int choice =
-      get_user_choice("Mode [1=Online / 2=Offline] (default 2): ", {1, 2}, 2);
-  Utils::startup_trace("agent: mode answered");
+  // Data-driven offline model configuration
+  struct ModelInfo {
+    int choice;
+    Mode mode;
+    std::string display_name;
+  };
 
-  if (choice == 1) {
-    // Online mode: pick provider
-    std::string prompt = "Provider [";
+  std::vector<ModelInfo> models = {
+      {1, Agent::Mode::MODE_LLAMA_3B, "llama3.2:3b"},
+      {2, Agent::Mode::MODE_LLAMA_LATEST, "llama3.2:latest"},
+      {3, Agent::Mode::MODE_LLAMA_31, "llama3.1:latest"}};
+
+  auto apply_provider_mode = [&](Mode target) {
+    for (const auto &provider : providers) {
+      if (provider.mode == target) {
+        mode_ = provider.mode;
+        api_key_ = Utils::Config::get_env_var(provider.env_var);
+        if (api_key_.empty()) {
+          throw std::runtime_error(provider.env_var + " not set");
+        }
+        Utils::UI::print_success(provider.display_name);
+        return;
+      }
+    }
+    throw std::runtime_error("unknown online provider selection");
+  };
+
+  auto apply_model_mode = [&](Mode target) {
+    for (const auto &model : models) {
+      if (model.mode == target) {
+        mode_ = model.mode;
+        Utils::UI::print_success(model.display_name);
+        return;
+      }
+    }
+    throw std::runtime_error("unknown offline model selection");
+  };
+
+  bool online = false;
+  if (options.mode_selected) {
+    online = options.online;
+  } else {
+    Utils::startup_trace("agent: asking for the mode");
+    std::optional<int> choice =
+        get_user_choice("Mode [1=Online / 2=Offline] (default 2): ", {1, 2}, 2);
+    Utils::startup_trace("agent: mode answered");
+    if (!choice)
+      return false;
+    online = (*choice == 1);
+  }
+
+  if (online) {
+    if (options.mode_selected && options.selection != Mode::MODE_UNSET) {
+      apply_provider_mode(options.selection);
+      return true;
+    }
+
+    std::string provider_prompt = "Provider [";
     for (size_t i = 0; i < providers.size(); ++i) {
       if (i > 0)
-        prompt += " / ";
-      prompt +=
+        provider_prompt += " / ";
+      provider_prompt +=
           std::to_string(providers[i].choice) + "=" + providers[i].display_name;
     }
-    prompt += "] (default 1): ";
+    provider_prompt += "] (default 1): ";
 
-    std::vector<int> valid_choices;
+    std::vector<int> provider_choices;
     for (const auto &p : providers)
-      valid_choices.push_back(p.choice);
+      provider_choices.push_back(p.choice);
 
-    int provider_choice = get_user_choice(prompt, valid_choices, 1);
+    std::optional<int> provider_choice =
+        get_user_choice(provider_prompt, provider_choices, 1);
+    if (!provider_choice)
+      return false;
 
-    // Find and configure the selected provider
     for (const auto &provider : providers) {
-      if (provider.choice == provider_choice) {
+      if (provider.choice == *provider_choice) {
         mode_ = provider.mode;
         api_key_ = Utils::Config::get_env_var(provider.env_var);
         if (api_key_.empty()) {
@@ -244,45 +299,42 @@ void Agent::initialize_mode() {
         break;
       }
     }
-  } else {
-    // Data-driven offline model configuration
-    struct ModelInfo {
-      int choice;
-      Mode mode;
-      std::string display_name;
-    };
+    return true;
+  }
 
-    std::vector<ModelInfo> models = {
-        {1, Agent::Mode::MODE_LLAMA_3B, "llama3.2:3b"},
-        {2, Agent::Mode::MODE_LLAMA_LATEST, "llama3.2:latest"},
-        {3, Agent::Mode::MODE_LLAMA_31, "llama3.1:latest"}};
+  if (options.mode_selected && options.selection != Mode::MODE_UNSET) {
+    apply_model_mode(options.selection);
+    return true;
+  }
 
-    // Offline mode: pick model
-    std::string prompt = "Model [";
-    for (size_t i = 0; i < models.size(); ++i) {
-      if (i > 0)
-        prompt += " / ";
-      prompt += std::to_string(models[i].choice) + "=" + models[i].display_name;
-    }
-    prompt += "] (default 1): ";
+  std::string model_prompt = "Model [";
+  for (size_t i = 0; i < models.size(); ++i) {
+    if (i > 0)
+      model_prompt += " / ";
+    model_prompt +=
+        std::to_string(models[i].choice) + "=" + models[i].display_name;
+  }
+  model_prompt += "] (default 1): ";
 
-    std::vector<int> valid_choices;
-    for (const auto &m : models)
-      valid_choices.push_back(m.choice);
+  std::vector<int> model_choices;
+  for (const auto &m : models)
+    model_choices.push_back(m.choice);
 
-    Utils::startup_trace("agent: asking for the offline model");
-    int model_choice = get_user_choice(prompt, valid_choices, 1);
-    Utils::startup_trace("agent: offline model answered");
+  Utils::startup_trace("agent: asking for the offline model");
+  std::optional<int> model_choice =
+      get_user_choice(model_prompt, model_choices, 1);
+  Utils::startup_trace("agent: offline model answered");
+  if (!model_choice)
+    return false;
 
-    // Find and configure the selected model
-    for (const auto &model : models) {
-      if (model.choice == model_choice) {
-        mode_ = model.mode;
-        Utils::UI::print_success(model.display_name);
-        break;
-      }
+  for (const auto &model : models) {
+    if (model.choice == *model_choice) {
+      mode_ = model.mode;
+      Utils::UI::print_success(model.display_name);
+      break;
     }
   }
+  return true;
 }
 
 bool Agent::is_online_mode() const {
@@ -294,9 +346,9 @@ bool Agent::is_online_mode() const {
          mode_ == Agent::Mode::MODE_OPENAI;
 }
 
-int Agent::get_user_choice(const std::string &prompt,
-                           const std::vector<int> &valid_choices,
-                           int default_choice) {
+std::optional<int> Agent::get_user_choice(const std::string &prompt,
+                                          const std::vector<int> &valid_choices,
+                                          int default_choice) {
   while (true) {
     Utils::UI::print_wrapped_prompt(prompt);
     std::string input;
@@ -308,8 +360,8 @@ int Agent::get_user_choice(const std::string &prompt,
       std::cout << "\n";
     }
     if (!got_input) {
-      // EOF -> return default
-      return default_choice;
+      // EOF is not a default choice: let startup end cleanly.
+      return std::nullopt;
     }
 
     input = trim_copy(input);
