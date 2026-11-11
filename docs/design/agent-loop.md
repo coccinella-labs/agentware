@@ -179,6 +179,13 @@ or, when blocked on the user:
 - When enabled, the runtime prints `Tools executed this turn:` after the
   loop, listing dispatched tool inputs in order or `none`. Refused calls and
   repeat attempts are not listed as executions.
+- Observations and model prose render in separate channels. The runtime
+  prints a reserved `TOOL RESULT` header, and only the loop's observation
+  renderer emits it. Model-authored answers are labeled `Model answer:` with
+  their body lines indented, and the loop prompt tells the model not to write
+  an observation marker itself. A model that writes `Observation:` in prose
+  therefore cannot be mistaken for a runtime observation, and a golden feeds
+  exactly that reply and asserts the separation.
 
 ## Policies decided (2026-10-20)
 

@@ -529,9 +529,68 @@ void UI::print_tool_result(const std::string &result) {
   }
 }
 
+void UI::print_tool_observation(const std::string &result) {
+  // The header is the channel: it is printed only here, never by the
+  // response renderer, so model-authored text cannot acquire it. The body
+  // is indented under the header for the same reason.
+  static const std::string kHeader = "TOOL RESULT";
+  if (!interactive_output()) {
+    std::cout << kHeader << "\n";
+    if (result.empty()) {
+      std::cout << "  (no output)\n";
+      return;
+    }
+    std::istringstream in(result);
+    std::string line;
+    while (std::getline(in, line)) {
+      std::cout << "  " << line << "\n";
+    }
+    return;
+  }
+
+  size_t line_count = 1;
+  for (const char c : result) {
+    if (c == '\n')
+      ++line_count;
+  }
+  if (line_count > 60) {
+    std::cout << "└ " << Color::DIM << kHeader << " [" << line_count
+              << " lines of output; scroll to review]" << Color::RESET << "\n";
+  } else {
+    std::cout << "└ " << Color::DIM << kHeader << Color::RESET << "\n";
+  }
+  if (result.empty()) {
+    std::cout << "  " << Color::DIM << "(no output)" << Color::RESET << "\n";
+    return;
+  }
+  std::istringstream in(result);
+  std::string line;
+  while (std::getline(in, line)) {
+    const bool is_error = line.rfind("Error", 0) == 0;
+    const bool is_cancel = line.find("cancel") != std::string::npos;
+    std::cout << "  ";
+    if (is_error) {
+      std::cout << Color::RED << line << Color::RESET;
+    } else if (is_cancel) {
+      std::cout << Color::YELLOW << line << Color::RESET;
+    } else {
+      std::cout << line;
+    }
+    std::cout << "\n";
+  }
+}
+
 void UI::print_response(const std::string &response) {
   if (!interactive_output()) {
-    std::cout << response << "\n";
+    // Indent every continuation line: model prose must not start at the
+    // same column as a runtime observation header.
+    std::istringstream in(response);
+    std::string line;
+    bool first = true;
+    while (std::getline(in, line)) {
+      std::cout << (first ? "" : "  ") << line << "\n";
+      first = false;
+    }
     return;
   }
   std::istringstream in(response);

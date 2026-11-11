@@ -1300,7 +1300,7 @@ void Agent::handle_ai_chat(const std::string &input) {
           ++retries;
         if (call)
           Utils::UI::print_tool_call(call->tool, display);
-        Utils::UI::print_tool_result(observation);
+        Utils::UI::print_tool_observation(observation);
         if (counts_as_retry && retries >= kRetryBudget) {
           Utils::UI::print_warning(stop_message.empty()
                                        ? "Retry budget (" +
