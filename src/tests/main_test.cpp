@@ -34,7 +34,10 @@ void record_global_fact(Data::MemoryManager &memory, const std::string &fact);
 #include <algorithm>
 #include <chrono>
 #ifndef _WIN32
+#include <cerrno>
 #include <csignal>
+#include <cstring>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 #include <cstdlib>
@@ -2676,3 +2679,77 @@ TEST(ToolRegistryTest, KnownNamesContainsList) {
   EXPECT_NE(names.find("list:"), std::string::npos);
   EXPECT_NE(names.find("read:"), std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// File read safety: the type is verified on the opened descriptor, so a path
+// swapped after the caller's check cannot turn the read into a FIFO block.
+// ---------------------------------------------------------------------------
+
+TEST(FileReadSafety, ReadsRegularFile) {
+  auto dir = fresh_temp_dir("read_regular");
+  auto file = dir / "plain.txt";
+  {
+    // Binary write: text mode would translate LF to CRLF on Windows and
+    // make the byte comparison platform-dependent.
+    std::ofstream out(file, std::ios::binary);
+    out << "alpha\nbeta\n";
+  }
+  EXPECT_EQ(Services::FileService::read_file(file.string()), "alpha\nbeta\n");
+  EXPECT_EQ(Services::FileService::read_file_range(file.string(), 1, 1),
+            "beta");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(FileReadSafety, RangeStripsCrFromCrlfFile) {
+  auto dir = fresh_temp_dir("read_crlf");
+  auto file = dir / "crlf.txt";
+  {
+    std::ofstream out(file, std::ios::binary);
+    out << "alpha\r\nbeta\r\n";
+  }
+  EXPECT_EQ(Services::FileService::read_file(file.string()),
+            "alpha\r\nbeta\r\n");
+  EXPECT_EQ(Services::FileService::read_file_range(file.string(), 0, 2),
+            "alpha\nbeta");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(FileReadSafety, RefusesMissingFile) {
+  auto dir = fresh_temp_dir("read_missing");
+  const std::string result =
+      Services::FileService::read_file((dir / "absent.txt").string());
+  EXPECT_NE(result.find("does not exist"), std::string::npos) << result;
+  std::filesystem::remove_all(dir);
+}
+
+#ifndef _WIN32
+TEST(FileReadSafety, RefusesFifoOnOpenDescriptor) {
+  auto dir = fresh_temp_dir("read_fifo");
+  const auto fifo = dir / "pipe";
+  ASSERT_EQ(mkfifo(fifo.c_str(), 0600), 0) << std::strerror(errno);
+  // Opening this path by name used to block here. O_NONBLOCK plus the
+  // descriptor check must return promptly with a refusal.
+  const std::string result = Services::FileService::read_file(fifo.string());
+  EXPECT_NE(result.find("Refusing to read a FIFO"), std::string::npos)
+      << result;
+  std::filesystem::remove_all(dir);
+}
+
+TEST(FileReadSafety, RefusesSymlinkOnOpenDescriptor) {
+  auto dir = fresh_temp_dir("read_symlink");
+  const auto target = dir / "target.txt";
+  {
+    std::ofstream out(target);
+    out << "secret";
+  }
+  const auto link = dir / "link.txt";
+  std::error_code ec;
+  std::filesystem::create_symlink(target, link, ec);
+  if (ec)
+    GTEST_SKIP() << "symlinks unavailable: " << ec.message();
+  const std::string result = Services::FileService::read_file(link.string());
+  EXPECT_NE(result.find("Refusing to read a symbolic link"), std::string::npos)
+      << result;
+  std::filesystem::remove_all(dir);
+}
+#endif

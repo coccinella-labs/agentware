@@ -151,6 +151,12 @@ or, when blocked on the user:
 - Tool results are sent as a named `Result of <tool and arguments>` block,
   followed by an instruction to answer the user's request from that result.
   The result remains explicitly marked as untrusted data, not instructions.
+- Reads verify the opened descriptor, not the path. `FileService::read_file`
+  and `read_file_range` open with `O_NONBLOCK | O_NOFOLLOW` on POSIX and
+  `fstat` the descriptor before reading, so a FIFO, device, or symlink
+  swapped in after the policy check is refused rather than read. The path
+  check remains the early, friendly refusal; the descriptor check is the
+  boundary.
 - Refusals are returned as quoted observations rather than becoming a turn's
   answer. They consume the shared retry budget.
 - A canonical tool call with identical arguments is never executed twice in
