@@ -5,6 +5,7 @@
 #include <atomic>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,6 +19,15 @@ class AIService;
 }
 
 namespace Core {
+// Startup selections resolved from argv before the REPL starts. When
+// mode_selected is false the agent prompts for the mode as before. When
+// selection is set, the provider or model prompt is skipped too.
+struct StartupOptions {
+  bool mode_selected = false;
+  bool online = false;
+  AgentMode selection = AgentMode::MODE_UNSET;
+};
+
 class AGENTWARE_API Agent {
 public:
   using Mode = AgentMode; // Type alias for backward compatibility
@@ -44,10 +54,12 @@ public:
   Agent(const Agent &) = delete;
   Agent &operator=(const Agent &) = delete;
 
-  void initialize_mode();
-  int get_user_choice(const std::string &prompt,
-                      const std::vector<int> &valid_choices,
-                      int default_choice);
+  bool initialize_mode(const StartupOptions &options);
+  // Returns std::nullopt when the prompt hits EOF, so startup can end
+  // without silently accepting the default choice.
+  std::optional<int> get_user_choice(const std::string &prompt,
+                                     const std::vector<int> &valid_choices,
+                                     int default_choice);
   void process_user_input(const std::string &input);
   // out_result, when non-null, receives the tool result instead of
   // last_command_result_. Used by the model tool-call loop to avoid
@@ -108,7 +120,7 @@ public:
   Agent();
   ~Agent();
 
-  void run();
+  void run(const StartupOptions &options = StartupOptions{});
 };
 
 // Records one interaction in persistent memory without letting a persistence
