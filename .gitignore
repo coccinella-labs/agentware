@@ -56,6 +56,7 @@ data/conversations/
 data/*.log
 *.log
 src/tests/data/*.txt
+src/tests/data/conversations/
 
 # Cache directories
 .cache/
