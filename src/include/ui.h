@@ -73,6 +73,11 @@ AGENTWARE_API void print_quick_help();
 AGENTWARE_API void print_tool_call(const std::string &tool,
                                    const std::string &args);
 AGENTWARE_API void print_tool_result(const std::string &result);
+// Loop observations render with a reserved "TOOL RESULT" header that the
+// model-authored response channel never receives. Model prose is indented
+// under its own label, so an answer that says "Observation:" cannot be read
+// as a runtime observation.
+AGENTWARE_API void print_tool_observation(const std::string &result);
 AGENTWARE_API void print_response(const std::string &response);
 // Full-width outline around the bottom input line. Only emitted on an
 // interactive terminal; pipes get the prompt alone.

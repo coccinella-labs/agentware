@@ -2550,6 +2550,10 @@ TEST(ToolRegistryTest, PromptSectionStatesTheJsonContract) {
             std::string::npos);
   EXPECT_NE(section.find("claim you ran a tool you did not call"),
             std::string::npos);
+  EXPECT_NE(section.find("Only the runtime renders tool results"),
+            std::string::npos);
+  EXPECT_NE(section.find("Never write an observation marker yourself"),
+            std::string::npos);
   EXPECT_NE(section.find("Example:"), std::string::npos);
   EXPECT_NE(section.find("{\"tool\": \"read\", \"arguments\": {\"path\": "),
             std::string::npos);

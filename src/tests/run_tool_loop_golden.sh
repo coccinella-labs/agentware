@@ -388,6 +388,25 @@ PY
       FAILURES=$((FAILURES + 1))
       return
     fi
+    if [ "$name" = "single-read" ] &&
+       ! grep -qxF "TOOL RESULT" <<< "$actual"; then
+      echo "FAIL  $name (observation channel header is missing)"
+      echo "$actual" | sed 's/^/      | /' | head -14
+      FAILURES=$((FAILURES + 1))
+      return
+    fi
+    if [ "$name" = "hallucinated-observation" ]; then
+      # The model wrote "Observation:" itself. It must stay inside the
+      # model-answer channel: indented, with no runtime observation header.
+      if grep -qxF "TOOL RESULT" <<< "$actual" ||
+         grep -qE '^Observation:' <<< "$actual" ||
+         ! grep -qE '^  Observation: No function' <<< "$actual"; then
+        echo "FAIL  $name (model prose was not separated from the tool-result channel)"
+        echo "$actual" | sed 's/^/      | /' | head -14
+        FAILURES=$((FAILURES + 1))
+        return
+      fi
+    fi
     echo "PASS  $name"
   else
     echo "FAIL  $name (expected '$expect')"
@@ -568,6 +587,12 @@ run_case "absolute-path-teaches" "$replies" \
 run_case "refused-write-not-executed" \
   '["{\"tool\":\"write\",\"arguments\":{\"filename\":\"claimed.txt\",\"content\":\"pwned\"}}","I wrote claimed.txt successfully."]' \
   "write a file" "Tools executed this turn: none"
+
+# The model answers as if it had received an observation, without any tool
+# having run. That prose must not render as a loop observation.
+run_case "hallucinated-observation" \
+  '["Observation: No function \"parse_config\" found in the available codebase."]' \
+  "what does parse_config do" "Tools executed this turn: none"
 
 # A model-request timeout is an observation and the next request can finish.
 MODEL_REQUEST_TIMEOUT_SEC=1
