@@ -95,15 +95,19 @@ Strict safety invariants are enforced on the model surface:
 | `AGENTWARE_TOOL_TIMEOUT_SEC` | `30` | Per-tool execution timeout in seconds |
 | `AGENTWARE_NET_TIMEOUT_SEC` | `10` | Network timeout for model requests during tool loop turns (30s elsewhere) |
 
-## Modal line editing (optional)
+## Interactive line editing and history
 
-Set `AGENTWARE_VIM_MODE=1` to edit the REPL prompt with Vim-style keys
-instead of plain `std::getline`. The default is off, so nothing changes until
-you opt in. Piped and redirected stdin always uses plain line input, so
-scripts and CI are unaffected even with the variable set.
+On an interactive terminal the REPL prompt uses a small line editor instead of
+plain `std::getline`. It keeps a session-scoped, in-memory history: Up recalls
+earlier inputs and Down walks back toward the newest one. Down at the newest
+entry restores the draft you had typed before navigating. Empty lines and raw
+escape sequences are never recorded, and a recalled entry is not submitted
+until you press Enter. History is not persisted to disk. Piped and redirected
+stdin still uses plain line input, so scripts and CI are unaffected.
 
-Insert mode is the usual one: characters insert, Backspace deletes. These
-keys work in **normal** mode, reached with `i`:
+Set `AGENTWARE_VIM_MODE=1` to add Vim-style normal mode on top of the line
+editor. Insert mode is the usual one: characters insert, Backspace deletes.
+With the variable set, Escape enters normal mode and these keys work there:
 
 | Key | Action |
 |---|---|
@@ -117,14 +121,14 @@ keys work in **normal** mode, reached with `i`:
 Enter submits through the existing REPL flow. Anything else in normal mode is
 a silent no-op rather than an error.
 
-Two limits worth knowing before you enable it:
+Limits worth knowing:
 
-- **Arrow keys, function keys, Home and End do nothing.** Escape sequences
-  are consumed and ignored in this version, so there is no `j`/`k` movement
-  and no history navigation.
-- **Windows key identity is unverified.** The console mapping handles the
-  unmapped keys that arrows and function keys produce, but nothing
-  distinguishes one special key from another on that platform.
+- Up and Down are the only arrow keys handled. Left and Right, Home, End and
+  the function keys are consumed and ignored, and there is no Tab completion.
+- In normal mode there is no `j`/`k` movement; only the keys in the table.
+- **Windows key identity for other special keys is unverified.** Up and Down
+  are mapped from the console virtual key code; the rest still arrive as
+  unmapped keys.
 
 ## Scope
 
