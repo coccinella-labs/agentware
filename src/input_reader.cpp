@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <iostream>
 #include <thread>
 
@@ -93,9 +94,38 @@ void append_utf8(std::string *out, char32_t value) {
 // True for a CSI final byte: parameter/intermediate bytes precede it.
 bool is_csi_final(unsigned char c) { return c >= 0x40 && c <= 0x7E; }
 
+// History stores submitted lines. Empty input is noise, and a line that
+// still contains ESC is a raw escape sequence (a paste or a scripted
+// line), never something the user meant to recall.
+bool is_eligible_history_line(const std::string &line) {
+  if (line.empty()) {
+    return false;
+  }
+  return line.find('\x1b') == std::string::npos;
+}
+
 } // namespace
 
+void History::add(const std::string &line) {
+  if (!is_eligible_history_line(line)) {
+    return;
+  }
+  entries_.push_back(line);
+  if (entries_.size() > k_max_entries) {
+    entries_.erase(entries_.begin());
+  }
+}
+
+size_t History::size() const { return entries_.size(); }
+
+const std::string &History::at(size_t index) const { return entries_[index]; }
+
+void History::clear() { entries_.clear(); }
+
 ModalEditor::ModalEditor() = default;
+
+ModalEditor::ModalEditor(History *history, bool allow_normal)
+    : history_(history), allow_normal_(allow_normal) {}
 
 EditMode ModalEditor::mode() const { return mode_; }
 
@@ -109,6 +139,56 @@ std::string ModalEditor::buffer_utf8() const {
     append_utf8(&out, c);
   }
   return out;
+}
+
+void ModalEditor::set_buffer_utf8(const std::string &text) {
+  buffer_.clear();
+  size_t pos = 0;
+  while (pos < text.size()) {
+    size_t before = pos;
+    char32_t value = decode_one(text, pos);
+    if (pos == before) {
+      // Truncated trailing sequence: keep a replacement and move on.
+      buffer_.push_back(0xFFFD);
+      ++pos;
+      continue;
+    }
+    buffer_.push_back(value);
+  }
+  // A recalled entry is always ready to edit at the end, in Insert mode,
+  // even when the user pressed Up while in Normal mode.
+  mode_ = EditMode::Insert;
+  cursor_ = buffer_.size();
+}
+
+void ModalEditor::recall_history_up() {
+  if (history_ == nullptr || history_->size() == 0) {
+    return;
+  }
+  if (!history_active_) {
+    history_draft_ = buffer_utf8();
+    history_index_ = history_->size();
+    history_active_ = true;
+  }
+  if (history_index_ > 0) {
+    --history_index_;
+  }
+  set_buffer_utf8(history_->at(history_index_));
+}
+
+void ModalEditor::recall_history_down() {
+  if (history_ == nullptr || !history_active_) {
+    return;
+  }
+  if (history_index_ + 1 < history_->size()) {
+    ++history_index_;
+    set_buffer_utf8(history_->at(history_index_));
+    return;
+  }
+  // At the newest entry: step past it back to the saved draft.
+  history_active_ = false;
+  set_buffer_utf8(history_draft_);
+  history_draft_.clear();
 }
 
 void ModalEditor::clamp_cursor() {
@@ -144,8 +224,17 @@ FeedResult ModalEditor::feed(const KeyEvent &event, std::string *out_line) {
     }
     return FeedResult::Continue; // keep editing, like canonical mode.
   case KeyKind::Escape:
+    if (!allow_normal_) {
+      return FeedResult::Continue;
+    }
     mode_ = EditMode::Normal;
     clamp_cursor();
+    return FeedResult::Continue;
+  case KeyKind::ArrowUp:
+    recall_history_up();
+    return FeedResult::Continue;
+  case KeyKind::ArrowDown:
+    recall_history_down();
     return FeedResult::Continue;
   case KeyKind::Backspace:
     if (mode_ == EditMode::Insert) {
@@ -251,7 +340,16 @@ void KeyDecoder::feed(const uint8_t *data, size_t size,
           pending_bytes_.erase(0, pos);
           return;
         }
-        pos = end + 1; // consume the whole sequence, ignore it (v1).
+        // Only the bare Up and Down forms are mapped. Parameterized CSI
+        // (for example Ctrl-Up) stays a no-op, as before.
+        const unsigned char final =
+            static_cast<unsigned char>(pending_bytes_[end]);
+        if (end == pos + 2 && final == 'A') {
+          out->push_back(KeyEvent{KeyKind::ArrowUp, 0});
+        } else if (end == pos + 2 && final == 'B') {
+          out->push_back(KeyEvent{KeyKind::ArrowDown, 0});
+        }
+        pos = end + 1; // consume the whole sequence.
         continue;
       }
       out->push_back(KeyEvent{KeyKind::Escape, 0});
@@ -334,10 +432,10 @@ bool windows_key_event(char32_t value, KeyEvent *out) {
 }
 
 InputBackend select_backend(bool opt_in, bool stdin_tty, bool guard_ok) {
-  if (opt_in && stdin_tty && guard_ok) {
-    return InputBackend::Modal;
+  if (!stdin_tty || !guard_ok) {
+    return InputBackend::Line;
   }
-  return InputBackend::Line;
+  return opt_in ? InputBackend::Modal : InputBackend::LineEdit;
 }
 
 namespace {
@@ -430,6 +528,19 @@ bool read_windows_events(ModalEditor *editor, std::string *line,
   if (record.EventType != KEY_EVENT || !record.Event.KeyEvent.bKeyDown) {
     return true;
   }
+  // Arrow keys report UnicodeChar == 0 on Windows, so history navigation
+  // is driven by the virtual key code instead of the character.
+  const WORD vk = record.Event.KeyEvent.wVirtualKeyCode;
+  if (vk == VK_UP || vk == VK_DOWN) {
+    const KeyEvent event{vk == VK_UP ? KeyKind::ArrowUp : KeyKind::ArrowDown,
+                         0};
+    FeedResult result = editor->feed(event, line);
+    if (result == FeedResult::Submitted || result == FeedResult::Eof) {
+      *saw_eof = (result == FeedResult::Eof);
+      return false;
+    }
+    return true;
+  }
   wchar_t wc = record.Event.KeyEvent.uChar.UnicodeChar;
   char32_t value = 0;
   if (wc >= 0xD800 && wc <= 0xDBFF) {
@@ -467,40 +578,15 @@ bool read_windows_events(ModalEditor *editor, std::string *line,
   return true;
 }
 #else
-// Returns false when input is exhausted (caller returns the line or EOF).
-bool read_posix_chunk(ModalEditor *editor, KeyDecoder *decoder,
-                      std::string *line, bool *saw_eof) {
-  uint8_t chunk[256];
-  ssize_t count = read(STDIN_FILENO, chunk, sizeof(chunk));
-  if (count == 0) {
-    KeyEvent end{KeyKind::StreamEnd, 0};
-    FeedResult result = editor->feed(end, line);
-    *saw_eof = (result == FeedResult::Eof);
-    return false;
-  }
-  if (count < 0) {
-    if (errno == EINTR) {
-      return true;
-    }
-    *saw_eof = true;
-    return false; // terminal error ends the loop, like getline failure.
-  }
-  std::vector<KeyEvent> events;
-  decoder->feed(chunk, static_cast<size_t>(count), &events);
-  if (decoder->has_pending_escape()) {
-    // Grace period so an ESC split across reads is not mistaken for a
-    // lone Escape before arrow-key bytes arrive.
-    fd_set fds;
-    FD_ZERO(&fds);
-    FD_SET(STDIN_FILENO, &fds);
-    struct timeval wait = {0, 50000};
-    if (select(STDIN_FILENO + 1, &fds, nullptr, nullptr, &wait) > 0) {
-      return true; // more bytes coming; loop back to read them.
-    }
-    decoder->flush(&events);
-  }
-  for (const KeyEvent &event : events) {
-    FeedResult result = editor->feed(event, line);
+// Feeds queued events until one submits or ends the stream. Events after
+// that one stay queued for the next prompt, so a paste that crosses a line
+// boundary loses nothing.
+bool process_queued_events(ModalEditor *editor, std::deque<KeyEvent> *pending,
+                           std::string *line, bool *saw_eof) {
+  while (!pending->empty()) {
+    const KeyEvent event = pending->front();
+    pending->pop_front();
+    const FeedResult result = editor->feed(event, line);
     if (result == FeedResult::Submitted) {
       std::cout << "\n";
       return false;
@@ -511,6 +597,67 @@ bool read_posix_chunk(ModalEditor *editor, KeyDecoder *decoder,
     }
   }
   return true;
+}
+
+// Returns false when input is exhausted (caller returns the line or EOF).
+bool read_posix_chunk(ModalEditor *editor, KeyDecoder *decoder,
+                      std::deque<KeyEvent> *pending, std::string *line,
+                      bool *saw_eof) {
+  if (!pending->empty()) {
+    return process_queued_events(editor, pending, line, saw_eof);
+  }
+
+  std::vector<KeyEvent> events;
+  // Startup prompts read through std::cin, whose buffer can hold bytes the
+  // raw descriptor no longer has. Consume those first; they precede
+  // anything still waiting in the kernel. If the stream cannot supply them
+  // (for example after a failed read), fall through to the descriptor.
+  bool drained = false;
+  const std::streamsize buffered = std::cin.rdbuf()->in_avail();
+  if (buffered > 0) {
+    std::string bytes(static_cast<size_t>(buffered), '\0');
+    std::cin.read(&bytes[0], buffered);
+    const std::streamsize got = std::cin.gcount();
+    if (got > 0) {
+      decoder->feed(reinterpret_cast<const uint8_t *>(bytes.data()),
+                    static_cast<size_t>(got), &events);
+      drained = true;
+    }
+  }
+  if (!drained) {
+    uint8_t chunk[256];
+    ssize_t count = read(STDIN_FILENO, chunk, sizeof(chunk));
+    if (count == 0) {
+      KeyEvent end{KeyKind::StreamEnd, 0};
+      FeedResult result = editor->feed(end, line);
+      *saw_eof = (result == FeedResult::Eof);
+      return false;
+    }
+    if (count < 0) {
+      if (errno == EINTR) {
+        return true;
+      }
+      *saw_eof = true;
+      return false; // terminal error ends the loop, like getline failure.
+    }
+    decoder->feed(chunk, static_cast<size_t>(count), &events);
+  }
+
+  if (decoder->has_pending_escape()) {
+    // Grace period so an ESC split across reads is not mistaken for a
+    // lone Escape before arrow-key bytes arrive.
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(STDIN_FILENO, &fds);
+    struct timeval wait = {0, 50000};
+    if (select(STDIN_FILENO + 1, &fds, nullptr, nullptr, &wait) > 0) {
+      pending->insert(pending->end(), events.begin(), events.end());
+      return true; // more bytes coming; loop back to read them.
+    }
+    decoder->flush(&events);
+  }
+  pending->insert(pending->end(), events.begin(), events.end());
+  return process_queued_events(editor, pending, line, saw_eof);
 }
 #endif
 
@@ -537,13 +684,19 @@ void redraw_line(const std::string &prompt, const ModalEditor &editor) {
 } // namespace
 
 ReadResult read_prompt_line(const std::string &prompt) {
+  // One ring per process: the REPL calls this once per prompt, and history
+  // must survive between calls. Nothing is persisted to disk.
+  static History session_history;
+
   std::cout << prompt << std::flush;
-  if (select_backend(vim_opt_in(), stdin_is_tty(), true) !=
-      InputBackend::Modal) {
+  const InputBackend backend =
+      select_backend(vim_opt_in(), stdin_is_tty(), true);
+  if (backend == InputBackend::Line) {
     std::string line;
     if (!std::getline(std::cin, line)) {
       return ReadResult{ReadStatus::Eof, ""};
     }
+    session_history.add(line);
     return ReadResult{ReadStatus::Line, line};
   }
 
@@ -553,11 +706,11 @@ ReadResult read_prompt_line(const std::string &prompt) {
     if (!std::getline(std::cin, line)) {
       return ReadResult{ReadStatus::Eof, ""};
     }
+    session_history.add(line);
     return ReadResult{ReadStatus::Line, line};
   }
 
-  ModalEditor editor;
-  KeyDecoder decoder;
+  ModalEditor editor(&session_history, backend == InputBackend::Modal);
   std::string line;
   bool saw_eof = false;
 #ifdef _WIN32
@@ -565,16 +718,20 @@ ReadResult read_prompt_line(const std::string &prompt) {
     redraw_line(prompt, editor);
   }
 #else
-  while (read_posix_chunk(&editor, &decoder, &line, &saw_eof)) {
+  // Decoder and event queue survive between prompts: a paste can contain
+  // several lines, and the bytes after the first Enter belong to the next
+  // read.
+  static KeyDecoder decoder;
+  static std::deque<KeyEvent> pending_events;
+  while (
+      read_posix_chunk(&editor, &decoder, &pending_events, &line, &saw_eof)) {
     redraw_line(prompt, editor);
   }
 #endif
   if (saw_eof && line.empty()) {
     return ReadResult{ReadStatus::Eof, ""};
   }
-  if (saw_eof) {
-    return ReadResult{ReadStatus::Line, line};
-  }
+  session_history.add(line);
   return ReadResult{ReadStatus::Line, line};
 }
 

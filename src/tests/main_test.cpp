@@ -973,16 +973,113 @@ TEST(ModalEditorTest, EofContract) {
             Utils::Input::FeedResult::Eof);
 }
 
-// Byte decoder: CSI consumed, multibyte kept whole, invalid -> U+FFFD,
-// split sequences held until complete or flushed.
-TEST(KeyDecoderTest, CsiSequencesIgnored) {
+TEST(HistoryTest, IgnoresEmptyAndRawEscapeSequences) {
+  Utils::Input::History history;
+  history.add("");
+  history.add("\x1b[A");
+  history.add("list:");
+  ASSERT_EQ(history.size(), 1u);
+  EXPECT_EQ(history.at(0), "list:");
+}
+
+TEST(HistoryTest, BoundedRingDropsOldest) {
+  Utils::Input::History history;
+  const size_t total = Utils::Input::History::k_max_entries + 5;
+  for (size_t i = 0; i < total; ++i) {
+    history.add("entry-" + std::to_string(i));
+  }
+  ASSERT_EQ(history.size(), Utils::Input::History::k_max_entries);
+  EXPECT_EQ(history.at(0), "entry-5");
+  EXPECT_EQ(history.at(history.size() - 1),
+            "entry-" + std::to_string(total - 1));
+}
+
+TEST(ModalEditorTest, HistoryUpAndDownRestoreDraft) {
+  Utils::Input::History history;
+  history.add("first");
+  history.add("second");
+  Utils::Input::ModalEditor editor(&history, false);
+  std::string line;
+  for (char c : std::string("draft")) {
+    editor.feed({Utils::Input::KeyKind::Char, static_cast<char32_t>(c)}, &line);
+  }
+  editor.feed({Utils::Input::KeyKind::ArrowUp, 0}, &line);
+  EXPECT_EQ(editor.buffer_utf8(), "second");
+  EXPECT_EQ(editor.cursor(), 6u);
+  editor.feed({Utils::Input::KeyKind::ArrowUp, 0}, &line);
+  EXPECT_EQ(editor.buffer_utf8(), "first");
+  editor.feed({Utils::Input::KeyKind::ArrowUp, 0}, &line);
+  EXPECT_EQ(editor.buffer_utf8(), "first");
+  editor.feed({Utils::Input::KeyKind::ArrowDown, 0}, &line);
+  EXPECT_EQ(editor.buffer_utf8(), "second");
+  editor.feed({Utils::Input::KeyKind::ArrowDown, 0}, &line);
+  EXPECT_EQ(editor.buffer_utf8(), "draft");
+  editor.feed({Utils::Input::KeyKind::ArrowDown, 0}, &line);
+  EXPECT_EQ(editor.buffer_utf8(), "draft");
+}
+
+TEST(ModalEditorTest, HistoryRecallIsNotSubmittedUntilEnter) {
+  Utils::Input::History history;
+  history.add("previous");
+  Utils::Input::ModalEditor editor(&history, false);
+  std::string line = "sentinel";
+  EXPECT_EQ(editor.feed({Utils::Input::KeyKind::ArrowUp, 0}, &line),
+            Utils::Input::FeedResult::Continue);
+  EXPECT_EQ(line, "sentinel");
+  EXPECT_EQ(editor.feed({Utils::Input::KeyKind::Enter, 0}, &line),
+            Utils::Input::FeedResult::Submitted);
+  EXPECT_EQ(line, "previous");
+}
+
+TEST(ModalEditorTest, HistoryRecallPreservesUtf8) {
+  Utils::Input::History history;
+  history.add("caf\xc3\xa9");
+  Utils::Input::ModalEditor editor(&history, false);
+  std::string line;
+  editor.feed({Utils::Input::KeyKind::ArrowUp, 0}, &line);
+  EXPECT_EQ(editor.buffer_utf8(), "caf\xc3\xa9");
+  EXPECT_EQ(editor.cursor(), 4u);
+}
+
+TEST(ModalEditorTest, EscapeIgnoredWithoutVimOptIn) {
+  Utils::Input::History history;
+  Utils::Input::ModalEditor editor(&history, false);
+  std::string line;
+  editor.feed({Utils::Input::KeyKind::Char, U'a'}, &line);
+  editor.feed({Utils::Input::KeyKind::Escape, 0}, &line);
+  EXPECT_EQ(editor.mode(), Utils::Input::EditMode::Insert);
+  editor.feed({Utils::Input::KeyKind::Char, U'b'}, &line);
+  EXPECT_EQ(editor.buffer_utf8(), "ab");
+}
+
+TEST(ModalEditorTest, HistoryRecallFromNormalModeReturnsToInsert) {
+  Utils::Input::History history;
+  history.add("previous");
+  Utils::Input::ModalEditor editor(&history, true);
+  std::string line;
+  editor.feed({Utils::Input::KeyKind::Char, U'a'}, &line);
+  editor.feed({Utils::Input::KeyKind::Escape, 0}, &line);
+  ASSERT_EQ(editor.mode(), Utils::Input::EditMode::Normal);
+  editor.feed({Utils::Input::KeyKind::ArrowUp, 0}, &line);
+  EXPECT_EQ(editor.mode(), Utils::Input::EditMode::Insert);
+  EXPECT_EQ(editor.buffer_utf8(), "previous");
+}
+
+// Byte decoder: arrows mapped, other CSI consumed, multibyte kept whole,
+// invalid -> U+FFFD, split sequences held until complete or flushed.
+TEST(KeyDecoderTest, ArrowKeysDecoded) {
   Utils::Input::KeyDecoder decoder;
   std::vector<Utils::Input::KeyEvent> out;
-  const uint8_t arrow[] = {0x1B, '[', 'A'};
-  decoder.feed(arrow, sizeof(arrow), &out);
-  EXPECT_TRUE(out.empty());
+  const uint8_t up[] = {0x1B, '[', 'A'};
+  const uint8_t down[] = {0x1B, '[', 'B'};
+  decoder.feed(up, sizeof(up), &out);
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out[0].kind, Utils::Input::KeyKind::ArrowUp);
+  decoder.feed(down, sizeof(down), &out);
+  ASSERT_EQ(out.size(), 2u);
+  EXPECT_EQ(out[1].kind, Utils::Input::KeyKind::ArrowDown);
   decoder.flush(&out);
-  EXPECT_TRUE(out.empty());
+  EXPECT_EQ(out.size(), 2u);
 }
 
 TEST(KeyDecoderTest, LoneEscapeSurvives) {
@@ -1027,9 +1124,11 @@ TEST(KeyDecoderTest, CsiSplitAcrossChunksMatchesWholeChunk) {
     EXPECT_TRUE(events.empty())
         << "emitted before completion at split " << split;
     decoder.feed(arrow + split, sizeof(arrow) - split, &events);
-    EXPECT_TRUE(events.empty()) << "CSI not ignored at split " << split;
+    ASSERT_EQ(events.size(), 1u) << "arrow not decoded at split " << split;
+    EXPECT_EQ(events[0].kind, Utils::Input::KeyKind::ArrowUp);
     decoder.flush(&events);
-    EXPECT_TRUE(events.empty()) << "flush invented an event at split " << split;
+    EXPECT_EQ(events.size(), 1u)
+        << "flush invented an event at split " << split;
   }
 }
 
@@ -1086,8 +1185,12 @@ TEST(KeyDecoderTest, ConsecutiveSplitSequences) {
     decoder.feed(seq, split, &events);
     decoder.feed(seq + split, sizeof(seq) - split, &events);
     decoder.flush(&events);
-    ASSERT_EQ(events.size(), 1u) << "split " << split;
-    EXPECT_EQ(events[0].ch, static_cast<char32_t>('k')) << "split " << split;
+    ASSERT_EQ(events.size(), 3u) << "split " << split;
+    EXPECT_EQ(events[0].kind, Utils::Input::KeyKind::ArrowUp)
+        << "split " << split;
+    EXPECT_EQ(events[1].kind, Utils::Input::KeyKind::ArrowDown)
+        << "split " << split;
+    EXPECT_EQ(events[2].ch, static_cast<char32_t>('k')) << "split " << split;
   }
 }
 
@@ -1125,14 +1228,15 @@ TEST(KeyDecoderTest, InvalidBytesBecomeReplacement) {
   EXPECT_EQ(out[1].ch, U'x');
 }
 
-// Backend selection: modal only when opt-in, TTY, and guard all hold.
-TEST(BackendSelectionTest, RequiresAllThreeConditions) {
+// Backend selection: interactive terminals get a line editor, Vim opt-in
+// upgrades it to modal, and everything else stays on getline.
+TEST(BackendSelectionTest, RequiresTtyAndGuard) {
   using Utils::Input::InputBackend;
   using Utils::Input::select_backend;
   EXPECT_EQ(select_backend(false, false, false), InputBackend::Line);
   EXPECT_EQ(select_backend(false, false, true), InputBackend::Line);
   EXPECT_EQ(select_backend(false, true, false), InputBackend::Line);
-  EXPECT_EQ(select_backend(false, true, true), InputBackend::Line);
+  EXPECT_EQ(select_backend(false, true, true), InputBackend::LineEdit);
   EXPECT_EQ(select_backend(true, false, false), InputBackend::Line);
   EXPECT_EQ(select_backend(true, false, true), InputBackend::Line);
   EXPECT_EQ(select_backend(true, true, false), InputBackend::Line);
